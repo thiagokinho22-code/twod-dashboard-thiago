@@ -34,7 +34,13 @@ O projeto foi retomado a partir de `PROJETO_CONTEXTO.md`.
       - Adicionado o leitor nativo do OneDrive na aba "Gerador de Criativos" via File System Access API (Chrome/Edge) com fallback universal para todos os navegadores.
       - Mapeamento automático de nichos, detecção de arquivos de áudio por idioma (PT, ES, EN, FR, HI) e verificação do status dos 6 vídeos diários (Feed 1-3 e Reels 4-6).
       - Player de áudio embutido na dashboard para ouvir qualquer narração de nicho diretamente no navegador.
-      - Persistência da pasta conectada via IndexedDB e filtros rápidos de busca por nome ou status de renderização.
+  11. **Alinhamento Arquitetural — Microsoft Graph API (Nuvem):**
+      - Thiago alinhou que a conexão definitiva deve ser 100% via API na nuvem da Microsoft, sem leitura de pastas locais.
+      - Tipo de conta identificado: **Pessoal (@hotmail.com)**.
+      - Estrutura do backend Python criada em `backend/`:
+        - `onedrive_client.py`: Cliente de autenticação OAuth 2.0 e varredura do Microsoft Graph API (`/me/drive/root:/Documentos/Trabalho`).
+        - `server.py`: Servidor HTTP leve para callback OAuth e rota `/api/onedrive/niches`.
+        - `requirements.txt` e `.env.example`.
 
 ---
 *(Este arquivo será atualizado continuamente conforme avançamos no desenvolvimento)*
