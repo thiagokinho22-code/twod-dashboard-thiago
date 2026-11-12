@@ -53,6 +53,11 @@ O projeto foi retomado a partir de `PROJETO_CONTEXTO.md`.
         2. Adicionado `pointer-events: none !important;` e remoção da classe de overlay em `#login-screen` para garantir que nenhuma camada invisível bloqueie o cursor.
         3. Atualizada a versão do script no `index.html` para `app.js?v=3.2` para anular o cache do navegador.
         4. Corrigidos os caminhos de execução do Python e do Git nos scripts `.bat` (`iniciar_backend.bat` e `enviar_github.bat`).
+  14. **Restauração da Tela de Login e Autenticação:**
+      - Tela de login reativada com layout nativo, marca TwoD Hub, campos de usuário e senha, e chips de acesso rápido: **👑 Thiago (Adm)**, **⚡ Alexandre** e **👤 Wesley**.
+      - Tratamento anti-recarregamento com `onsubmit="return handleLogin(event);"` e funções globais expostas no `window`.
+      - Controle de permissão dinâmico: administradores veem todas as abas, operadores têm abas de gestão ocultadas.
+      - Botão de logout ("Sair") limpa a sessão e retorna à tela de login instantaneamente.
 
 ---
 *(Este arquivo será atualizado continuamente conforme avançamos no desenvolvimento)*
