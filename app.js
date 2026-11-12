@@ -110,62 +110,102 @@ function showLogin() {
 }
 
 function showApp() {
-    loginScreen.classList.add('twod-hidden');
-    appContainer.classList.remove('twod-hidden');
+    try {
+        const loginEl = document.getElementById('login-screen');
+        const appEl = document.getElementById('app-container');
+        if (loginEl) loginEl.classList.add('twod-hidden');
+        if (appEl) appEl.classList.remove('twod-hidden');
 
-    // Atualiza cabeçalho e perfil
-    document.getElementById('current-user-name').innerText = currentUser.name;
-    document.getElementById('current-user-role').innerText = currentUser.role;
-    document.getElementById('current-user-avatar').innerText = currentUser.name.charAt(0).toUpperCase();
+        if (currentUser) {
+            const nameEl = document.getElementById('current-user-name');
+            const roleEl = document.getElementById('current-user-role');
+            const avatarEl = document.getElementById('current-user-avatar');
+            if (nameEl) nameEl.innerText = currentUser.name || 'Usuário';
+            if (roleEl) roleEl.innerText = currentUser.role || 'Operador';
+            if (avatarEl) avatarEl.innerText = (currentUser.name || 'U').charAt(0).toUpperCase();
 
-    // Controle de permissão: esconde abas de admin para operadores
-    const isAdmin = currentUser.role === 'Administrador';
-    document.querySelectorAll('.admin-only').forEach(el => {
-        if (isAdmin) {
-            el.classList.remove('twod-hidden');
-        } else {
-            el.classList.add('twod-hidden');
+            // Controle de permissão: esconde abas de admin para operadores
+            const isAdmin = currentUser.role === 'Administrador';
+            document.querySelectorAll('.admin-only').forEach(el => {
+                if (isAdmin) {
+                    el.classList.remove('twod-hidden');
+                } else {
+                    el.classList.add('twod-hidden');
+                }
+            });
         }
-    });
 
-    // Aplica tema do usuário
-    applyUserTheme();
+        // Aplica tema do usuário
+        applyUserTheme();
 
-    // Renderiza tabelas e abas
-    renderSitesTable();
-    if (isAdmin) renderUsersTable();
-    initTabs();
+        // Renderiza tabelas e abas
+        renderSitesTable();
+        if (currentUser && currentUser.role === 'Administrador') renderUsersTable();
+        initTabs();
+    } catch (err) {
+        console.error('Erro ao renderizar Dashboard:', err);
+    }
 }
 
-loginForm.addEventListener('submit', (e) => {
-    e.preventDefault();
-    const usernameInput = document.getElementById('login-username').value.trim().toLowerCase();
-    const passwordInput = document.getElementById('login-password').value;
+function handleLogin(e) {
+    if (e && e.preventDefault) {
+        e.preventDefault();
+        e.stopPropagation();
+    }
+    const usernameInput = (document.getElementById('login-username').value || '').trim().toLowerCase();
+    const passwordInput = (document.getElementById('login-password').value || '');
 
-    const user = users.find(u => u.username.toLowerCase() === usernameInput && u.password === passwordInput);
+    if (!usernameInput || !passwordInput) {
+        return false;
+    }
+
+    // Busca usuário na lista
+    let user = users.find(u => u.username.toLowerCase() === usernameInput && u.password === passwordInput);
+
+    // Fallback de garantia: se não encontrou (ex: localStorage corrompido), busca nos padrões
+    if (!user) {
+        const defaultMatch = DEFAULT_USERS.find(u => u.username.toLowerCase() === usernameInput && u.password === passwordInput);
+        if (defaultMatch) {
+            user = { ...defaultMatch };
+            users.push(user);
+            saveUsers();
+        }
+    }
+
+    const errBox = document.getElementById('login-error');
     if (user) {
         user.lastLogin = 'Agora';
         saveUsers();
         currentUser = user;
         localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(currentUser));
-        loginError.classList.add('twod-hidden');
+        if (errBox) errBox.classList.add('twod-hidden');
         showApp();
     } else {
-        loginError.classList.remove('twod-hidden');
+        if (errBox) errBox.classList.remove('twod-hidden');
     }
-});
-
-function quickLogin(username, password) {
-    document.getElementById('login-username').value = username;
-    document.getElementById('login-password').value = password;
-    loginForm.dispatchEvent(new Event('submit'));
+    return false;
 }
 
-document.getElementById('btn-logout').addEventListener('click', () => {
-    currentUser = null;
-    localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
-    showLogin();
-});
+if (loginForm) {
+    loginForm.addEventListener('submit', handleLogin);
+}
+
+function quickLogin(username, password) {
+    const uInput = document.getElementById('login-username');
+    const pInput = document.getElementById('login-password');
+    if (uInput) uInput.value = username;
+    if (pInput) pInput.value = password;
+    handleLogin();
+}
+
+const btnLogout = document.getElementById('btn-logout');
+if (btnLogout) {
+    btnLogout.addEventListener('click', () => {
+        currentUser = null;
+        localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
+        showLogin();
+    });
+}
 
 // ========================================================
 // SISTEMA DE TEMAS (CLARO, ESCURO, AGENDADO)
