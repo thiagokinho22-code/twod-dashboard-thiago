@@ -22,7 +22,9 @@ O projeto foi retomado a partir de `PROJETO_CONTEXTO.md`.
 - **Thiago:** Solicitou começar conectando o projeto ao GitHub para deixar acessível para os auxiliares entrarem, além de substituir o "Auxiliar 2" pelo nome real: **Wesley**.
 - **Agente:**
   1. Atualizou a interface (`index.html`), o motor de autenticação (`app.js`) com migração automática e o `README.md`, substituindo `auxiliar2` por `wesley`.
-  2. Identificou que o novo computador precisa da instalação do Git (via `winget`) para sincronizar com o GitHub e publicar o painel online para a equipe.
+  2. Baixou e configurou o Git localmente em modo portátil para dispensar privilégios de administrador.
+  3. Criou o arquivo `.gitignore` (ignorando `.exe` pesados e arquivos temporários).
+  4. Inicializou o repositório Git no branch `main` e executou o primeiro commit com todos os arquivos do TwoD Hub, projetos base e histórico.
 
 ---
 *(Este arquivo será atualizado continuamente conforme avançamos no desenvolvimento)*
