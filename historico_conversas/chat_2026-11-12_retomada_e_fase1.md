@@ -36,11 +36,15 @@ O projeto foi retomado a partir de `PROJETO_CONTEXTO.md`.
       - Player de áudio embutido na dashboard para ouvir qualquer narração de nicho diretamente no navegador.
   11. **Alinhamento Arquitetural — Microsoft Graph API (Nuvem):**
       - Thiago alinhou que a conexão definitiva deve ser 100% via API na nuvem da Microsoft, sem leitura de pastas locais.
-      - Tipo de conta identificado: **Pessoal (@hotmail.com)**.
-      - Estrutura do backend Python criada em `backend/`:
-        - `onedrive_client.py`: Cliente de autenticação OAuth 2.0 e varredura do Microsoft Graph API (`/me/drive/root:/Documentos/Trabalho`).
-        - `server.py`: Servidor HTTP leve para callback OAuth e rota `/api/onedrive/niches`.
-        - `requirements.txt` e `.env.example`.
+      - Ao tentar criar o App Registration no portal Azure com a conta `@hotmail.com`, a Microsoft exibiu o erro de depreciação de registros fora de diretório corporativo/M365 Developer.
+  12. **Solução do Backend REST API (Python 3.11):**
+      - Configuração do Python 3.11 portátil em modo usuário (sem necessidade de privilégios de administrador).
+      - Implementação do servidor REST `backend/server.py` que expõe a API:
+        - `GET /api/status`: Status do servidor e confirmação de acesso ao OneDrive.
+        - `GET /api/onedrive/niches`: Mapeamento automático em tempo real de todas as pastas de `Arquivos de Áudio` e `Vídeos` (detectados com sucesso **1.218 nichos** no OneDrive).
+        - `GET /api/audio/...`: Streaming direto de áudio com suporte a players web.
+      - Atualização do motor da Dashboard (`app.js`): Conecta-se automaticamente ao backend em `http://localhost:8000` via `fetch()`, populando as estatísticas e tabela de nichos via API pura.
+      - Criação do facilitador `iniciar_backend.bat` para inicializar a API em 1 clique.
 
 ---
 *(Este arquivo será atualizado continuamente conforme avançamos no desenvolvimento)*

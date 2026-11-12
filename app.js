@@ -503,12 +503,67 @@ function deleteUser(username) {
 // INTEGRAÇÃO ONEDRIVE & LEITOR DE ARQUIVOS NATIVO
 // ========================================================
 
+const API_BASE_URL = 'http://localhost:8000';
+
 let oneDriveHandle = null;
 let oneDriveData = {
+    isApiMode: false,
     niches: [], // array de objetos de cada nicho
     audioFilesMap: new Map(), // chave: `${nicheName}_${lang}` -> File/Handle
     videoFilesMap: new Map()  // chave: `${nicheName}_${num}` -> File/Handle
 };
+
+// 1. Conexão Automática via API Backend
+async function checkBackendAPI() {
+    try {
+        const res = await fetch(`${API_BASE_URL}/api/status`);
+        if (!res.ok) return false;
+        const data = await res.json();
+        if (data.status === 'online' && data.onedrive_accessible) {
+            console.log('✅ Backend API detectado:', data);
+            await loadNichesFromAPI();
+            return true;
+        }
+    } catch (e) {
+        console.log('Backend API não detectado localmente.');
+    }
+    return false;
+}
+
+async function loadNichesFromAPI() {
+    const badge = document.getElementById('onedrive-connection-badge');
+    const folderTitle = document.getElementById('onedrive-folder-title');
+    const folderDesc = document.getElementById('onedrive-folder-desc');
+    const connectActions = document.querySelector('.onedrive-connect-actions');
+    const rescanBtn = document.getElementById('btn-rescan-onedrive');
+
+    if (badge) {
+        badge.className = 'badge-tag';
+        badge.style.color = '#10b981';
+        badge.textContent = `🟢 Backend API Conectado (127.0.0.1:8000)`;
+    }
+    if (folderTitle) folderTitle.textContent = `OneDrive Nuvem (via Backend API)`;
+    if (folderDesc) folderDesc.textContent = `Carregando nichos via API...`;
+    if (rescanBtn) {
+        rescanBtn.style.display = 'inline-flex';
+        rescanBtn.onclick = () => loadNichesFromAPI();
+    }
+
+    try {
+        const res = await fetch(`${API_BASE_URL}/api/onedrive/niches`);
+        const json = await res.json();
+        if (json.success && json.niches) {
+            oneDriveData.niches = json.niches;
+            oneDriveData.isApiMode = true;
+            renderOneDriveStatsAndTable();
+            if (folderDesc) folderDesc.textContent = `Sincronizado via API! ${json.count} nichos disponíveis no OneDrive.`;
+        }
+    } catch (e) {
+        console.error('Erro ao carregar nichos da API:', e);
+        if (folderDesc) folderDesc.textContent = `Erro ao carregar dados da API.`;
+    }
+}
+
 
 // IndexedDB para persistir acesso à pasta
 const DB_NAME = 'twod_hub_db';
@@ -887,6 +942,28 @@ function filterNichesTable() {
 // Reproduzir Áudio Selecionado
 async function playAudio(nicheNameEncoded, lang) {
     const nicheName = decodeURIComponent(nicheNameEncoded);
+
+    // Se estiver em modo API (Backend Server)
+    if (oneDriveData.isApiMode) {
+        const niche = oneDriveData.niches.find(n => n.name === nicheName);
+        if (!niche) return;
+        const audio = niche.audios.find(a => a.lang === lang);
+        if (!audio || !audio.url) return;
+
+        const playerBar = document.getElementById('inline-audio-player-bar');
+        const audioElement = document.getElementById('global-audio-element');
+        const titleEl = document.getElementById('now-playing-title');
+        const metaEl = document.getElementById('now-playing-meta');
+
+        titleEl.textContent = `Áudio ${lang} — ${nicheName}`;
+        metaEl.textContent = `${audio.name} (${(audio.size / 1024).toFixed(1)} KB) — Via API`;
+        audioElement.src = `${API_BASE_URL}${audio.url}`;
+        playerBar.style.display = 'flex';
+        audioElement.play();
+        return;
+    }
+
+    // Modo nativo de arquivo local (Fallback)
     const key = `${nicheName}_${lang}`;
     const fileItem = oneDriveData.audioFilesMap.get(key);
 
@@ -932,6 +1009,11 @@ function closeAudioPlayer() {
 
 // Tenta restaurar acesso salvo do OneDrive ao iniciar
 async function checkSavedOneDriveHandle() {
+    // 1. Tenta conectar via Backend API primeiro
+    const apiSuccess = await checkBackendAPI();
+    if (apiSuccess) return;
+
+    // 2. Se a API não estiver rodando, tenta restaurar handle do IndexedDB
     try {
         const saved = await getHandleFromDB('onedrive_folder');
         if (saved && saved.queryPermission) {
@@ -963,6 +1045,9 @@ function changeMyPassword() {
 // INICIALIZAÇÃO
 // ========================================================
 document.addEventListener('DOMContentLoaded', () => {
+    checkSession();
+    checkSavedOneDriveHandle();
+});
     checkSession();
     checkSavedOneDriveHandle();
 });
