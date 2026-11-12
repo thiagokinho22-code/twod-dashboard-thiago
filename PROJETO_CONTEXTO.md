@@ -45,6 +45,12 @@ Tudo foi copiado e centralizado nesta mesma pasta do OneDrive:
 
 ---
 
+## 🌐 Acesso Online Atual (Publicado)
+- **URL Oficial:** https://thiagokinho22-code.github.io/twod-dashboard-thiago/
+- **Repositório GitHub:** https://github.com/thiagokinho22-code/twod-dashboard-thiago
+- **Logins Ativos:** `thiago` (Admin), `alexandre` (Operador), `wesley` (Operador) — Senha padrão: `123456`.
+
+---
+
 ## 🎯 Próximo Passo
-Quando for continuar no outro PC:
 - Conectar o backend Python para testar a leitura de arquivos no OneDrive e renderização dos criativos na nuvem (Fase 1).
