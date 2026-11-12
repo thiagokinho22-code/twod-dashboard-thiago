@@ -1099,13 +1099,32 @@ function changeMyPassword() {
     alert('Sua senha foi alterada com sucesso!');
 }
 
+// Expõe funções globais para compatibilidade total com onclick
+window.switchTab = switchTab;
+window.setThemeMode = setThemeMode;
+window.openAddSiteModal = openAddSiteModal;
+window.closeModal = closeModal;
+window.openAddUserModal = openAddUserModal;
+window.connectOneDriveFolder = connectOneDriveFolder;
+window.scanOneDriveFiles = scanOneDriveFiles;
+window.playAudio = playAudio;
+window.closeAudioPlayer = closeAudioPlayer;
+window.changeMyPassword = changeMyPassword;
+
 // ========================================================
-// INICIALIZAÇÃO
+// INICIALIZAÇÃO INFALÍVEL (EXECUTA IMEDIATO SE DOM JÁ CARREGADO)
 // ========================================================
-document.addEventListener('DOMContentLoaded', () => {
+function startApp() {
     checkSession();
     checkSavedOneDriveHandle();
-});
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', startApp);
+} else {
+    startApp();
+}
+
 
 
 
