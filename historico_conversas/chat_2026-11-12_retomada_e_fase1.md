@@ -39,12 +39,12 @@ O projeto foi retomado a partir de `PROJETO_CONTEXTO.md`.
       - Ao tentar criar o App Registration no portal Azure com a conta `@hotmail.com`, a Microsoft exibiu o erro de depreciação de registros fora de diretório corporativo/M365 Developer.
   12. **Solução do Backend REST API (Python 3.11):**
       - Configuração do Python 3.11 portátil em modo usuário (sem necessidade de privilégios de administrador).
-      - Implementação do servidor REST `backend/server.py` que expõe a API:
+      - Implementação do servidor REST `backend/server.py` com cache em memória que expõe a API:
         - `GET /api/status`: Status do servidor e confirmação de acesso ao OneDrive.
-        - `GET /api/onedrive/niches`: Mapeamento automático em tempo real de todas as pastas de `Arquivos de Áudio` e `Vídeos` (detectados com sucesso **1.218 nichos** no OneDrive).
-        - `GET /api/audio/...`: Streaming direto de áudio com suporte a players web.
-      - Atualização do motor da Dashboard (`app.js`): Conecta-se automaticamente ao backend em `http://localhost:8000` via `fetch()`, populando as estatísticas e tabela de nichos via API pura.
-      - Criação do facilitador `iniciar_backend.bat` para inicializar a API em 1 clique.
+        - `GET /api/onedrive/niches`: Mapeamento automático em tempo real de todas as pastas de `Arquivos de Áudio` e `Vídeos` (detectados **1.218 nichos** no OneDrive).
+        - `GET /api/audio/...`: Streaming direto de áudio.
+      - Servidor passa a servir os arquivos estáticos diretamente em `http://localhost:8000/`.
+      - **Tela de login desativada temporariamente:** Dashboard abre direto na visão principal com perfil de Administrador (`Thiago`), removendo qualquer atrito ou barreira de autenticação.
 
 ---
 *(Este arquivo será atualizado continuamente conforme avançamos no desenvolvimento)*
