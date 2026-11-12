@@ -45,6 +45,14 @@ O projeto foi retomado a partir de `PROJETO_CONTEXTO.md`.
         - `GET /api/audio/...`: Streaming direto de áudio.
       - Servidor passa a servir os arquivos estáticos diretamente em `http://localhost:8000/`.
       - **Tela de login desativada temporariamente:** Dashboard abre direto na visão principal com perfil de Administrador (`Thiago`), removendo qualquer atrito ou barreira de autenticação.
+  13. **Correção Crítica: Destravamento de Cliques na Dashboard:**
+      - **Causa Raiz Identificada:** Durante o bypass do formulário de login no commit anterior, a declaração `const loginForm` foi removida do topo, mas a linha `if (loginForm)` permaneceu no escopo global. No JavaScript, testar uma variável não declarada dispara `Uncaught ReferenceError: loginForm is not defined`, o que abortava a execução de todo o `app.js` logo no início.
+      - **Efeito:** Nenhuma função posterior (`initTabs`, `switchTab`, temas, modais, etc.) era registrada, tornando toda a dashboard visualmente carregada, mas 100% inerte a cliques.
+      - **Solução Aplicada:**
+        1. Declarado `const loginForm = document.getElementById('login-form');` com validação segura contra `null`.
+        2. Adicionado `pointer-events: none !important;` e remoção da classe de overlay em `#login-screen` para garantir que nenhuma camada invisível bloqueie o cursor.
+        3. Atualizada a versão do script no `index.html` para `app.js?v=3.2` para anular o cache do navegador.
+        4. Corrigidos os caminhos de execução do Python e do Git nos scripts `.bat` (`iniciar_backend.bat` e `enviar_github.bat`).
 
 ---
 *(Este arquivo será atualizado continuamente conforme avançamos no desenvolvimento)*
