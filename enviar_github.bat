@@ -1,7 +1,7 @@
 @echo off
 title Conectando TwoD Hub ao GitHub...
 cd /d "%~dp0"
-set "PATH=%LOCALAPPDATA%\Programs\Git\cmd;%PATH%"
+set "PATH=C:\Program Files\Git\cmd;%LOCALAPPDATA%\Programs\Git\cmd;%PATH%"
 echo.
 echo ========================================================
 echo   TwoD Hub - Conexao com GitHub
