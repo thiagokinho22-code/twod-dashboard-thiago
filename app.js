@@ -95,7 +95,13 @@ try {
     sites = [...DEFAULT_SITES];
 }
 
-let currentUser = { ...DEFAULT_USERS[0] }; // Login padrão direto como Thiago (Administrador)
+let currentUser = null;
+try {
+    const rawUser = localStorage.getItem(STORAGE_KEYS.CURRENT_USER);
+    if (rawUser) currentUser = JSON.parse(rawUser);
+} catch (e) {
+    currentUser = null;
+}
 
 function saveUsers() {
     try { localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users)); } catch (e) { }
@@ -106,27 +112,49 @@ function saveSites() {
 }
 
 // ========================================================
-// SISTEMA DE NAVEGAÇÃO DIRETA (LOGIN DESATIVADO)
+// SISTEMA DE AUTENTICAÇÃO E SESSÃO
 // ========================================================
 
 function checkSession() {
-    showApp();
+    if (currentUser && currentUser.username) {
+        // Encontra o usuário atualizado no banco
+        const updated = users.find(u => u && u.username && u.username.toLowerCase() === currentUser.username.toLowerCase());
+        if (updated) currentUser = updated;
+        showApp();
+    } else {
+        showLogin();
+    }
 }
 
 function showLogin() {
-    showApp();
+    const loginEl = document.getElementById('login-screen');
+    const appEl = document.getElementById('app-container');
+    const errBox = document.getElementById('login-error');
+    const pwdInput = document.getElementById('login-password');
+
+    if (loginEl) {
+        loginEl.style.display = 'flex';
+        loginEl.classList.remove('twod-hidden');
+    }
+    if (appEl) {
+        appEl.style.display = 'none';
+        appEl.classList.add('twod-hidden');
+    }
+    if (errBox) errBox.classList.add('twod-hidden');
+    if (pwdInput) pwdInput.value = '';
 }
 
 function showApp() {
     const loginEl = document.getElementById('login-screen');
     const appEl = document.getElementById('app-container');
+
     if (loginEl) {
         loginEl.style.display = 'none';
         loginEl.classList.add('twod-hidden');
     }
     if (appEl) {
-        appEl.classList.remove('twod-hidden');
         appEl.style.display = 'flex';
+        appEl.classList.remove('twod-hidden');
     }
 
     if (!currentUser) currentUser = { ...DEFAULT_USERS[0] };
@@ -134,16 +162,25 @@ function showApp() {
     const nameEl = document.getElementById('current-user-name');
     const roleEl = document.getElementById('current-user-role');
     const avatarEl = document.getElementById('current-user-avatar');
-    if (nameEl) nameEl.innerText = currentUser.name || 'Thiago';
-    if (roleEl) roleEl.innerText = currentUser.role || 'Administrador';
-    if (avatarEl) avatarEl.innerText = (currentUser.name || 'T').charAt(0).toUpperCase();
+    if (nameEl) nameEl.innerText = currentUser.name || 'Usuário';
+    if (roleEl) roleEl.innerText = currentUser.role || 'Operador';
+    if (avatarEl) avatarEl.innerText = (currentUser.name || 'U').charAt(0).toUpperCase();
 
-    // Permissões de administrador ativas
-    document.querySelectorAll('.admin-only').forEach(el => el.classList.remove('twod-hidden'));
+    // Controle de permissão: esconde abas de admin para operadores
+    const isAdmin = currentUser.role === 'Administrador';
+    document.querySelectorAll('.admin-only').forEach(el => {
+        if (isAdmin) {
+            el.classList.remove('twod-hidden');
+        } else {
+            el.classList.add('twod-hidden');
+        }
+    });
 
     try { applyUserTheme(); } catch (e) { }
     try { renderSitesTable(); } catch (e) { }
-    try { renderUsersTable(); } catch (e) { }
+    if (isAdmin) {
+        try { renderUsersTable(); } catch (e) { }
+    }
     try { initTabs(); } catch (e) { }
 }
 
@@ -188,9 +225,7 @@ function handleLogin(e) {
             if (errBox) errBox.classList.remove('twod-hidden');
         }
     } catch (err) {
-        console.error('Erro no handleLogin, ativando fallback:', err);
-        currentUser = { ...DEFAULT_USERS[0] };
-        showApp();
+        console.error('Erro no handleLogin:', err);
     }
     return false;
 }
@@ -210,9 +245,10 @@ function quickLogin(username, password) {
 
 const btnLogout = document.getElementById('btn-logout');
 if (btnLogout) {
-    btnLogout.addEventListener('click', () => {
+    btnLogout.addEventListener('click', (e) => {
+        if (e && e.preventDefault) e.preventDefault();
         currentUser = null;
-        localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
+        try { localStorage.removeItem(STORAGE_KEYS.CURRENT_USER); } catch (e) { }
         showLogin();
     });
 }
@@ -1110,6 +1146,10 @@ window.scanOneDriveFiles = scanOneDriveFiles;
 window.playAudio = playAudio;
 window.closeAudioPlayer = closeAudioPlayer;
 window.changeMyPassword = changeMyPassword;
+window.handleLogin = handleLogin;
+window.quickLogin = quickLogin;
+window.showLogin = showLogin;
+window.showApp = showApp;
 
 // ========================================================
 // INICIALIZAÇÃO INFALÍVEL (EXECUTA IMEDIATO SE DOM JÁ CARREGADO)
