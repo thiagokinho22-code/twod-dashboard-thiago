@@ -30,6 +30,11 @@ O projeto foi retomado a partir de `PROJETO_CONTEXTO.md`.
   7. **Repositório Conectado com Sucesso:** O envio (`git push`) foi concluído e o projeto está 100% sincronizado no GitHub no branch `main`.
   8. **GitHub Pages Ativado e Publicado:** O repositório foi tornado público e o GitHub Pages foi ativado com sucesso.
   9. **Validação do Link Online:** O painel está ativo em `https://thiagokinho22-code.github.io/twod-dashboard-thiago/` (HTTP 200 OK em HTML, CSS e JS), pronto para os acessos de Thiago, Alexandre e Wesley.
+  10. **Implementação do Conector OneDrive Nativo:**
+      - Adicionado o leitor nativo do OneDrive na aba "Gerador de Criativos" via File System Access API (Chrome/Edge) com fallback universal para todos os navegadores.
+      - Mapeamento automático de nichos, detecção de arquivos de áudio por idioma (PT, ES, EN, FR, HI) e verificação do status dos 6 vídeos diários (Feed 1-3 e Reels 4-6).
+      - Player de áudio embutido na dashboard para ouvir qualquer narração de nicho diretamente no navegador.
+      - Persistência da pasta conectada via IndexedDB e filtros rápidos de busca por nome ou status de renderização.
 
 ---
 *(Este arquivo será atualizado continuamente conforme avançamos no desenvolvimento)*

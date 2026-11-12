@@ -499,6 +499,453 @@ function deleteUser(username) {
     }
 }
 
+// ========================================================
+// INTEGRAÇÃO ONEDRIVE & LEITOR DE ARQUIVOS NATIVO
+// ========================================================
+
+let oneDriveHandle = null;
+let oneDriveData = {
+    niches: [], // array de objetos de cada nicho
+    audioFilesMap: new Map(), // chave: `${nicheName}_${lang}` -> File/Handle
+    videoFilesMap: new Map()  // chave: `${nicheName}_${num}` -> File/Handle
+};
+
+// IndexedDB para persistir acesso à pasta
+const DB_NAME = 'twod_hub_db';
+const STORE_NAME = 'handles';
+
+function getDB() {
+    return new Promise((resolve, reject) => {
+        const req = indexedDB.open(DB_NAME, 1);
+        req.onupgradeneeded = () => req.result.createObjectStore(STORE_NAME);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+    });
+}
+
+async function saveHandleToDB(key, handle) {
+    try {
+        const db = await getDB();
+        const tx = db.transaction(STORE_NAME, 'readwrite');
+        tx.objectStore(STORE_NAME).put(handle, key);
+        return new Promise(res => tx.oncomplete = res);
+    } catch (e) {
+        console.warn('Não foi possível salvar handle no IndexedDB:', e);
+    }
+}
+
+async function getHandleFromDB(key) {
+    try {
+        const db = await getDB();
+        const tx = db.transaction(STORE_NAME, 'readonly');
+        const req = tx.objectStore(STORE_NAME).get(key);
+        return new Promise(res => req.onsuccess = () => res(req.result));
+    } catch (e) {
+        return null;
+    }
+}
+
+// Conectar via File System Access API (Chrome / Edge)
+async function connectOneDriveFolder() {
+    if (!window.showDirectoryPicker) {
+        // Fallback para navegadores sem showDirectoryPicker
+        document.getElementById('onedrive-fallback-input').click();
+        return;
+    }
+
+    try {
+        const handle = await window.showDirectoryPicker({
+            mode: 'read',
+            startIn: 'documents'
+        });
+        oneDriveHandle = handle;
+        await saveHandleToDB('onedrive_folder', handle);
+        await scanOneDriveFiles();
+    } catch (err) {
+        if (err.name !== 'AbortError') {
+            console.error('Erro ao conectar pasta do OneDrive:', err);
+            alert('Não foi possível abrir a pasta selecionada: ' + err.message);
+        }
+    }
+}
+
+// Fallback para navegadores sem showDirectoryPicker (Firefox / Safari)
+function handleFallbackDirectoryUpload(event) {
+    const files = Array.from(event.target.files);
+    if (!files.length) return;
+
+    processFilesList(files);
+}
+
+// Escanear arquivos a partir do handle
+async function scanOneDriveFiles() {
+    if (!oneDriveHandle) return;
+
+    const badge = document.getElementById('onedrive-connection-badge');
+    const folderTitle = document.getElementById('onedrive-folder-title');
+    const folderDesc = document.getElementById('onedrive-folder-desc');
+    const rescanBtn = document.getElementById('btn-rescan-onedrive');
+
+    badge.className = 'badge-tag';
+    badge.style.color = '#10b981';
+    badge.textContent = `🟢 Conectado: ${oneDriveHandle.name}`;
+    folderTitle.textContent = `OneDrive: ${oneDriveHandle.name}`;
+    folderDesc.textContent = `Varredura em andamento em ${oneDriveHandle.name}...`;
+    rescanBtn.style.display = 'inline-flex';
+
+    oneDriveData = {
+        niches: [],
+        audioFilesMap: new Map(),
+        videoFilesMap: new Map()
+    };
+
+    const nichesMap = new Map();
+
+    function getOrCreateNiche(name) {
+        if (!nichesMap.has(name)) {
+            nichesMap.set(name, {
+                name: name,
+                audios: [],
+                videos: { feed: [], reels: [] },
+                status: 'pending'
+            });
+        }
+        return nichesMap.get(name);
+    }
+
+    try {
+        let audiosHandle = null;
+        let videosHandle = null;
+
+        // Verifica se a pasta selecionada já é 'Arquivos de Áudio' ou 'Vídeos' ou a raiz 'Trabalho'
+        const lowerName = oneDriveHandle.name.toLowerCase();
+        if (lowerName.includes('áudio') || lowerName.includes('audio')) {
+            audiosHandle = oneDriveHandle;
+        } else if (lowerName.includes('vídeo') || lowerName.includes('video')) {
+            videosHandle = oneDriveHandle;
+        } else {
+            // Procura subpastas dentro da raiz
+            for await (const [name, entry] of oneDriveHandle.entries()) {
+                if (entry.kind === 'directory') {
+                    const n = name.toLowerCase();
+                    if (n.includes('áudio') || n.includes('audio')) audiosHandle = entry;
+                    if (n.includes('vídeo') || n.includes('video')) videosHandle = entry;
+                }
+            }
+        }
+
+        // 1. Escaneia Áudios
+        if (audiosHandle) {
+            for await (const [nicheFolder, nicheEntry] of audiosHandle.entries()) {
+                if (nicheEntry.kind === 'directory') {
+                    const niche = getOrCreateNiche(nicheFolder);
+                    for await (const [fileName, fileEntry] of nicheEntry.entries()) {
+                        if (fileEntry.kind === 'file' && fileName.match(/\.(mp3|wav|m4a|aac)$/i)) {
+                            // Extrai idioma do arquivo (ex: 5G_pt.mp3 -> PT)
+                            let lang = 'PT';
+                            const match = fileName.match(/_([a-zA-Z]{2})\./);
+                            if (match) lang = match[1].toUpperCase();
+
+                            niche.audios.push({
+                                name: fileName,
+                                lang: lang,
+                                handle: fileEntry
+                            });
+                            oneDriveData.audioFilesMap.set(`${nicheFolder}_${lang}`, fileEntry);
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2. Escaneia Vídeos
+        if (videosHandle) {
+            for await (const [nicheFolder, nicheEntry] of videosHandle.entries()) {
+                if (nicheEntry.kind === 'directory') {
+                    const niche = getOrCreateNiche(nicheFolder);
+                    
+                    // Varre subpastas de idiomas (Português, Espanhol, Inglês, etc.)
+                    for await (const [langFolder, langEntry] of nicheEntry.entries()) {
+                        if (langEntry.kind === 'directory') {
+                            for await (const [videoName, videoEntry] of langEntry.entries()) {
+                                if (videoEntry.kind === 'file' && videoName.match(/\.mp4$/i)) {
+                                    const numMatch = videoName.match(/^([1-6])\./);
+                                    const num = numMatch ? parseInt(numMatch[1]) : 0;
+                                    const isFeed = num >= 1 && num <= 3;
+                                    const isReels = num >= 4 && num <= 6;
+
+                                    const videoItem = {
+                                        name: videoName,
+                                        num: num,
+                                        type: isFeed ? 'feed' : (isReels ? 'reels' : 'other'),
+                                        lang: langFolder,
+                                        handle: videoEntry
+                                    };
+
+                                    if (isFeed) niche.videos.feed.push(videoItem);
+                                    else if (isReels) niche.videos.reels.push(videoItem);
+                                    
+                                    oneDriveData.videoFilesMap.set(`${nicheFolder}_${langFolder}_${videoName}`, videoEntry);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Calcula status de cada nicho
+        oneDriveData.niches = Array.from(nichesMap.values()).map(n => {
+            const feedCount = n.videos.feed.length;
+            const reelsCount = n.videos.reels.length;
+            const totalVideos = feedCount + reelsCount;
+
+            if (totalVideos >= 6) n.status = 'completed';
+            else if (totalVideos > 0) n.status = 'partial';
+            else n.status = 'pending';
+
+            return n;
+        });
+
+        // Ordena por nome
+        oneDriveData.niches.sort((a, b) => a.name.localeCompare(b.name));
+
+        renderOneDriveStatsAndTable();
+        folderDesc.textContent = `Sincronizado! ${oneDriveData.niches.length} nichos carregados com sucesso.`;
+
+    } catch (err) {
+        console.error('Erro na varredura de pastas:', err);
+        alert('Erro ao escanear pastas: ' + err.message);
+    }
+}
+
+// Processa lista de arquivos via Fallback File Input
+function processFilesList(files) {
+    const nichesMap = new Map();
+
+    function getOrCreateNiche(name) {
+        if (!nichesMap.has(name)) {
+            nichesMap.set(name, {
+                name: name,
+                audios: [],
+                videos: { feed: [], reels: [] },
+                status: 'pending'
+            });
+        }
+        return nichesMap.get(name);
+    }
+
+    files.forEach(file => {
+        const pathParts = file.webkitRelativePath ? file.webkitRelativePath.split('/') : [file.name];
+        // Exemplo: Trabalho/Arquivos de Áudio/5G 05.08.26/5G_pt.mp3
+        // ou: Arquivos de Áudio/5G 05.08.26/5G_pt.mp3
+        const isAudio = pathParts.some(p => p.toLowerCase().includes('áudio') || p.toLowerCase().includes('audio'));
+        const isVideo = pathParts.some(p => p.toLowerCase().includes('vídeo') || p.toLowerCase().includes('video'));
+
+        if (isAudio && file.name.match(/\.(mp3|wav|m4a|aac)$/i)) {
+            const nicheIdx = pathParts.findIndex(p => p.toLowerCase().includes('áudio') || p.toLowerCase().includes('audio')) + 1;
+            const nicheName = pathParts[nicheIdx] || 'Nicho Geral';
+            const niche = getOrCreateNiche(nicheName);
+
+            let lang = 'PT';
+            const match = file.name.match(/_([a-zA-Z]{2})\./);
+            if (match) lang = match[1].toUpperCase();
+
+            niche.audios.push({ name: file.name, lang: lang, file: file });
+            oneDriveData.audioFilesMap.set(`${nicheName}_${lang}`, file);
+        } else if (isVideo && file.name.match(/\.mp4$/i)) {
+            const videoIdx = pathParts.findIndex(p => p.toLowerCase().includes('vídeo') || p.toLowerCase().includes('video')) + 1;
+            const nicheName = pathParts[videoIdx] || 'Nicho Geral';
+            const niche = getOrCreateNiche(nicheName);
+
+            const numMatch = file.name.match(/^([1-6])\./);
+            const num = numMatch ? parseInt(numMatch[1]) : 0;
+            const isFeed = num >= 1 && num <= 3;
+            const isReels = num >= 4 && num <= 6;
+
+            const videoItem = {
+                name: file.name,
+                num: num,
+                type: isFeed ? 'feed' : 'reels',
+                file: file
+            };
+
+            if (isFeed) niche.videos.feed.push(videoItem);
+            else if (isReels) niche.videos.reels.push(videoItem);
+
+            oneDriveData.videoFilesMap.set(`${nicheName}_${file.name}`, file);
+        }
+    });
+
+    oneDriveData.niches = Array.from(nichesMap.values()).map(n => {
+        const total = n.videos.feed.length + n.videos.reels.length;
+        if (total >= 6) n.status = 'completed';
+        else if (total > 0) n.status = 'partial';
+        else n.status = 'pending';
+        return n;
+    });
+
+    oneDriveData.niches.sort((a, b) => a.name.localeCompare(b.name));
+
+    const badge = document.getElementById('onedrive-connection-badge');
+    badge.className = 'badge-tag';
+    badge.style.color = '#10b981';
+    badge.textContent = `🟢 Conectado via Navegador`;
+
+    renderOneDriveStatsAndTable();
+}
+
+// Renderiza Stats Cards e Tabela
+function renderOneDriveStatsAndTable() {
+    const statsContainer = document.getElementById('onedrive-stats');
+    const filterBar = document.getElementById('onedrive-filter-bar');
+    const tableContainer = document.getElementById('onedrive-table-container');
+    const emptyState = document.getElementById('onedrive-empty-state');
+
+    statsContainer.style.display = 'grid';
+    filterBar.style.display = 'flex';
+    tableContainer.style.display = 'block';
+    emptyState.style.display = 'none';
+
+    // Contadores
+    const totalNiches = oneDriveData.niches.length;
+    let totalAudios = 0;
+    let totalVideos = 0;
+
+    oneDriveData.niches.forEach(n => {
+        totalAudios += n.audios.length;
+        totalVideos += (n.videos.feed.length + n.videos.reels.length);
+    });
+
+    document.getElementById('stat-niches-count').textContent = totalNiches;
+    document.getElementById('stat-audios-count').textContent = totalAudios;
+    document.getElementById('stat-videos-count').textContent = totalVideos;
+
+    filterNichesTable();
+}
+
+// Filtro e Renderização da Tabela
+function filterNichesTable() {
+    const query = (document.getElementById('niche-search-input').value || '').toLowerCase().trim();
+    const statusFilter = document.getElementById('filter-status-select').value;
+    const tbody = document.getElementById('niches-table-body');
+
+    const filtered = oneDriveData.niches.filter(n => {
+        const matchesQuery = !query || n.name.toLowerCase().includes(query);
+        const matchesStatus = statusFilter === 'all' || n.status === statusFilter;
+        return matchesQuery && matchesStatus;
+    });
+
+    if (filtered.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--text-muted); padding: 30px;">Nenhum nicho encontrado com os filtros selecionados.</td></tr>`;
+        return;
+    }
+
+    tbody.innerHTML = filtered.map(n => {
+        // Áudios com botões clicáveis de play
+        const audiosHtml = n.audios.length > 0
+            ? n.audios.map(a => `<button type="button" class="audio-chip-btn" onclick="playAudio('${encodeURIComponent(n.name)}', '${a.lang}')">▶️ ${a.lang}</button>`).join('')
+            : `<span class="text-muted" style="font-size: 11px;">Sem áudios</span>`;
+
+        // Vídeos Feed (1 a 3)
+        const feedNums = [1, 2, 3];
+        const feedHtml = `<div class="video-badge-group">` + feedNums.map(num => {
+            const exists = n.videos.feed.some(v => v.num === num);
+            return `<span class="video-chip ${exists ? 'ready' : 'missing'}">${num}.mp4 ${exists ? '✓' : '—'}</span>`;
+        }).join('') + `</div>`;
+
+        // Vídeos Reels (4 a 6)
+        const reelsNums = [4, 5, 6];
+        const reelsHtml = `<div class="video-badge-group">` + reelsNums.map(num => {
+            const exists = n.videos.reels.some(v => v.num === num);
+            return `<span class="video-chip ${exists ? 'ready' : 'missing'}">${num}.mp4 ${exists ? '✓' : '—'}</span>`;
+        }).join('') + `</div>`;
+
+        // Status badge
+        let statusBadge = '';
+        if (n.status === 'completed') {
+            statusBadge = `<span class="badge-status-completed">6/6 Concluídos ✅</span>`;
+        } else if (n.status === 'partial') {
+            const total = n.videos.feed.length + n.videos.reels.length;
+            statusBadge = `<span class="badge-status-partial">${total}/6 Renderizados ⚠️</span>`;
+        } else {
+            statusBadge = `<span class="badge-status-pending">Apenas Áudio ⏳</span>`;
+        }
+
+        return `
+            <tr>
+                <td><strong>📁 ${n.name}</strong></td>
+                <td>${audiosHtml}</td>
+                <td>${feedHtml}</td>
+                <td>${reelsHtml}</td>
+                <td>${statusBadge}</td>
+            </tr>
+        `;
+    }).join('');
+}
+
+// Reproduzir Áudio Selecionado
+async function playAudio(nicheNameEncoded, lang) {
+    const nicheName = decodeURIComponent(nicheNameEncoded);
+    const key = `${nicheName}_${lang}`;
+    const fileItem = oneDriveData.audioFilesMap.get(key);
+
+    if (!fileItem) {
+        alert(`Arquivo de áudio não encontrado para o nicho ${nicheName} (${lang})`);
+        return;
+    }
+
+    try {
+        let file = null;
+        if (fileItem instanceof File) {
+            file = fileItem;
+        } else if (fileItem.getFile) {
+            file = await fileItem.getFile();
+        }
+
+        if (!file) return;
+
+        const audioUrl = URL.createObjectURL(file);
+        const playerBar = document.getElementById('inline-audio-player-bar');
+        const audioElement = document.getElementById('global-audio-element');
+        const titleEl = document.getElementById('now-playing-title');
+        const metaEl = document.getElementById('now-playing-meta');
+
+        titleEl.textContent = `Áudio ${lang} — ${nicheName}`;
+        metaEl.textContent = `${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
+        audioElement.src = audioUrl;
+        playerBar.style.display = 'flex';
+        audioElement.play();
+    } catch (err) {
+        console.error('Erro ao tocar áudio:', err);
+        alert('Não foi possível reproduzir o áudio: ' + err.message);
+    }
+}
+
+function closeAudioPlayer() {
+    const playerBar = document.getElementById('inline-audio-player-bar');
+    const audioElement = document.getElementById('global-audio-element');
+    audioElement.pause();
+    audioElement.src = '';
+    playerBar.style.display = 'none';
+}
+
+// Tenta restaurar acesso salvo do OneDrive ao iniciar
+async function checkSavedOneDriveHandle() {
+    try {
+        const saved = await getHandleFromDB('onedrive_folder');
+        if (saved && saved.queryPermission) {
+            const perm = await saved.queryPermission({ mode: 'read' });
+            if (perm === 'granted') {
+                oneDriveHandle = saved;
+                scanOneDriveFiles();
+            }
+        }
+    } catch (e) {
+        console.log('Nenhum handle pré-salvo do OneDrive.');
+    }
+}
+
 function changeMyPassword() {
     const input = document.getElementById('change-pwd-input');
     const nova = input.value.trim();
@@ -517,5 +964,7 @@ function changeMyPassword() {
 // ========================================================
 document.addEventListener('DOMContentLoaded', () => {
     checkSession();
+    checkSavedOneDriveHandle();
 });
+
 

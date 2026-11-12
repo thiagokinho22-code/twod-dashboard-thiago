@@ -228,55 +228,127 @@
                 <!-- ============================================== -->
                 <!-- ABA 2: GERADOR DE CRIATIVOS (TWOD STUDIO)      -->
                 <!-- ============================================== -->
+                <!-- ABA 2: GERADOR DE CRIATIVOS                    -->
+                <!-- ============================================== -->
                 <section id="tab-criativos" class="tab-pane">
                     <div class="panel-card">
                         <div class="panel-card-header">
                             <div>
-                                <h2>🎬 TWOD Criativos Studio V2 (Nuvem)</h2>
-                                <p>Renderização diária de vídeos para Feed (1-3) e Reels (4-6) via FFmpeg e OneDrive</p>
+                                <h2>🎬 TWOD Criativos Studio V2 (OneDrive)</h2>
+                                <p>Gerenciamento e monitoramento de áudios, nichos e criativos (Feed 1-3 e Reels 4-6) integrados ao OneDrive</p>
                             </div>
-                            <span class="badge-tag">Motor Python</span>
+                            <span class="badge-tag" id="onedrive-connection-badge">⚪ OneDrive Desconectado</span>
                         </div>
 
-                        <div class="form-grid-2">
-                            <div class="form-group">
-                                <label>Data dos Criativos</label>
-                                <input type="date" id="creative-date" value="2026-11-12">
+                        <!-- BARRA DE CONEXÃO E SELEÇÃO ONEDRIVE -->
+                        <div class="onedrive-connect-box">
+                            <div class="onedrive-connect-info">
+                                <div class="connect-icon">📁</div>
+                                <div>
+                                    <h3 id="onedrive-folder-title">Pasta de Trabalho do OneDrive</h3>
+                                    <p id="onedrive-folder-desc">Conecte a pasta <code>Documentos\Trabalho</code> (ou <code>Arquivos de Áudio</code> / <code>Vídeos</code>) para carregar todos os nichos e arquivos.</p>
+                                </div>
                             </div>
+                            <div class="onedrive-connect-actions">
+                                <button type="button" class="btn btn-primary" id="btn-connect-onedrive" onclick="connectOneDriveFolder()">
+                                    📂 Conectar Pasta OneDrive
+                                </button>
+                                <button type="button" class="btn btn-outline" id="btn-rescan-onedrive" onclick="scanOneDriveFiles()" style="display: none;">
+                                    🔄 Re-escanear Pastas
+                                </button>
+                                <input type="file" id="onedrive-fallback-input" webkitdirectory directory multiple style="display: none;" onchange="handleFallbackDirectoryUpload(event)">
+                            </div>
+                        </div>
 
-                            <div class="form-group">
-                                <label>Bloco Diário</label>
-                                <select id="creative-block">
-                                    <option value="bloco-a">Bloco A (3 Nichos)</option>
-                                    <option value="bloco-b">Bloco B (3 Nichos)</option>
-                                    <option value="ambos">Ambos (Todos os Nichos do Dia)</option>
+                        <!-- STATS CARDS DO ONEDRIVE (APARECE QUANDO CONECTADO) -->
+                        <div class="stats-grid onedrive-stats-grid" id="onedrive-stats" style="display: none; margin: 20px 0;">
+                            <div class="stat-card">
+                                <div class="stat-icon-wrapper" style="background: rgba(59, 130, 246, 0.15); color: #3b82f6;">📁</div>
+                                <div class="stat-content">
+                                    <span class="stat-label">Nichos Mapeados</span>
+                                    <h3 class="stat-value" id="stat-niches-count">0</h3>
+                                    <span class="stat-sub">Pastas de nichos</span>
+                                </div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-icon-wrapper" style="background: rgba(16, 185, 129, 0.15); color: #10b981;">🎵</div>
+                                <div class="stat-content">
+                                    <span class="stat-label">Áudios Prontos</span>
+                                    <h3 class="stat-value" id="stat-audios-count">0</h3>
+                                    <span class="stat-sub">Arquivos .mp3</span>
+                                </div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-icon-wrapper" style="background: rgba(245, 158, 11, 0.15); color: #f59e0b;">🎬</div>
+                                <div class="stat-content">
+                                    <span class="stat-label">Vídeos Renderizados</span>
+                                    <h3 class="stat-value" id="stat-videos-count">0</h3>
+                                    <span class="stat-sub">Feed (1-3) & Reels (4-6)</span>
+                                </div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-icon-wrapper" style="background: rgba(99, 102, 241, 0.15); color: #6366f1;">🌐</div>
+                                <div class="stat-content">
+                                    <span class="stat-label">Idiomas Suportados</span>
+                                    <h3 class="stat-value" id="stat-langs-count">PT / ES / EN</h3>
+                                    <span class="stat-sub">+ FR / HI</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- PLAYER DE ÁUDIO EMBUTIDO (QUANDO USUÁRIO TOCA UM ÁUDIO) -->
+                        <div id="inline-audio-player-bar" class="audio-player-bar" style="display: none;">
+                            <div class="audio-player-info">
+                                <span class="audio-icon">▶️</span>
+                                <div>
+                                    <strong id="now-playing-title">Nome do Áudio</strong>
+                                    <div id="now-playing-meta" class="text-muted" style="font-size: 11px;">Idioma / Nicho</div>
+                                </div>
+                            </div>
+                            <audio id="global-audio-element" controls style="flex: 1; max-width: 450px;"></audio>
+                            <button type="button" class="btn btn-outline btn-sm" onclick="closeAudioPlayer()">✕ Fechar</button>
+                        </div>
+
+                        <!-- FILTROS E BUSCA DE NICHOS -->
+                        <div class="table-controls" id="onedrive-filter-bar" style="display: none; margin-top: 20px;">
+                            <div class="search-box">
+                                <input type="text" id="niche-search-input" placeholder="🔍 Buscar por nome do nicho ou data (ex: 5G, 05.08)..." oninput="filterNichesTable()">
+                            </div>
+                            <div class="filter-actions">
+                                <select id="filter-status-select" onchange="filterNichesTable()">
+                                    <option value="all">Todos os Status</option>
+                                    <option value="completed">6 Vídeos Concluídos ✅</option>
+                                    <option value="partial">Parcialmente Renderizado ⚠️</option>
+                                    <option value="pending">Apenas Áudio (Sem Vídeo) ⏳</option>
                                 </select>
                             </div>
                         </div>
 
-                        <div class="form-group">
-                            <label>Pastas Monitoradas no OneDrive:</label>
-                            <div class="folder-path-display">
-                                <div>📁 Áudios: <code>C:\Users\thiag\OneDrive\Documentos\Trabalho\Arquivos de Áudio</code></div>
-                                <div>📁 Vídeos: <code>C:\Users\thiag\OneDrive\Documentos\Trabalho\Vídeos</code></div>
-                            </div>
+                        <!-- TABELA DE NICHOS E ARQUIVOS MAPEADOS -->
+                        <div class="table-responsive" id="onedrive-table-container" style="display: none; margin-top: 15px;">
+                            <table class="twod-table">
+                                <thead>
+                                    <tr>
+                                        <th>Nicho / Pasta</th>
+                                        <th>Áudios Detectados</th>
+                                        <th>Vídeos Feed (1 a 3)</th>
+                                        <th>Vídeos Reels (4 a 6)</th>
+                                        <th>Status Geral</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="niches-table-body">
+                                    <!-- Preenchido dinamicamente via JS -->
+                                </tbody>
+                            </table>
                         </div>
 
-                        <div class="render-preview-box">
-                            <div class="render-status-title">Status da Fila de Renderização:</div>
+                        <!-- MENSAGEM QUANDO AINDA NÃO CONECTADO -->
+                        <div id="onedrive-empty-state" class="render-preview-box">
+                            <div class="render-status-title">Aguardando Conexão com o OneDrive:</div>
                             <div class="queue-status-indicator">
-                                <span class="dot-idle"></span> Pronto para processamento na nuvem.
+                                <span class="dot-idle" style="background: var(--text-muted);"></span> Nenhuma pasta selecionada ainda.
                             </div>
-                            <p class="text-muted">Ao iniciar, o servidor baixa os arquivos do OneDrive, aplica o FFmpeg com corte suave e sobe os 6 MP4s prontos de volta.</p>
-                        </div>
-
-                        <div class="panel-actions">
-                            <button class="btn btn-success btn-lg" onclick="alert('Simulação: Motor FFmpeg pronto para ser conectado ao servidor!')">
-                                🚀 Iniciar Renderização do Dia
-                            </button>
-                            <button class="btn btn-outline" onclick="alert('Verificando integridade das pastas no OneDrive...')">
-                                🔍 Verificar Arquivos do OneDrive
-                            </button>
+                            <p class="text-muted">Clique no botão <strong>"📂 Conectar Pasta OneDrive"</strong> acima e selecione a pasta <code>Documentos\Trabalho</code> do seu computador. A dashboard lerá todos os nichos de áudios e vídeos instantaneamente pelo navegador.</p>
                         </div>
                     </div>
                 </section>

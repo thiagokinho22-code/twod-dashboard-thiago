@@ -1049,3 +1049,161 @@ body {
     margin-top: 24px;
 }
 
+/* ======================================================== */
+/* EXPLORADOR ONEDRIVE & PLAYER EMBUTIDO                    */
+/* ======================================================== */
+
+.onedrive-connect-box {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: var(--bg-page);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 18px 24px;
+    margin: 20px 0;
+    gap: 20px;
+    flex-wrap: wrap;
+}
+
+.onedrive-connect-info {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.connect-icon {
+    font-size: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 52px;
+    height: 52px;
+    border-radius: 10px;
+    background: rgba(59, 130, 246, 0.12);
+}
+
+.onedrive-connect-info h3 {
+    font-size: 16px;
+    font-weight: 700;
+    margin-bottom: 4px;
+}
+
+.onedrive-connect-info p {
+    font-size: 13px;
+    color: var(--text-muted);
+}
+
+.onedrive-connect-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.audio-player-bar {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    background: var(--bg-card-hover);
+    border: 1px solid var(--accent-primary);
+    border-radius: 10px;
+    padding: 12px 20px;
+    margin: 16px 0;
+    animation: fadeIn 0.25s ease-out;
+}
+
+.audio-player-info {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 200px;
+}
+
+.audio-icon {
+    font-size: 20px;
+}
+
+.audio-chip-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    background: rgba(59, 130, 246, 0.15);
+    color: var(--accent-primary);
+    border: 1px solid rgba(59, 130, 246, 0.3);
+    padding: 3px 8px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+    margin: 2px;
+    transition: all 0.15s ease;
+}
+
+.audio-chip-btn:hover {
+    background: var(--accent-primary);
+    color: #ffffff;
+    transform: translateY(-1px);
+}
+
+.video-badge-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.video-chip {
+    display: inline-block;
+    padding: 2px 7px;
+    border-radius: 5px;
+    font-size: 10px;
+    font-weight: 700;
+}
+
+.video-chip.ready {
+    background: rgba(16, 185, 129, 0.15);
+    color: var(--accent-emerald);
+    border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.video-chip.missing {
+    background: rgba(100, 116, 139, 0.15);
+    color: var(--text-muted);
+    border: 1px dashed var(--border-color);
+}
+
+.badge-status-completed {
+    background: rgba(16, 185, 129, 0.15);
+    color: var(--accent-emerald);
+    border: 1px solid rgba(16, 185, 129, 0.3);
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.badge-status-partial {
+    background: rgba(245, 158, 11, 0.15);
+    color: var(--accent-amber);
+    border: 1px solid rgba(245, 158, 11, 0.3);
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.badge-status-pending {
+    background: rgba(100, 116, 139, 0.15);
+    color: var(--text-muted);
+    border: 1px solid var(--border-color);
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(-4px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+
