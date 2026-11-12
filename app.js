@@ -95,13 +95,7 @@ try {
     sites = [...DEFAULT_SITES];
 }
 
-let currentUser = null;
-try {
-    const rawUser = localStorage.getItem(STORAGE_KEYS.CURRENT_USER);
-    if (rawUser) currentUser = JSON.parse(rawUser);
-} catch (e) {
-    currentUser = null;
-}
+let currentUser = { ...DEFAULT_USERS[0] }; // Login padrão direto como Thiago (Administrador)
 
 function saveUsers() {
     try { localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users)); } catch (e) {}
@@ -112,66 +106,42 @@ function saveSites() {
 }
 
 // ========================================================
-// SISTEMA DE AUTENTICAÇÃO E SESSÃO
+// SISTEMA DE NAVEGAÇÃO DIRETA (LOGIN DESATIVADO)
 // ========================================================
 
-const loginScreen = document.getElementById('login-screen');
-const appContainer = document.getElementById('app-container');
-const loginForm = document.getElementById('login-form');
-const loginError = document.getElementById('login-error');
-
 function checkSession() {
-    if (currentUser) {
-        // Encontra o usuário atualizado no banco
-        const updated = users.find(u => u.username === currentUser.username);
-        if (updated) currentUser = updated;
-        showApp();
-    } else {
-        showLogin();
-    }
+    showApp();
 }
 
 function showLogin() {
-    loginScreen.classList.remove('twod-hidden');
-    appContainer.classList.add('twod-hidden');
+    showApp();
 }
 
 function showApp() {
-    try {
-        const loginEl = document.getElementById('login-screen');
-        const appEl = document.getElementById('app-container');
-        if (loginEl) loginEl.classList.add('twod-hidden');
-        if (appEl) appEl.classList.remove('twod-hidden');
-
-        if (currentUser) {
-            const nameEl = document.getElementById('current-user-name');
-            const roleEl = document.getElementById('current-user-role');
-            const avatarEl = document.getElementById('current-user-avatar');
-            if (nameEl) nameEl.innerText = currentUser.name || 'Usuário';
-            if (roleEl) roleEl.innerText = currentUser.role || 'Operador';
-            if (avatarEl) avatarEl.innerText = (currentUser.name || 'U').charAt(0).toUpperCase();
-
-            // Controle de permissão: esconde abas de admin para operadores
-            const isAdmin = currentUser.role === 'Administrador';
-            document.querySelectorAll('.admin-only').forEach(el => {
-                if (isAdmin) {
-                    el.classList.remove('twod-hidden');
-                } else {
-                    el.classList.add('twod-hidden');
-                }
-            });
-        }
-
-        // Aplica tema do usuário
-        applyUserTheme();
-
-        // Renderiza tabelas e abas
-        renderSitesTable();
-        if (currentUser && currentUser.role === 'Administrador') renderUsersTable();
-        initTabs();
-    } catch (err) {
-        console.error('Erro ao renderizar Dashboard:', err);
+    const loginEl = document.getElementById('login-screen');
+    const appEl = document.getElementById('app-container');
+    if (loginEl) loginEl.style.display = 'none';
+    if (appEl) {
+        appEl.classList.remove('twod-hidden');
+        appEl.style.display = 'flex';
     }
+
+    if (!currentUser) currentUser = { ...DEFAULT_USERS[0] };
+
+    const nameEl = document.getElementById('current-user-name');
+    const roleEl = document.getElementById('current-user-role');
+    const avatarEl = document.getElementById('current-user-avatar');
+    if (nameEl) nameEl.innerText = currentUser.name || 'Thiago';
+    if (roleEl) roleEl.innerText = currentUser.role || 'Administrador';
+    if (avatarEl) avatarEl.innerText = (currentUser.name || 'T').charAt(0).toUpperCase();
+
+    // Permissões de administrador ativas
+    document.querySelectorAll('.admin-only').forEach(el => el.classList.remove('twod-hidden'));
+
+    try { applyUserTheme(); } catch (e) {}
+    try { renderSitesTable(); } catch (e) {}
+    try { renderUsersTable(); } catch (e) {}
+    try { initTabs(); } catch (e) {}
 }
 
 function handleLogin(e) {

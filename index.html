@@ -9,51 +9,15 @@
 <body>
 
     <!-- ========================================== -->
-    <!-- TELA DE LOGIN / AUTENTICAÇÃO               -->
+    <!-- TELA DE LOGIN (DESATIVADA TEMPORARIAMENTE) -->
     <!-- ========================================== -->
-    <div id="login-screen" class="login-overlay">
-        <div class="login-card">
-            <div class="login-brand">
-                <div class="brand-logo">
-                    <svg viewBox="0 0 24 24" width="32" height="32" fill="currentColor">
-                        <path d="M13 2L3 14h8l-1 8 11-12h-8l1-8z" />
-                    </svg>
-                </div>
-                <h2>TwoD Hub</h2>
-                <p>Central de Automações e Performance</p>
-            </div>
-
-            <form id="login-form" onsubmit="handleLogin(event); return false;">
-                <div class="form-group">
-                    <label for="login-username">Usuário</label>
-                    <input type="text" id="login-username" placeholder="Digite seu usuário..." required autocomplete="username">
-                </div>
-
-                <div class="form-group">
-                    <label for="login-password">Senha</label>
-                    <input type="password" id="login-password" placeholder="Digite sua senha..." required autocomplete="current-password">
-                </div>
-
-                <div id="login-error" class="login-error-msg twod-hidden">Usuário ou senha incorretos.</div>
-
-                <button type="submit" class="btn btn-primary btn-block">Acessar Painel</button>
-            </form>
-
-            <div class="quick-login-box">
-                <p class="quick-login-title">Acesso Rápido para Teste:</p>
-                <div class="quick-login-chips">
-                    <button type="button" class="chip" onclick="quickLogin('thiago', '123456')">👑 Thiago (Adm)</button>
-                    <button type="button" class="chip" onclick="quickLogin('alexandre', '123456')">⚡ Alexandre</button>
-                    <button type="button" class="chip" onclick="quickLogin('wesley', '123456')">👤 Wesley</button>
-                </div>
-            </div>
-        </div>
+    <div id="login-screen" class="login-overlay" style="display: none !important;">
     </div>
 
     <!-- ========================================== -->
-    <!-- APLICAÇÃO PRINCIPAL (DASHBOARD)            -->
+    <!-- APLICAÇÃO PRINCIPAL (DASHBOARD DIRETA)     -->
     <!-- ========================================== -->
-    <div id="app-container" class="app-layout twod-hidden">
+    <div id="app-container" class="app-layout">
         
         <!-- SIDEBAR LATERAL -->
         <aside class="sidebar">
@@ -623,7 +587,7 @@
         </div>
     </div>
 
-    <script src="app.js?v=2.0"></script>
+    <script src="app.js?v=3.0"></script>
 </body>
 </html>
 
