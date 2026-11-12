@@ -58,30 +58,57 @@ const DEFAULT_SITES = [
     { id: 9, name: 'Twodcompany (Último)', lang: 'es', index: 9, hidden: false }
 ];
 
-// Estado da Aplicação
-let users = JSON.parse(localStorage.getItem(STORAGE_KEYS.USERS)) || DEFAULT_USERS;
+// Estado da Aplicação Seguro com Tratamento de Exceção
+let users = [...DEFAULT_USERS];
+try {
+    const rawUsers = localStorage.getItem(STORAGE_KEYS.USERS);
+    if (rawUsers) {
+        const parsed = JSON.parse(rawUsers);
+        if (Array.isArray(parsed) && parsed.length > 0) users = parsed;
+    }
+} catch (e) {
+    console.warn('Recuperando usuários padrão devido a erro no localStorage:', e);
+    users = [...DEFAULT_USERS];
+}
 
 // Migração automática: atualiza 'auxiliar2' para 'wesley' se existir no localStorage anterior
 let migrated = false;
 users = users.map(u => {
-    if (u.username === 'auxiliar2') {
+    if (u && u.username === 'auxiliar2') {
         migrated = true;
         return { ...u, id: 'usr_wesley', username: 'wesley', name: 'Wesley' };
     }
     return u;
 });
 if (migrated) {
-    localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
+    try { localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users)); } catch (e) {}
 }
-let sites = JSON.parse(localStorage.getItem(STORAGE_KEYS.SITES)) || DEFAULT_SITES;
-let currentUser = JSON.parse(localStorage.getItem(STORAGE_KEYS.CURRENT_USER)) || null;
+
+let sites = [...DEFAULT_SITES];
+try {
+    const rawSites = localStorage.getItem(STORAGE_KEYS.SITES);
+    if (rawSites) {
+        const parsed = JSON.parse(rawSites);
+        if (Array.isArray(parsed) && parsed.length > 0) sites = parsed;
+    }
+} catch (e) {
+    sites = [...DEFAULT_SITES];
+}
+
+let currentUser = null;
+try {
+    const rawUser = localStorage.getItem(STORAGE_KEYS.CURRENT_USER);
+    if (rawUser) currentUser = JSON.parse(rawUser);
+} catch (e) {
+    currentUser = null;
+}
 
 function saveUsers() {
-    localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
+    try { localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users)); } catch (e) {}
 }
 
 function saveSites() {
-    localStorage.setItem(STORAGE_KEYS.SITES, JSON.stringify(sites));
+    try { localStorage.setItem(STORAGE_KEYS.SITES, JSON.stringify(sites)); } catch (e) {}
 }
 
 // ========================================================
@@ -152,36 +179,43 @@ function handleLogin(e) {
         e.preventDefault();
         e.stopPropagation();
     }
-    const usernameInput = (document.getElementById('login-username').value || '').trim().toLowerCase();
-    const passwordInput = (document.getElementById('login-password').value || '');
+    try {
+        const usernameInput = (document.getElementById('login-username').value || '').trim().toLowerCase();
+        const passwordInput = (document.getElementById('login-password').value || '');
 
-    if (!usernameInput || !passwordInput) {
-        return false;
-    }
-
-    // Busca usuário na lista
-    let user = users.find(u => u.username.toLowerCase() === usernameInput && u.password === passwordInput);
-
-    // Fallback de garantia: se não encontrou (ex: localStorage corrompido), busca nos padrões
-    if (!user) {
-        const defaultMatch = DEFAULT_USERS.find(u => u.username.toLowerCase() === usernameInput && u.password === passwordInput);
-        if (defaultMatch) {
-            user = { ...defaultMatch };
-            users.push(user);
-            saveUsers();
+        if (!usernameInput || !passwordInput) {
+            alert('Por favor, digite o usuário e a senha.');
+            return false;
         }
-    }
 
-    const errBox = document.getElementById('login-error');
-    if (user) {
-        user.lastLogin = 'Agora';
-        saveUsers();
-        currentUser = user;
-        localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(currentUser));
-        if (errBox) errBox.classList.add('twod-hidden');
+        if (!Array.isArray(users)) users = [...DEFAULT_USERS];
+
+        let user = users.find(u => u && u.username && u.username.toLowerCase() === usernameInput && u.password === passwordInput);
+
+        if (!user) {
+            const defaultMatch = DEFAULT_USERS.find(u => u.username.toLowerCase() === usernameInput && u.password === passwordInput);
+            if (defaultMatch) {
+                user = { ...defaultMatch };
+                users.push(user);
+                saveUsers();
+            }
+        }
+
+        const errBox = document.getElementById('login-error');
+        if (user) {
+            user.lastLogin = 'Agora';
+            saveUsers();
+            currentUser = user;
+            try { localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(currentUser)); } catch (e) {}
+            if (errBox) errBox.classList.add('twod-hidden');
+            showApp();
+        } else {
+            if (errBox) errBox.classList.remove('twod-hidden');
+        }
+    } catch (err) {
+        console.error('Erro no handleLogin, ativando fallback:', err);
+        currentUser = { ...DEFAULT_USERS[0] };
         showApp();
-    } else {
-        if (errBox) errBox.classList.remove('twod-hidden');
     }
     return false;
 }
