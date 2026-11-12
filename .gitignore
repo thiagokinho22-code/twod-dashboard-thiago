@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.spec
+build/
+dist/
+venv/
+.env
+
+# Binários pesados gerados localmente
+*.exe
+
+# Sistema & Editores
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/

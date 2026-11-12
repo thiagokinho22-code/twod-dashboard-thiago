@@ -1,0 +1,40 @@
+{
+  "manifest_version": 3,
+  "name": "Meta Ads Block Automator - Duplicador de Conjuntos e Idiomas",
+  "version": "1.0.0",
+  "description": "Automatiza a edição de conjuntos (- Copy), países, orçamento ($1), anunciante verificado, URL com tag de idioma e tradução de anúncios por Blocos no Meta Ads Manager.",
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://adsmanager.facebook.com/*",
+    "https://business.facebook.com/*",
+    "https://translate.googleapis.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Abrir Painel Meta Ads Blocos"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://adsmanager.facebook.com/*",
+        "https://business.facebook.com/adsmanager/*"
+      ],
+      "css": [
+        "content/panel.css"
+      ],
+      "js": [
+        "data/blocks.js",
+        "content/automator.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}
+

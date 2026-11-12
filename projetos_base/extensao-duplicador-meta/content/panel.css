@@ -1,0 +1,818 @@
+/* ==========================================================================
+   AutoAds Blocos - Modern Dark & Amber Tech Theme
+   Inspired by high-performance developer tools & dark dashboards
+   ========================================================================== */
+
+#mab-root-panel {
+  position: fixed;
+  top: 64px;
+  right: 18px;
+  width: 388px;
+  max-height: calc(100vh - 80px);
+  background: #090e1a;
+  color: #f8fafc;
+  border: 1px solid #1e293d;
+  border-radius: 14px;
+  box-shadow: 0 25px 60px -12px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(255, 255, 255, 0.06);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-size: 12.5px;
+  z-index: 2147483640;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transition: width 0.22s cubic-bezier(0.4, 0, 0.2, 1), height 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+  user-select: none;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+#mab-root-panel * {
+  box-sizing: border-box;
+}
+
+/* Minimized Mode */
+#mab-root-panel.mab-minimized {
+  width: 250px;
+  max-height: none;
+}
+
+#mab-root-panel.mab-minimized .mab-nav-subbar,
+#mab-root-panel.mab-minimized .mab-tabs,
+#mab-root-panel.mab-minimized .mab-body,
+#mab-root-panel.mab-minimized #mab-log-footer,
+#mab-root-panel.mab-minimized #mab-btn-go-adset,
+#mab-root-panel.mab-minimized #mab-btn-go-ad,
+#mab-root-panel.mab-minimized #mab-btn-open-standalone {
+  display: none !important;
+}
+
+#mab-root-panel.mab-minimized .mab-header {
+  border-bottom: none;
+  cursor: pointer;
+  padding: 8px 12px;
+}
+
+/* ==========================================================================
+   Header & Brand
+   ========================================================================== */
+.mab-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: linear-gradient(180deg, #131c30 0%, #0d1527 100%);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  cursor: move;
+  gap: 8px;
+}
+
+.mab-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mab-brand-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  background: linear-gradient(135deg, #f59e0b 0%, #ea580c 100%);
+  color: #090e1a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 900;
+  box-shadow: 0 2px 8px rgba(245, 158, 11, 0.35);
+  flex-shrink: 0;
+}
+
+.mab-brand-info {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.mab-brand-title {
+  font-weight: 700;
+  font-size: 13px;
+  color: #f8fafc;
+  letter-spacing: -0.01em;
+}
+
+.mab-badge {
+  background: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  font-size: 10px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.mab-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+}
+
+/* Header Pills */
+.mab-header-pill {
+  background: #111a2e;
+  color: #94a3b8;
+  border: 1px solid #1e2b45;
+  border-radius: 6px;
+  padding: 3px 7px;
+  font-size: 10.5px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.15s ease;
+  line-height: 1.2;
+}
+
+.mab-header-pill:hover {
+  background: #1a2744;
+  color: #f1f5f9;
+  border-color: #2b3d63;
+}
+
+.mab-header-pill.mab-pill-on {
+  background: rgba(34, 197, 94, 0.12);
+  color: #4ade80;
+  border: 1px solid rgba(34, 197, 94, 0.35);
+  font-weight: 700;
+}
+
+.mab-header-pill.mab-pill-on:hover {
+  background: rgba(34, 197, 94, 0.22);
+  border-color: #22c55e;
+  box-shadow: 0 0 10px rgba(34, 197, 94, 0.3);
+}
+
+.mab-pulse-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #22c55e;
+  box-shadow: 0 0 6px #22c55e;
+  display: inline-block;
+}
+
+.mab-icon-btn,
+#mab-btn-minimize {
+  background: #111a2e;
+  color: #94a3b8;
+  border: 1px solid #1e2b45;
+  border-radius: 6px;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1;
+  flex-shrink: 0;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.mab-icon-btn:hover,
+#mab-btn-minimize:hover {
+  background: #1f2d47;
+  color: #f8fafc;
+  border-color: #38bdf8;
+  box-shadow: 0 0 8px rgba(56, 189, 248, 0.3);
+}
+
+/* Quick Nav Sub-bar (Conjunto / Anúncio) */
+.mab-nav-subbar {
+  display: flex;
+  gap: 6px;
+  padding: 6px 12px;
+  background: #0b1120;
+  border-bottom: 1px solid #1e293d;
+}
+
+.mab-nav-subbar-btn {
+  flex: 1;
+  background: #111a2e;
+  color: #94a3b8;
+  border: 1px solid #1e2b45;
+  border-radius: 7px;
+  padding: 5px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  transition: all 0.15s ease;
+}
+
+.mab-nav-subbar-btn:hover {
+  background: #1a2744;
+  color: #f8fafc;
+  border-color: #38bdf8;
+}
+
+/* Warning Drawer Bar */
+#mab-view-warning {
+  background: #241403;
+  border-bottom: 1px solid #78350f;
+  padding: 6px 12px;
+  font-size: 10.5px;
+  color: #fbbf24;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* ==========================================================================
+   Tabs Navigation
+   ========================================================================== */
+.mab-tabs {
+  display: flex;
+  background: #0b1120;
+  border-bottom: 1px solid #1e293d;
+  padding: 0 8px;
+  gap: 4px;
+}
+
+.mab-tab {
+  flex: 1;
+  text-align: center;
+  padding: 9px 8px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #64748b;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  transition: all 0.15s ease;
+}
+
+.mab-tab:hover {
+  color: #cbd5e1;
+}
+
+.mab-tab.active {
+  color: #f59e0b;
+  border-bottom-color: #f59e0b;
+  background: linear-gradient(180deg, rgba(245, 158, 11, 0.06) 0%, transparent 100%);
+}
+
+.mab-tab-icon {
+  font-size: 12px;
+}
+
+/* ==========================================================================
+   Body & Cards (Sections)
+   ========================================================================== */
+.mab-body {
+  padding: 12px;
+  overflow-y: auto;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: #090e1a;
+}
+
+.mab-body::-webkit-scrollbar {
+  width: 5px;
+}
+
+.mab-body::-webkit-scrollbar-track {
+  background: #090e1a;
+}
+
+.mab-body::-webkit-scrollbar-thumb {
+  background: #1e293d;
+  border-radius: 4px;
+}
+
+.mab-body::-webkit-scrollbar-thumb:hover {
+  background: #334155;
+}
+
+.mab-section {
+  background: #101827;
+  border: 1px solid #1f2a40;
+  border-radius: 12px;
+  padding: 12px 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+}
+
+.mab-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+
+.mab-section-header-left {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.mab-section-icon-box {
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  background: linear-gradient(135deg, #f59e0b 0%, #ea580c 100%);
+  color: #090e1a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 800;
+  box-shadow: 0 2px 8px rgba(245, 158, 11, 0.3);
+  flex-shrink: 0;
+}
+
+.mab-section-title-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.mab-section-title-text {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #f8fafc;
+  letter-spacing: -0.01em;
+}
+
+.mab-section-subtitle-text {
+  font-size: 10.5px;
+  color: #64748b;
+  line-height: 1.2;
+}
+
+.mab-section-title {
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #94a3b8;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* ==========================================================================
+   Form Controls (Inputs & Selects)
+   ========================================================================== */
+.mab-select,
+.mab-input,
+.mab-textarea {
+  width: 100%;
+  background: #080d17;
+  color: #f8fafc;
+  border: 1px solid #1f2a40;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 12px;
+  font-family: inherit;
+  outline: none;
+  transition: all 0.15s ease;
+}
+
+.mab-select:focus,
+.mab-input:focus,
+.mab-textarea:focus {
+  border-color: #f59e0b;
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.25);
+  background: #0b1120;
+}
+
+.mab-field-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.mab-field-label {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* ==========================================================================
+   Country List & Country Items
+   ========================================================================== */
+.mab-country-list {
+  max-height: 175px;
+  overflow-y: auto;
+  background: #080d17;
+  border: 1px solid #1c273c;
+  border-radius: 8px;
+  padding: 5px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.mab-country-list::-webkit-scrollbar {
+  width: 4px;
+}
+
+.mab-country-list::-webkit-scrollbar-thumb {
+  background: #1f2a40;
+  border-radius: 3px;
+}
+
+.mab-country-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 9px;
+  border-radius: 6px;
+  background: #0d1526;
+  border: 1px solid rgba(255, 255, 255, 0.03);
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.mab-country-item:hover {
+  background: #131f36;
+  border-color: rgba(245, 158, 11, 0.25);
+}
+
+.mab-country-item.mab-done {
+  opacity: 0.55;
+  background: #09101f;
+}
+
+.mab-country-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+}
+
+.mab-country-name {
+  font-weight: 600;
+  font-size: 12px;
+  color: #f1f5f9;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mab-country-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+/* Language Pill (AdMob / Orange Badge Style) */
+.mab-lang-pill {
+  background: rgba(245, 158, 11, 0.12);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.25);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+}
+
+.mab-apply-single-btn {
+  background: #131c30;
+  color: #94a3b8;
+  border: 1px solid #1e2b45;
+  border-radius: 5px;
+  padding: 2px 7px;
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.mab-apply-single-btn:hover {
+  background: #f59e0b;
+  color: #090e1a;
+  border-color: #f59e0b;
+  font-weight: 700;
+}
+
+.mab-note-warning {
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  color: #fbbf24;
+  font-size: 11px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  line-height: 1.35;
+}
+
+/* Quick Action Links */
+.mab-link-action {
+  color: #f59e0b;
+  text-decoration: none;
+  font-weight: 600;
+  transition: color 0.12s;
+}
+
+.mab-link-action:hover {
+  color: #fbbf24;
+  text-decoration: underline;
+}
+
+.mab-link-muted {
+  color: #64748b;
+}
+
+.mab-link-muted:hover {
+  color: #94a3b8;
+}
+
+.mab-link-danger {
+  color: #f87171;
+}
+
+.mab-link-danger:hover {
+  color: #ef4444;
+}
+
+/* ==========================================================================
+   Checkboxes (Custom Crisp Amber Square)
+   ========================================================================== */
+.mab-checkboxes-group {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.mab-checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 12px;
+  color: #e2e8f0;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 6px;
+  transition: background 0.12s, color 0.12s;
+}
+
+.mab-checkbox-row:hover {
+  background: #141f33;
+  color: #ffffff;
+}
+
+.mab-checkbox-row input[type="checkbox"],
+.mab-country-left input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 15px;
+  height: 15px;
+  border: 1.5px solid #334155;
+  border-radius: 4px;
+  background: #080d17;
+  cursor: pointer;
+  display: inline-grid;
+  place-content: center;
+  flex-shrink: 0;
+  transition: all 0.15s ease;
+  margin: 0;
+}
+
+.mab-checkbox-row input[type="checkbox"]:hover,
+.mab-country-left input[type="checkbox"]:hover {
+  border-color: #f59e0b;
+}
+
+.mab-checkbox-row input[type="checkbox"]:checked,
+.mab-country-left input[type="checkbox"]:checked {
+  background: #f59e0b;
+  border-color: #f59e0b;
+  box-shadow: 0 0 8px rgba(245, 158, 11, 0.4);
+}
+
+.mab-checkbox-row input[type="checkbox"]:checked::before,
+.mab-country-left input[type="checkbox"]:checked::before {
+  content: "";
+  width: 7px;
+  height: 4px;
+  border-left: 2px solid #090e1a;
+  border-bottom: 2px solid #090e1a;
+  transform: rotate(-45deg) translate(0.5px, -0.5px);
+}
+
+/* ==========================================================================
+   Buttons (Primary Amber, Modern Outlines, Glows)
+   ========================================================================== */
+.mab-btn {
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: 9px;
+  border: none;
+  font-weight: 700;
+  font-size: 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  line-height: 1.25;
+}
+
+.mab-btn:active {
+  transform: translateY(1px);
+}
+
+.mab-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  filter: grayscale(0.5);
+  transform: none !important;
+}
+
+/* Primary Button - Signature Amber / Orange Gradient */
+.mab-btn-primary {
+  background: linear-gradient(135deg, #f59e0b 0%, #ea580c 100%) !important;
+  color: #090e1a !important;
+  font-weight: 800;
+  border: none !important;
+  box-shadow: 0 4px 14px rgba(245, 158, 11, 0.35);
+}
+
+.mab-btn-primary:hover:not(:disabled) {
+  background: linear-gradient(135deg, #fbbf24 0%, #f97316 100%) !important;
+  box-shadow: 0 6px 18px rgba(245, 158, 11, 0.48);
+  transform: translateY(-1px);
+  color: #000000 !important;
+}
+
+/* Secondary Button - Dark Slate Surface */
+.mab-btn-secondary {
+  background: #121c2f;
+  color: #e2e8f0;
+  border: 1px solid #1f2d47;
+}
+
+.mab-btn-secondary:hover:not(:disabled) {
+  background: #1a2842;
+  border-color: #2b3e61;
+  color: #ffffff;
+}
+
+/* Outlined Buttons */
+.mab-btn-outline-cyan {
+  background: rgba(56, 189, 248, 0.08);
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.35);
+}
+
+.mab-btn-outline-cyan:hover:not(:disabled) {
+  background: rgba(56, 189, 248, 0.18);
+  border-color: #38bdf8;
+  box-shadow: 0 4px 12px rgba(56, 189, 248, 0.25);
+  color: #7dd3fc;
+}
+
+.mab-btn-outline-green {
+  background: rgba(34, 197, 94, 0.08);
+  color: #4ade80;
+  border: 1px solid rgba(34, 197, 94, 0.35);
+}
+
+.mab-btn-outline-green:hover:not(:disabled) {
+  background: rgba(34, 197, 94, 0.18);
+  border-color: #22c55e;
+  box-shadow: 0 4px 12px rgba(34, 197, 94, 0.25);
+  color: #86efac;
+}
+
+.mab-btn-outline-danger {
+  background: rgba(239, 68, 68, 0.08);
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.25);
+}
+
+.mab-btn-outline-danger:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.18);
+  border-color: #ef4444;
+  color: #fca5a5;
+}
+
+/* Danger Button */
+.mab-btn-danger {
+  background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%);
+  color: #ffffff;
+  box-shadow: 0 4px 14px rgba(239, 68, 68, 0.35);
+}
+
+.mab-btn-danger:hover:not(:disabled) {
+  background: linear-gradient(135deg, #f87171 0%, #dc2626 100%);
+  box-shadow: 0 6px 18px rgba(239, 68, 68, 0.45);
+}
+
+.mab-btn-sm {
+  padding: 5px 9px;
+  font-size: 11px;
+  width: auto;
+  border-radius: 7px;
+}
+
+.mab-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+/* ==========================================================================
+   Status & Log Box (Persistent Dark Console)
+   ========================================================================== */
+#mab-log-footer {
+  padding: 0 12px 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: #080d17;
+  border-top: 1px solid #1a253c;
+}
+
+.mab-log-title {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.mab-btn-log-action {
+  background: #111a2e;
+  color: #94a3b8;
+  border: 1px solid #1e2b45;
+  border-radius: 5px;
+  padding: 2px 7px;
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.12s;
+}
+
+.mab-btn-log-action:hover {
+  background: #1a2844;
+  color: #f8fafc;
+  border-color: #334155;
+}
+
+.mab-status-box {
+  background: #050810;
+  border: 1px solid #151e30;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  max-height: 105px;
+  overflow-y: auto;
+  color: #94a3b8;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.mab-status-box::-webkit-scrollbar {
+  width: 4px;
+}
+
+.mab-status-box::-webkit-scrollbar-thumb {
+  background: #1a253c;
+  border-radius: 2px;
+}
+
+.mab-log-entry {
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+.mab-log-info { color: #38bdf8; }
+.mab-log-ok   { color: #4ade80; }
+.mab-log-warn { color: #fbbf24; }
+.mab-log-err  { color: #f87171; }

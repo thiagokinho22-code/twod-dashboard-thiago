@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="pt-BR" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TwoD Hub — Central de Automações</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+    <!-- ========================================== -->
+    <!-- TELA DE LOGIN / AUTENTICAÇÃO               -->
+    <!-- ========================================== -->
+    <div id="login-screen" class="login-overlay">
+        <div class="login-card">
+            <div class="login-brand">
+                <div class="brand-logo">
+                    <svg viewBox="0 0 24 24" width="32" height="32" fill="currentColor">
+                        <path d="M13 2L3 14h8l-1 8 11-12h-8l1-8z" />
+                    </svg>
+                </div>
+                <h2>TwoD Hub</h2>
+                <p>Central de Automações e Performance</p>
+            </div>
+
+            <form id="login-form">
+                <div class="form-group">
+                    <label for="login-username">Usuário</label>
+                    <input type="text" id="login-username" placeholder="Digite seu usuário..." required autocomplete="username">
+                </div>
+
+                <div class="form-group">
+                    <label for="login-password">Senha</label>
+                    <input type="password" id="login-password" placeholder="Digite sua senha..." required autocomplete="current-password">
+                </div>
+
+                <div id="login-error" class="login-error-msg twod-hidden">Usuário ou senha incorretos.</div>
+
+                <button type="submit" class="btn btn-primary btn-block">Acessar Painel</button>
+            </form>
+
+            <div class="quick-login-box">
+                <p class="quick-login-title">Acesso Rápido para Teste:</p>
+                <div class="quick-login-chips">
+                    <button type="button" class="chip" onclick="quickLogin('thiago', '123456')">👑 Thiago (Adm)</button>
+                    <button type="button" class="chip" onclick="quickLogin('alexandre', '123456')">⚡ Alexandre</button>
+                    <button type="button" class="chip" onclick="quickLogin('wesley', '123456')">👤 Wesley</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========================================== -->
+    <!-- APLICAÇÃO PRINCIPAL (DASHBOARD)            -->
+    <!-- ========================================== -->
+    <div id="app-container" class="app-layout twod-hidden">
+        
+        <!-- SIDEBAR LATERAL -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="brand-badge">
+                    <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor">
+                        <path d="M13 2L3 14h8l-1 8 11-12h-8l1-8z" />
+                    </svg>
+                    <span>TwoD Hub</span>
+                </div>
+                <span class="badge-version">v1.0 MVP</span>
+            </div>
+
+            <nav class="sidebar-nav">
+                <div class="nav-section-title">PRINCIPAL</div>
+                <button class="nav-item active" data-tab="visao-geral">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline></svg>
+                    <span>Visão Geral</span>
+                </button>
+
+                <div class="nav-section-title">FERRAMENTAS</div>
+                <button class="nav-item" data-tab="criativos">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>
+                    <span>Gerador de Criativos</span>
+                </button>
+
+                <button class="nav-item" data-tab="gerador-campanhas">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="16"></line><line x1="8" y1="12" x2="16" y2="12"></line></svg>
+                    <span>Gerador de Campanhas</span>
+                    <span class="tag-status">Em Breve</span>
+                </button>
+
+                <button class="nav-item" data-tab="duplicador">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                    <span>Duplicador Meta Ads</span>
+                    <span class="tag-status">Em Breve</span>
+                </button>
+
+                <button class="nav-item" data-tab="fun-digital">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h8l-1 8 11-12h-8l1-8z" /></svg>
+                    <span>Fila FUN Digital</span>
+                    <span class="badge-count" id="badge-total-sites">9</span>
+                </button>
+
+                <button class="nav-item" data-tab="wordpress">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><path d="M2 12h20"></path><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
+                    <span>WordPress (Tags/Coment.)</span>
+                    <span class="tag-status">Em Breve</span>
+                </button>
+
+                <div class="nav-section-title admin-only">ADMINISTRAÇÃO</div>
+                <button class="nav-item admin-only" data-tab="usuarios">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+                    <span>Gestão de Usuários</span>
+                </button>
+
+                <button class="nav-item" data-tab="configuracoes">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                    <span>Configurações & Tema</span>
+                </button>
+            </nav>
+
+            <div class="sidebar-footer">
+                <div class="user-profile-pill">
+                    <div class="avatar" id="current-user-avatar">T</div>
+                    <div class="user-info">
+                        <span class="user-name" id="current-user-name">Thiago</span>
+                        <span class="user-role" id="current-user-role">Administrador</span>
+                    </div>
+                    <button class="btn-logout" id="btn-logout" title="Sair da conta">
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
+                    </button>
+                </div>
+            </div>
+        </aside>
+
+        <!-- CONTEÚDO PRINCIPAL (MAIN VIEW) -->
+        <main class="main-content">
+            
+            <!-- BARRA SUPERIOR (HEADER) -->
+            <header class="top-header">
+                <div class="header-title">
+                    <h1 id="page-title">Visão Geral</h1>
+                    <span id="page-subtitle">Status operacional e conexões da central</span>
+                </div>
+
+                <div class="header-actions">
+                    <!-- SELETOR RÁPIDO DE TEMA -->
+                    <div class="theme-quick-toggle" title="Modo de Tema">
+                        <button class="theme-btn" id="theme-btn-light" onclick="setThemeMode('light')" title="Modo Claro">☀️</button>
+                        <button class="theme-btn" id="theme-btn-dark" onclick="setThemeMode('dark')" title="Modo Escuro">🌙</button>
+                        <button class="theme-btn" id="theme-btn-auto" onclick="setThemeMode('auto')" title="Automático por Horário">⏰</button>
+                    </div>
+
+                    <div class="current-time-badge" id="live-clock">--:--:--</div>
+                </div>
+            </header>
+
+            <div class="content-body">
+
+                <!-- ============================================== -->
+                <!-- ABA 1: VISÃO GERAL                             -->
+                <!-- ============================================== -->
+                <section id="tab-visao-geral" class="tab-pane active">
+                    <div class="grid-cards-connections">
+                        <!-- Card OneDrive -->
+                        <div class="status-card">
+                            <div class="status-card-header">
+                                <div class="status-icon bg-blue">
+                                    <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z"/></svg>
+                                </div>
+                                <span class="badge-status status-pending">Aguardando Conexão</span>
+                            </div>
+                            <h3>Microsoft OneDrive</h3>
+                            <p class="status-desc">Pasta local: <code>OneDrive\Documentos\Trabalho</code></p>
+                            <div class="card-footer-info">Pronto para integrar via Microsoft Graph API</div>
+                        </div>
+
+                        <!-- Card Meta Ads API -->
+                        <div class="status-card">
+                            <div class="status-card-header">
+                                <div class="status-icon bg-indigo">
+                                    <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M12 2C6.477 2 2 6.477 2 12c0 4.991 3.657 9.128 8.438 9.879V14.89h-2.54V12h2.54V9.797c0-2.506 1.492-3.89 3.777-3.89 1.094 0 2.238.195 2.238.195v2.46h-1.26c-1.243 0-1.63.771-1.63 1.562V12h2.773l-.443 2.89h-2.33v6.989C18.343 21.129 22 16.99 22 12c0-5.523-4.477-10-10-10z"/></svg>
+                                </div>
+                                <span class="badge-status status-pending">Token Pendente</span>
+                            </div>
+                            <h3>Meta Marketing API</h3>
+                            <p class="status-desc">Criação e duplicação direta de conjuntos sem navegador</p>
+                            <div class="card-footer-info">API Gratuita da Meta pronta para configuração</div>
+                        </div>
+
+                        <!-- Card FUN Digital -->
+                        <div class="status-card">
+                            <div class="status-card-header">
+                                <div class="status-icon bg-emerald">
+                                    <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M13 2L3 14h8l-1 8 11-12h-8l1-8z" /></svg>
+                                </div>
+                                <span class="badge-status status-active">Extensão Ativa</span>
+                            </div>
+                            <h3>FUN Digital (9 Sites)</h3>
+                            <p class="status-desc">Automação de fila desenvolvida por Alexandre (TwoD AutoFill)</p>
+                            <div class="card-footer-info">9 sites configurados na fila diária</div>
+                        </div>
+
+                        <!-- Card WordPress -->
+                        <div class="status-card">
+                            <div class="status-card-header">
+                                <div class="status-icon bg-cyan">
+                                    <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><circle cx="12" cy="12" r="10"></circle></svg>
+                                </div>
+                                <span class="badge-status status-pending">Aguardando WP-API</span>
+                            </div>
+                            <h3>WordPress Blogs</h3>
+                            <p class="status-desc">Rede de sites (Simplificandocomcafe, Twod, Kiuvix...)</p>
+                            <div class="card-footer-info">Ajuste de tags e comentários em massa</div>
+                        </div>
+                    </div>
+
+                    <!-- Resumo Rápido e Boas-Vindas -->
+                    <div class="welcome-box">
+                        <div class="welcome-text">
+                            <h2>Bem-vindo à nova central da TwoD! 🚀</h2>
+                            <p>Este painel foi estruturado para substituir o uso de executáveis locais, automatizar as duplicações do Meta Ads em segundos e centralizar os comandos da equipe.</p>
+                            <div class="action-buttons-row">
+                                <button class="btn btn-primary" onclick="switchTab('criativos')">Abrir Gerador de Criativos</button>
+                                <button class="btn btn-secondary" onclick="switchTab('fun-digital')">Ver Fila FUN Digital</button>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- ============================================== -->
+                <!-- ABA 2: GERADOR DE CRIATIVOS (TWOD STUDIO)      -->
+                <!-- ============================================== -->
+                <section id="tab-criativos" class="tab-pane">
+                    <div class="panel-card">
+                        <div class="panel-card-header">
+                            <div>
+                                <h2>🎬 TWOD Criativos Studio V2 (Nuvem)</h2>
+                                <p>Renderização diária de vídeos para Feed (1-3) e Reels (4-6) via FFmpeg e OneDrive</p>
+                            </div>
+                            <span class="badge-tag">Motor Python</span>
+                        </div>
+
+                        <div class="form-grid-2">
+                            <div class="form-group">
+                                <label>Data dos Criativos</label>
+                                <input type="date" id="creative-date" value="2026-11-12">
+                            </div>
+
+                            <div class="form-group">
+                                <label>Bloco Diário</label>
+                                <select id="creative-block">
+                                    <option value="bloco-a">Bloco A (3 Nichos)</option>
+                                    <option value="bloco-b">Bloco B (3 Nichos)</option>
+                                    <option value="ambos">Ambos (Todos os Nichos do Dia)</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Pastas Monitoradas no OneDrive:</label>
+                            <div class="folder-path-display">
+                                <div>📁 Áudios: <code>C:\Users\thiag\OneDrive\Documentos\Trabalho\Arquivos de Áudio</code></div>
+                                <div>📁 Vídeos: <code>C:\Users\thiag\OneDrive\Documentos\Trabalho\Vídeos</code></div>
+                            </div>
+                        </div>
+
+                        <div class="render-preview-box">
+                            <div class="render-status-title">Status da Fila de Renderização:</div>
+                            <div class="queue-status-indicator">
+                                <span class="dot-idle"></span> Pronto para processamento na nuvem.
+                            </div>
+                            <p class="text-muted">Ao iniciar, o servidor baixa os arquivos do OneDrive, aplica o FFmpeg com corte suave e sobe os 6 MP4s prontos de volta.</p>
+                        </div>
+
+                        <div class="panel-actions">
+                            <button class="btn btn-success btn-lg" onclick="alert('Simulação: Motor FFmpeg pronto para ser conectado ao servidor!')">
+                                🚀 Iniciar Renderização do Dia
+                            </button>
+                            <button class="btn btn-outline" onclick="alert('Verificando integridade das pastas no OneDrive...')">
+                                🔍 Verificar Arquivos do OneDrive
+                            </button>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- ============================================== -->
+                <!-- ABA 3: GERADOR DE CAMPANHAS (NOVO)             -->
+                <!-- ============================================== -->
+                <section id="tab-gerador-campanhas" class="tab-pane">
+                    <div class="panel-card construction-card">
+                        <div class="construction-icon">🚀</div>
+                        <h2>Gerador Rápido de Campanhas Meta Ads</h2>
+                        <span class="badge-wip">EM CONSTRUÇÃO</span>
+                        <p>Diga adeus ao Gerenciador de Anúncios pesado do Facebook! Esta ferramenta permitirá subir novas campanhas, definir públicos, orçamento e criativos diretamente por aqui em segundos através da Marketing API oficial.</p>
+                        
+                        <div class="mock-fields-preview">
+                            <div class="mock-input-row">
+                                <span class="mock-label">Conta de Anúncios:</span>
+                                <span class="mock-val">TwoD Company (BM Principal)</span>
+                            </div>
+                            <div class="mock-input-row">
+                                <span class="mock-label">Objetivo:</span>
+                                <span class="mock-val">Tráfego / Vendas</span>
+                            </div>
+                            <div class="mock-input-row">
+                                <span class="mock-label">Orçamento Diário Padrão:</span>
+                                <span class="mock-val">$1.00 USD por Conjunto</span>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- ============================================== -->
+                <!-- ABA 4: DUPLICADOR META ADS                     -->
+                <!-- ============================================== -->
+                <section id="tab-duplicador" class="tab-pane">
+                    <div class="panel-card construction-card">
+                        <div class="construction-icon">🔄</div>
+                        <h2>Duplicador em Massa por Blocos de Países</h2>
+                        <span class="badge-wip">EM CONSTRUÇÃO</span>
+                        <p>Substituirá a extensão do Chrome que clica nos botões do Facebook. A API oficial duplicará 50 conjuntos em 2 segundos com orçamento de $1, anunciante verificado, tags UTM e cópias traduzidas.</p>
+
+                        <div class="blocks-preview-grid">
+                            <div class="block-preview-pill">Bloco 1 (Países Tier 1)</div>
+                            <div class="block-preview-pill">Bloco 2 (América Latina - ES)</div>
+                            <div class="block-preview-pill">Bloco 3 (Europa)</div>
+                            <div class="block-preview-pill">Bloco 4 (Global / Expansão)</div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- ============================================== -->
+                <!-- ABA 5: FILA FUN DIGITAL (9 SITES + GESTÃO)     -->
+                <!-- ============================================== -->
+                <section id="tab-fun-digital" class="tab-pane">
+                    <div class="panel-card">
+                        <div class="panel-card-header">
+                            <div>
+                                <h2>⚡ Fila FUN Digital — Gestão de Sites</h2>
+                                <p>Gerencie os sites atendidos pela automação do Alexandre. Oculte projetos em teste (Beta) para não poluir a tela operacional.</p>
+                            </div>
+                            <button class="btn btn-primary" onclick="openAddSiteModal()">+ Adicionar Novo Site</button>
+                        </div>
+
+                        <div class="fun-filters-bar">
+                            <label class="switch-toggle">
+                                <input type="checkbox" id="toggle-show-hidden" onchange="renderSitesTable()">
+                                <span class="slider"></span>
+                                <span class="switch-label">Exibir sites ocultos / em teste (Beta)</span>
+                            </label>
+                            <span class="text-muted" id="sites-counter-text">Carregando...</span>
+                        </div>
+
+                        <div class="table-responsive">
+                            <table class="twod-table">
+                                <thead>
+                                    <tr>
+                                        <th>Ordem</th>
+                                        <th>Nome do Site</th>
+                                        <th>Idioma</th>
+                                        <th>Índice FUN</th>
+                                        <th>Status / Visibilidade</th>
+                                        <th>Ações</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="sites-table-body">
+                                    <!-- Preenchido via JavaScript -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- ============================================== -->
+                <!-- ABA 6: WORDPRESS (TAGS & COMENTÁRIOS)          -->
+                <!-- ============================================== -->
+                <section id="tab-wordpress" class="tab-pane">
+                    <div class="panel-card construction-card">
+                        <div class="construction-icon">📝</div>
+                        <h2>Ajuste em Massa no WordPress</h2>
+                        <span class="badge-wip">EM CONSTRUÇÃO</span>
+                        <p>Integração com a WP REST API para aplicar tags, ativar/desativar comentários e atualizar taxonomias em todos os posts da rede (Simplificandocomcafe, Twod, Kiuvix, etc.) sem abrir o painel /wp-admin de cada um.</p>
+                    </div>
+                </section>
+
+                <!-- ============================================== -->
+                <!-- ABA 7: GESTÃO DE USUÁRIOS (ADMIN ONLY)         -->
+                <!-- ============================================== -->
+                <section id="tab-usuarios" class="tab-pane admin-only">
+                    <div class="panel-card">
+                        <div class="panel-card-header">
+                            <div>
+                                <h2>👥 Gestão de Usuários da Equipe</h2>
+                                <p>Cadastre auxiliares, altere senhas e defina permissões de acesso às ferramentas</p>
+                            </div>
+                            <button class="btn btn-primary" onclick="openAddUserModal()">+ Novo Usuário</button>
+                        </div>
+
+                        <div class="table-responsive">
+                            <table class="twod-table">
+                                <thead>
+                                    <tr>
+                                        <th>Nome / Usuário</th>
+                                        <th>Cargo</th>
+                                        <th>Tema Preferido</th>
+                                        <th>Último Acesso</th>
+                                        <th>Ações</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="users-table-body">
+                                    <!-- Preenchido via JavaScript -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- ============================================== -->
+                <!-- ABA 8: CONFIGURAÇÕES & TEMA                    -->
+                <!-- ============================================== -->
+                <section id="tab-configuracoes" class="tab-pane">
+                    <div class="panel-card">
+                        <h2>⚙️ Preferências do Usuário & Aparência</h2>
+                        <p>Configure como a dashboard se comporta para o seu perfil.</p>
+
+                        <div class="settings-section">
+                            <h3>Tema & Agendamento de Horário</h3>
+                            <div class="theme-picker-group">
+                                <label class="radio-card">
+                                    <input type="radio" name="theme-choice" value="light" onchange="updateThemeSettings(this.value)">
+                                    <div class="radio-card-content">
+                                        <span class="icon">☀️</span>
+                                        <strong>Modo Claro</strong>
+                                        <p>Cores claras o tempo todo</p>
+                                    </div>
+                                </label>
+
+                                <label class="radio-card">
+                                    <input type="radio" name="theme-choice" value="dark" onchange="updateThemeSettings(this.value)">
+                                    <div class="radio-card-content">
+                                        <span class="icon">🌙</span>
+                                        <strong>Modo Escuro</strong>
+                                        <p>Tema escuro confortável o tempo todo</p>
+                                    </div>
+                                </label>
+
+                                <label class="radio-card">
+                                    <input type="radio" name="theme-choice" value="auto" onchange="updateThemeSettings(this.value)">
+                                    <div class="radio-card-content">
+                                        <span class="icon">⏰</span>
+                                        <strong>Programar por Horário</strong>
+                                        <p>Claro de dia, escuro à noite</p>
+                                    </div>
+                                </label>
+                            </div>
+
+                            <!-- Campos de Horário para o Modo Automático -->
+                            <div id="schedule-controls" class="schedule-inputs-box twod-hidden">
+                                <h4>Defina o período do Modo Claro:</h4>
+                                <div class="schedule-inputs-row">
+                                    <div class="form-group">
+                                        <label>Início (Modo Claro):</label>
+                                        <input type="time" id="schedule-start" value="06:00" onchange="saveScheduleTimes()">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Término (Mudar para Escuro):</label>
+                                        <input type="time" id="schedule-end" value="18:00" onchange="saveScheduleTimes()">
+                                    </div>
+                                </div>
+                                <span class="help-text">Ex: Das 06:00 às 18:00 o sistema ficará Claro. Fora desse intervalo, mudará automaticamente para Escuro.</span>
+                            </div>
+                        </div>
+
+                        <div class="settings-section">
+                            <h3>Segurança da Conta</h3>
+                            <div class="form-grid-2">
+                                <div class="form-group">
+                                    <label>Alterar Minha Senha</label>
+                                    <input type="password" id="change-pwd-input" placeholder="Nova senha...">
+                                </div>
+                                <div class="form-group" style="align-self: flex-end;">
+                                    <button class="btn btn-secondary" onclick="changeMyPassword()">Salvar Nova Senha</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+            </div>
+        </main>
+    </div>
+
+    <!-- ============================================== -->
+    <!-- MODAL: ADICIONAR SITE (FILA FUN DIGITAL)       -->
+    <!-- ============================================== -->
+    <div id="modal-site" class="modal-overlay twod-hidden">
+        <div class="modal-card">
+            <h3>Adicionar Novo Site à Fila</h3>
+            <p class="text-muted">Cadastre o nome e idioma para a extensão considerar na fila de criativos.</p>
+            <form id="form-add-site" onsubmit="saveNewSite(event)">
+                <div class="form-group">
+                    <label>Nome do Site</label>
+                    <input type="text" id="site-name-input" placeholder="Ex: NovoBlog" required>
+                </div>
+                <div class="form-group">
+                    <label>Idioma do Nicho</label>
+                    <select id="site-lang-input">
+                        <option value="pt">Português (PT-BR)</option>
+                        <option value="es">Espanhol (ES)</option>
+                        <option value="en">Inglês (EN)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Índice / Posição na FUN Digital</label>
+                    <input type="number" id="site-index-input" value="10" required>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-outline" onclick="closeModal('modal-site')">Cancelar</button>
+                    <button type="submit" class="btn btn-primary">Salvar Site</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- ============================================== -->
+    <!-- MODAL: ADICIONAR USUÁRIO                       -->
+    <!-- ============================================== -->
+    <div id="modal-user" class="modal-overlay twod-hidden">
+        <div class="modal-card">
+            <h3>Cadastrar Novo Usuário da Equipe</h3>
+            <p class="text-muted">Crie credenciais de acesso para um novo colaborador ou auxiliar.</p>
+            <form id="form-add-user" onsubmit="saveNewUser(event)">
+                <div class="form-group">
+                    <label>Nome do Usuário (Login)</label>
+                    <input type="text" id="new-user-name" placeholder="Ex: joao" required>
+                </div>
+                <div class="form-group">
+                    <label>Senha Provisória</label>
+                    <input type="password" id="new-user-pwd" placeholder="Digite uma senha..." required>
+                </div>
+                <div class="form-group">
+                    <label>Cargo / Permissão</label>
+                    <select id="new-user-role">
+                        <option value="Operador">Auxiliar / Operador</option>
+                        <option value="Administrador">Administrador</option>
+                    </select>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-outline" onclick="closeModal('modal-user')">Cancelar</button>
+                    <button type="submit" class="btn btn-primary">Cadastrar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
+

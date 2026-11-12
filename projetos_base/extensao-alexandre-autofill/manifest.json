@@ -1,0 +1,49 @@
+{
+  "manifest_version": 3,
+  "name": "TwoD AutoFill - FUN, Meta Ads & WordPress",
+  "version": "1.1.0",
+  "description": "Autopreenchimento para FUN Digital, Meta Ads e ajuste automático de Tags e Comentários no WordPress",
+  "icons": {
+    "16": "icon16.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icon16.png",
+      "48": "icon48.png",
+      "128": "icon128.png"
+    }
+  },
+  "permissions": [
+    "storage",
+    "clipboardWrite"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "*://app.fundigital.net.br/*",
+        "*://adsmanager.facebook.com/*",
+        "*://web.facebook.com/adsmanager/*",
+        "*://facebook.com/adsmanager/*",
+        "*://*.facebook.com/adsmanager/*",
+        "*://*/wp-admin/*",
+        "*://*.simplificandocomcafe.com/*",
+        "*://*.twodcompany.com/*",
+        "*://*.f4rol.com/*",
+        "*://*.kiocom.com/*",
+        "*://*.kiuvix.com/*",
+        "*://*.thehatsune.com/*"
+      ],
+      "js": [
+        "posts_data.js",
+        "content.js"
+      ],
+      "css": [
+        "styles.css"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}
