@@ -2,22 +2,27 @@ import os
 import json
 import mimetypes
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from urllib.parse import urlparse, parse_qs, unquote
+from urllib.parse import urlparse, unquote
 
-# ========================================================
-# TWOD HUB — BACKEND REST API (LEITOR NATIVO DO ONEDRIVE)
-# ========================================================
+# Diretório base do dashboard (onde ficam index.html, styles.css, app.js)
+DASHBOARD_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 # Auto-detecta a pasta do OneDrive de Trabalho
 DEFAULT_WORK_DIR = os.path.join(os.path.expanduser("~"), "OneDrive", "Documentos", "Trabalho")
 if not os.path.exists(DEFAULT_WORK_DIR):
-    # Fallback para o caminho absoluto padrão
     DEFAULT_WORK_DIR = r"C:\Users\thiag\OneDrive\Documentos\Trabalho"
 
 PORT = int(os.environ.get("PORT", 8000))
 
-def scan_onedrive_folders(base_path=DEFAULT_WORK_DIR):
-    """Varre as pastas de Áudios e Vídeos no OneDrive e retorna o mapa completo de nichos."""
+# Cache em memória para não ficar lendo o disco toda vez
+NICHES_CACHE = None
+
+def scan_onedrive_folders(base_path=DEFAULT_WORK_DIR, force_reload=False):
+    """Varre as pastas de Áudios e Vídeos no OneDrive com cache em memória."""
+    global NICHES_CACHE
+    if NICHES_CACHE is not None and not force_reload:
+        return NICHES_CACHE
+
     audios_dir = os.path.join(base_path, "Arquivos de Áudio")
     videos_dir = os.path.join(base_path, "Vídeos")
 
@@ -88,7 +93,8 @@ def scan_onedrive_folders(base_path=DEFAULT_WORK_DIR):
             n["status"] = "pending"
 
     sorted_niches = sorted(list(niches.values()), key=lambda x: x["name"])
-    return sorted_niches
+    NICHES_CACHE = sorted_niches
+    return NICHES_CACHE
 
 class APIHandler(BaseHTTPRequestHandler):
     def _send_json(self, data, status=200):
@@ -122,6 +128,9 @@ class APIHandler(BaseHTTPRequestHandler):
             while chunk := f.read(64 * 1024):
                 self.wfile.write(chunk)
 
+    def do_HEAD(self):
+        self.do_GET()
+
     def do_OPTIONS(self):
         self.send_response(200)
         self.send_header("Access-Control-Allow-Origin", "*")
@@ -133,29 +142,33 @@ class APIHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = unquote(parsed.path)
 
-        # 1. Status do Backend
+        # --------------------------------------------------------
+        # ROTAS DA API
+        # --------------------------------------------------------
         if path == "/api/status":
             exists = os.path.exists(DEFAULT_WORK_DIR)
             self._send_json({
                 "status": "online",
                 "backend": "Python 3.11",
                 "onedrive_path": DEFAULT_WORK_DIR,
-                "onedrive_accessible": exists
+                "onedrive_accessible": exists,
+                "cached": NICHES_CACHE is not None
             })
 
-        # 2. Rota Principal: Listagem de Nichos e Arquivos via API
         elif path == "/api/onedrive/niches":
             try:
-                niches = scan_onedrive_folders(DEFAULT_WORK_DIR)
+                # Se passar ?reload=true força revarredura
+                reload_force = "reload=true" in parsed.query
+                niches = scan_onedrive_folders(DEFAULT_WORK_DIR, force_reload=reload_force)
                 self._send_json({
                     "success": True,
                     "count": len(niches),
+                    "cached": not reload_force,
                     "niches": niches
                 })
             except Exception as e:
                 self._send_json({"success": False, "error": str(e)}, 500)
 
-        # 3. Streaming de Áudio: /api/audio/<niche>/<filename>
         elif path.startswith("/api/audio/"):
             parts = path.replace("/api/audio/", "").split("/")
             if len(parts) >= 2:
@@ -166,7 +179,6 @@ class APIHandler(BaseHTTPRequestHandler):
             else:
                 self._send_json({"error": "Caminho de áudio inválido"}, 400)
 
-        # 4. Streaming de Vídeo: /api/video/<niche>/<lang>/<filename>
         elif path.startswith("/api/video/"):
             parts = path.replace("/api/video/", "").split("/")
             if len(parts) >= 3:
@@ -178,13 +190,22 @@ class APIHandler(BaseHTTPRequestHandler):
             else:
                 self._send_json({"error": "Caminho de vídeo inválido"}, 400)
 
+        # --------------------------------------------------------
+        # SERVIR O FRONTEND DA DASHBOARD DIRETAMENTE NO LOCALHOST:8000
+        # --------------------------------------------------------
+        elif path == "/" or path == "/index.html":
+            self._serve_file(os.path.join(DASHBOARD_DIR, "index.html"))
+
+        elif path in ["/styles.css", "/app.js", "/README.md"]:
+            self._serve_file(os.path.join(DASHBOARD_DIR, path.lstrip("/")))
+
         else:
             self._send_json({"error": "Rota não encontrada"}, 404)
 
 def run():
     server_address = ("127.0.0.1", PORT)
     httpd = HTTPServer(server_address, APIHandler)
-    print(f"🚀 TwoD Backend API rodando em http://localhost:{PORT}")
+    print(f"🚀 TwoD Hub Dashboard & API rodando em http://localhost:{PORT}")
     print(f"📁 Monitorando OneDrive em: {DEFAULT_WORK_DIR}")
     httpd.serve_forever()
 
