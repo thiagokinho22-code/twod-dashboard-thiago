@@ -6,6 +6,6 @@ echo ========================================================
 echo   TwoD Hub - Backend REST API (Python 3.11)
 echo ========================================================
 echo.
-set "PATH=%LOCALAPPDATA%\Programs\Python311;%PATH%"
+set "PATH=%LOCALAPPDATA%\Python\bin;%LOCALAPPDATA%\Programs\Python311;%PATH%"
 python backend\server.py
 pause

@@ -81,7 +81,7 @@ users = users.map(u => {
     return u;
 });
 if (migrated) {
-    try { localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users)); } catch (e) {}
+    try { localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users)); } catch (e) { }
 }
 
 let sites = [...DEFAULT_SITES];
@@ -98,11 +98,11 @@ try {
 let currentUser = { ...DEFAULT_USERS[0] }; // Login padrão direto como Thiago (Administrador)
 
 function saveUsers() {
-    try { localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users)); } catch (e) {}
+    try { localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users)); } catch (e) { }
 }
 
 function saveSites() {
-    try { localStorage.setItem(STORAGE_KEYS.SITES, JSON.stringify(sites)); } catch (e) {}
+    try { localStorage.setItem(STORAGE_KEYS.SITES, JSON.stringify(sites)); } catch (e) { }
 }
 
 // ========================================================
@@ -120,7 +120,10 @@ function showLogin() {
 function showApp() {
     const loginEl = document.getElementById('login-screen');
     const appEl = document.getElementById('app-container');
-    if (loginEl) loginEl.style.display = 'none';
+    if (loginEl) {
+        loginEl.style.display = 'none';
+        loginEl.classList.add('twod-hidden');
+    }
     if (appEl) {
         appEl.classList.remove('twod-hidden');
         appEl.style.display = 'flex';
@@ -138,10 +141,10 @@ function showApp() {
     // Permissões de administrador ativas
     document.querySelectorAll('.admin-only').forEach(el => el.classList.remove('twod-hidden'));
 
-    try { applyUserTheme(); } catch (e) {}
-    try { renderSitesTable(); } catch (e) {}
-    try { renderUsersTable(); } catch (e) {}
-    try { initTabs(); } catch (e) {}
+    try { applyUserTheme(); } catch (e) { }
+    try { renderSitesTable(); } catch (e) { }
+    try { renderUsersTable(); } catch (e) { }
+    try { initTabs(); } catch (e) { }
 }
 
 function handleLogin(e) {
@@ -150,8 +153,10 @@ function handleLogin(e) {
         e.stopPropagation();
     }
     try {
-        const usernameInput = (document.getElementById('login-username').value || '').trim().toLowerCase();
-        const passwordInput = (document.getElementById('login-password').value || '');
+        const uEl = document.getElementById('login-username');
+        const pEl = document.getElementById('login-password');
+        const usernameInput = (uEl ? uEl.value : '').trim().toLowerCase();
+        const passwordInput = (pEl ? pEl.value : '');
 
         if (!usernameInput || !passwordInput) {
             alert('Por favor, digite o usuário e a senha.');
@@ -176,7 +181,7 @@ function handleLogin(e) {
             user.lastLogin = 'Agora';
             saveUsers();
             currentUser = user;
-            try { localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(currentUser)); } catch (e) {}
+            try { localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(currentUser)); } catch (e) { }
             if (errBox) errBox.classList.add('twod-hidden');
             showApp();
         } else {
@@ -190,6 +195,7 @@ function handleLogin(e) {
     return false;
 }
 
+const loginForm = document.getElementById('login-form');
 if (loginForm) {
     loginForm.addEventListener('submit', handleLogin);
 }
@@ -329,7 +335,8 @@ const tabTitles = {
 
 function initTabs() {
     document.querySelectorAll('.nav-item').forEach(btn => {
-        btn.addEventListener('click', () => {
+        btn.addEventListener('click', (e) => {
+            if (e && e.preventDefault) e.preventDefault();
             const tabId = btn.getAttribute('data-tab');
             switchTab(tabId);
         });
@@ -340,8 +347,11 @@ function initTabs() {
 }
 
 function switchTab(tabId) {
+    if (!tabId) return;
+
     // Permissão: se tentar abrir usuário sem ser admin, volta para visão geral
-    if (tabId === 'usuarios' && currentUser.role !== 'Administrador') {
+    const isAdmin = currentUser && currentUser.role === 'Administrador';
+    if (tabId === 'usuarios' && !isAdmin) {
         tabId = 'visao-geral';
     }
 
@@ -356,10 +366,12 @@ function switchTab(tabId) {
 
     // Atualiza títulos do cabeçalho
     const meta = tabTitles[tabId] || { title: 'TwoD Hub', subtitle: '' };
-    document.getElementById('page-title').innerText = meta.title;
-    document.getElementById('page-subtitle').innerText = meta.subtitle;
+    const titleEl = document.getElementById('page-title');
+    const subEl = document.getElementById('page-subtitle');
+    if (titleEl) titleEl.innerText = meta.title;
+    if (subEl) subEl.innerText = meta.subtitle;
 
-    localStorage.setItem(STORAGE_KEYS.ACTIVE_TAB, tabId);
+    try { localStorage.setItem(STORAGE_KEYS.ACTIVE_TAB, tabId); } catch (e) { }
 }
 
 // ========================================================
@@ -764,7 +776,7 @@ async function scanOneDriveFiles() {
             for await (const [nicheFolder, nicheEntry] of videosHandle.entries()) {
                 if (nicheEntry.kind === 'directory') {
                     const niche = getOrCreateNiche(nicheFolder);
-                    
+
                     // Varre subpastas de idiomas (Português, Espanhol, Inglês, etc.)
                     for await (const [langFolder, langEntry] of nicheEntry.entries()) {
                         if (langEntry.kind === 'directory') {
@@ -785,7 +797,7 @@ async function scanOneDriveFiles() {
 
                                     if (isFeed) niche.videos.feed.push(videoItem);
                                     else if (isReels) niche.videos.reels.push(videoItem);
-                                    
+
                                     oneDriveData.videoFilesMap.set(`${nicheFolder}_${langFolder}_${videoName}`, videoEntry);
                                 }
                             }
@@ -1094,8 +1106,6 @@ document.addEventListener('DOMContentLoaded', () => {
     checkSession();
     checkSavedOneDriveHandle();
 });
-    checkSession();
-    checkSavedOneDriveHandle();
-});
+
 
 
