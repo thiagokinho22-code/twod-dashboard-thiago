@@ -25,6 +25,8 @@ O projeto foi retomado a partir de `PROJETO_CONTEXTO.md`.
   2. Baixou e configurou o Git localmente em modo portátil para dispensar privilégios de administrador.
   3. Criou o arquivo `.gitignore` (ignorando `.exe` pesados e arquivos temporários).
   4. Inicializou o repositório Git no branch `main` e executou o primeiro commit com todos os arquivos do TwoD Hub, projetos base e histórico.
+  5. Vinculou o repositório remoto `https://github.com/thiagokinho22-code/twod-dashboard-thiago.git`.
+  6. Criou o script facilitador `enviar_github.bat` para autorização direta do GitHub via navegador no Windows.
 
 ---
 *(Este arquivo será atualizado continuamente conforme avançamos no desenvolvimento)*
