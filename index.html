@@ -253,11 +253,14 @@
                                 </div>
                             </div>
                             <div class="onedrive-connect-actions">
-                                <button type="button" class="btn btn-primary" id="btn-connect-onedrive" onclick="connectOneDriveFolder()">
-                                    📂 Conectar Pasta OneDrive
+                                <button type="button" class="btn btn-primary" id="btn-auth-onedrive-cloud" onclick="connectOneDriveCloudAPI()">
+                                    ☁️ Conectar OneDrive Nuvem (API)
+                                </button>
+                                <button type="button" class="btn btn-outline" id="btn-connect-onedrive" onclick="connectOneDriveFolder()">
+                                    📂 Pasta Local
                                 </button>
                                 <button type="button" class="btn btn-outline" id="btn-rescan-onedrive" onclick="scanOneDriveFiles()" style="display: none;">
-                                    🔄 Re-escanear Pastas
+                                    🔄 Re-escanear
                                 </button>
                                 <input type="file" id="onedrive-fallback-input" webkitdirectory directory multiple style="display: none;" onchange="handleFallbackDirectoryUpload(event)">
                             </div>
@@ -871,7 +874,7 @@
         </div>
     </div>
 
-    <script src="app.js?v=6.3"></script>
+    <script src="app.js?v=6.4"></script>
 </body>
 </html>
 

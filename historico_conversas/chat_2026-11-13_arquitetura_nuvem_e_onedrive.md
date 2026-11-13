@@ -40,6 +40,11 @@
 - **Agente:**
   1. Reativou a tela de login em `index.html` e ajustou `checkSession()`/`showApp()` em `app.js?v=6.3` para exigir login quando sem sessão e manter o usuário logado no `localStorage` ao atualizar a página.
   2. Validou no Chrome headless (11 checagens: bloqueio inicial, erro de senha, login com Enter, persistência no `localStorage`, logout e permissões de Alexandre vs. Thiago).
+- **Thiago:** Criou a conta Azure, concluiu o App Registration (`TwoD Hub OneDrive`) e salvou as credenciais na pasta do projeto (`TwoD Hub OneDrive.txt`).
+- **Agente:**
+  1. Protegeu imediatamente as credenciais adicionando `TwoD Hub OneDrive.txt` e `backend/.graph_cache.json` ao `.gitignore` (garantindo que nunca vão para o repositório público do GitHub) e moveu `ONEDRIVE_CLIENT_ID` e `ONEDRIVE_CLIENT_SECRET` para `backend/.env`.
+  2. Implementou a integração completa **Microsoft Graph API + OAuth2** em `backend/server.py` (`/api/onedrive/auth`, `/api/onedrive/callback`, `/api/onedrive/graph-status`, `/api/onedrive/niches`, `/api/graph/file/...`), utilizando `ThreadingHTTPServer`, cache local/memória e pronto para nuvem (`0.0.0.0` via `PORT`).
+  3. Adicionou o botão **☁️ Autorizar OneDrive Nuvem** na aba **Gerador de Criativos** (`index.html` e `app.js?v=6.4`) e subiu o servidor local atualizado.
 
 ---
 *(Este arquivo será atualizado continuamente conforme avançamos no desenvolvimento)*

@@ -630,9 +630,10 @@ function deleteUser(username) {
 // INTEGRAÇÃO ONEDRIVE & LEITOR DE ARQUIVOS NATIVO
 // ========================================================
 
-const API_BASE_URL = (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'))
-    ? window.location.origin
-    : 'http://localhost:8000';
+const API_BASE_URL = localStorage.getItem('twod_backend_url') ||
+    ((typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'))
+        ? window.location.origin
+        : 'http://localhost:8000');
 
 let oneDriveHandle = null;
 let oneDriveData = {
@@ -642,15 +643,41 @@ let oneDriveData = {
     videoFilesMap: new Map()  // chave: `${nicheName}_${num}` -> File/Handle
 };
 
+async function connectOneDriveCloudAPI() {
+    try {
+        const res = await fetch(`${API_BASE_URL}/api/onedrive/auth?mode=json`);
+        const data = await res.json();
+        if (data.success && data.auth_url) {
+            window.location.href = data.auth_url;
+        } else {
+            alert('Erro ao iniciar autorização Microsoft: ' + (data.error || 'Verifique o backend/.env'));
+        }
+    } catch (e) {
+        alert('O servidor backend precisa estar ativo em http://localhost:8000 (ou na nuvem) para iniciar o login Microsoft.');
+    }
+}
+
 // 1. Conexão Automática via API Backend
 async function checkBackendAPI() {
     try {
         const res = await fetch(`${API_BASE_URL}/api/status`);
         if (!res.ok) return false;
         const data = await res.json();
+
+        const cloudBtn = document.getElementById('btn-auth-onedrive-cloud');
+        if (cloudBtn) {
+            if (data.graph_connected) {
+                cloudBtn.className = 'btn btn-outline';
+                cloudBtn.innerText = '✅ Nuvem OneDrive Autorizada';
+            } else if (data.graph_configured) {
+                cloudBtn.className = 'btn btn-primary';
+                cloudBtn.innerText = '☁️ Autorizar OneDrive Nuvem';
+            }
+        }
+
         if (data.status === 'online' && data.onedrive_accessible) {
             console.log('✅ Backend API detectado:', data);
-            await loadNichesFromAPI();
+            await loadNichesFromAPI(false, data);
             return true;
         }
     } catch (e) {
@@ -659,33 +686,38 @@ async function checkBackendAPI() {
     return false;
 }
 
-async function loadNichesFromAPI() {
+async function loadNichesFromAPI(forceReload = false, statusData = null) {
     const badge = document.getElementById('onedrive-connection-badge');
     const folderTitle = document.getElementById('onedrive-folder-title');
     const folderDesc = document.getElementById('onedrive-folder-desc');
-    const connectActions = document.querySelector('.onedrive-connect-actions');
     const rescanBtn = document.getElementById('btn-rescan-onedrive');
+
+    const isGraph = statusData && statusData.mode === 'graph_cloud';
 
     if (badge) {
         badge.className = 'badge-tag';
         badge.style.color = '#10b981';
-        badge.textContent = `🟢 Backend API Conectado (127.0.0.1:8000)`;
+        badge.textContent = isGraph ? `☁️ OneDrive Graph API (24/7)` : `🟢 Backend API Conectado`;
     }
-    if (folderTitle) folderTitle.textContent = `OneDrive Nuvem (via Backend API)`;
+    if (folderTitle) folderTitle.textContent = isGraph ? `OneDrive Microsoft Graph API` : `OneDrive (via Backend API)`;
     if (folderDesc) folderDesc.textContent = `Carregando nichos via API...`;
     if (rescanBtn) {
         rescanBtn.style.display = 'inline-flex';
-        rescanBtn.onclick = () => loadNichesFromAPI();
+        rescanBtn.onclick = () => loadNichesFromAPI(true, statusData);
     }
 
     try {
-        const res = await fetch(`${API_BASE_URL}/api/onedrive/niches`);
+        const url = `${API_BASE_URL}/api/onedrive/niches${forceReload ? '?reload=true' : ''}`;
+        const res = await fetch(url);
         const json = await res.json();
         if (json.success && json.niches) {
             oneDriveData.niches = json.niches;
             oneDriveData.isApiMode = true;
             renderOneDriveStatsAndTable();
-            if (folderDesc) folderDesc.textContent = `Sincronizado via API! ${json.count} nichos disponíveis no OneDrive.`;
+            if (badge && json.source === 'graph') {
+                badge.textContent = `☁️ OneDrive Graph API (${json.count} nichos)`;
+            }
+            if (folderDesc) folderDesc.textContent = `Sincronizado via API (${json.source === 'graph' ? 'Microsoft Nuvem' : 'Pasta Local'})! ${json.count} nichos disponíveis.`;
         }
     } catch (e) {
         console.error('Erro ao carregar nichos da API:', e);
@@ -2460,6 +2492,7 @@ window.setThemeMode = setThemeMode;
 window.openAddSiteModal = openAddSiteModal;
 window.closeModal = closeModal;
 window.openAddUserModal = openAddUserModal;
+window.connectOneDriveCloudAPI = connectOneDriveCloudAPI;
 window.connectOneDriveFolder = connectOneDriveFolder;
 window.scanOneDriveFiles = scanOneDriveFiles;
 window.playAudio = playAudio;
