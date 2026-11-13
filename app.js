@@ -6,7 +6,9 @@ const STORAGE_KEYS = {
     USERS: 'twod_users_db',
     CURRENT_USER: 'twod_logged_user',
     SITES: 'twod_fun_sites',
-    ACTIVE_TAB: 'twod_active_tab'
+    ACTIVE_TAB: 'twod_active_tab',
+    META_TOKEN: 'twod_meta_token',
+    META_ACCOUNT: 'twod_meta_default_account'
 };
 
 // 1. DADOS INICIAIS (SEED) SE NÃO EXISTIREM
@@ -407,7 +409,11 @@ function switchTab(tabId) {
     if (titleEl) titleEl.innerText = meta.title;
     if (subEl) subEl.innerText = meta.subtitle;
 
-    try { localStorage.setItem(STORAGE_KEYS.ACTIVE_TAB, tabId); } catch (e) { }
+    if (tabId === 'duplicador') {
+        onDuplicatorTabOpened();
+    } else if (tabId === 'configuracoes') {
+        onSettingsTabOpened();
+    }
 }
 
 // ========================================================
@@ -1135,6 +1141,1006 @@ function changeMyPassword() {
     alert('Sua senha foi alterada com sucesso!');
 }
 
+// ========================================================
+// META MARKETING API & DUPLICADOR POR BLOCOS DE PAÍSES
+// ========================================================
+
+const META_DEFAULT_TOKEN = 'EAAO1VpZB2A6kBSxrQK9f7ZAbnb5yirsabRy6DX0JEiUuwTMEDe4LZBmnXCUaxB1TyPVeJ3zjKe8Oi3Jq1v2AzayMChpZBv7O9OpkoOZAM1k5OwKRWzg23wXm1TH1QaTHKXZAT1t1gXZAsalm70pzvFZA2IydYLSFiWMYJYlUfui5q9j28wnZB9KpB7Uo6h6chTB4f1L6ZBw5BO2F4qasyZCqJNB01hEZBQQf6QE5NjeSMv4NQ2SdZAWlZCIOjA1GCzqC5vsGGAaQibWeE84oiyOXKU2sJX1NNKZCvUN';
+const META_DEFAULT_ACCOUNT_ID = 'act_522793227047438';
+const META_GRAPH_VERSION = 'v21.0';
+
+const META_COUNTRY_BLOCKS = {
+    "BLOCO-01": {
+        id: "BLOCO-01",
+        title: "BLOCO 01 - Espanhol (es)",
+        langCode: "es",
+        langName: "ESPANHOL",
+        countries: [
+            { adSetName: "Espanha", code: "ES", searchEN: "Spain", langName: "ESPANHOL", langCode: "es", priority: true },
+            { adSetName: "Chile", code: "CL", searchEN: "Chile", langName: "ESPANHOL", langCode: "es", priority: true },
+            { adSetName: "Argentina", code: "AR", searchEN: "Argentina", langName: "ESPANHOL", langCode: "es", priority: true },
+            { adSetName: "Colômbia", code: "CO", searchEN: "Colombia", langName: "ESPANHOL", langCode: "es", priority: true },
+            { adSetName: "Venezuela", code: "VE", searchEN: "Venezuela", langName: "ESPANHOL", langCode: "es" },
+            { adSetName: "Peru", code: "PE", searchEN: "Peru", langName: "ESPANHOL", langCode: "es" },
+            { adSetName: "Porto Rico", code: "PR", searchEN: "Puerto Rico", langName: "ESPANHOL", langCode: "es" },
+            { adSetName: "Costa Rica", code: "CR", searchEN: "Costa Rica", langName: "ESPANHOL", langCode: "es" },
+            { adSetName: "Equador", code: "EC", searchEN: "Ecuador", langName: "ESPANHOL", langCode: "es" },
+            { adSetName: "Honduras", code: "HN", searchEN: "Honduras", langName: "ESPANHOL", langCode: "es" },
+            { adSetName: "Panamá", code: "PA", searchEN: "Panama", langName: "ESPANHOL", langCode: "es" },
+            { adSetName: "Nicarágua", code: "NI", searchEN: "Nicaragua", langName: "ESPANHOL", langCode: "es" },
+            { adSetName: "El Salvador", code: "SV", searchEN: "El Salvador", langName: "ESPANHOL", langCode: "es" },
+            { adSetName: "Guatemala", code: "GT", searchEN: "Guatemala", langName: "ESPANHOL", langCode: "es" },
+            { adSetName: "República Dominicana", code: "DO", searchEN: "Dominican Republic", langName: "ESPANHOL", langCode: "es" }
+        ]
+    },
+    "BLOCO-02": {
+        id: "BLOCO-02",
+        title: "BLOCO 02 - Multi-Idiomas (Europa / Ásia)",
+        langCode: "multi",
+        langName: "MULTI-IDIOMAS",
+        countries: [
+            { adSetName: "Sérvia", code: "RS", searchEN: "Serbia", langName: "SÉRVIO", langCode: "sr" },
+            { adSetName: "Itália", code: "IT", searchEN: "Italy", langName: "ITALIANO", langCode: "it" },
+            { adSetName: "Alemanha", code: "DE", searchEN: "Germany", langName: "ALEMÃO", langCode: "de", priority: true },
+            { adSetName: "Suíça", code: "CH", searchEN: "Switzerland", langName: "ALEMÃO", langCode: "de", priority: true },
+            { adSetName: "Luxemburgo", code: "LU", searchEN: "Luxembourg", langName: "ALEMÃO", langCode: "de", priority: true },
+            { adSetName: "Holanda", code: "NL", searchEN: "Netherlands", langName: "HOLANDÊS", langCode: "nl", priority: true },
+            { adSetName: "Bélgica", code: "BE", searchEN: "Belgium", langName: "HOLANDÊS", langCode: "nl", priority: true },
+            { adSetName: "Romênia", code: "RO", searchEN: "Romania", langName: "ROMENO", langCode: "ro" },
+            { adSetName: "Hungria", code: "HU", searchEN: "Hungary", langName: "HÚNGARO", langCode: "hu" },
+            { adSetName: "República Tcheca", code: "CZ", searchEN: "Czech Republic", langName: "TCHECO", langCode: "cs" },
+            { adSetName: "Eslováquia", code: "SK", searchEN: "Slovakia", langName: "ESLOVACO", langCode: "sk" },
+            { adSetName: "Índia", code: "IN", searchEN: "India", langName: "HINDI", langCode: "hi" },
+            { adSetName: "Indonésia", code: "ID", searchEN: "Indonesia", langName: "INDONÉSIO", langCode: "id" },
+            { adSetName: "Paquistão", code: "PK", searchEN: "Pakistan", langName: "URDU", langCode: "ur" },
+            { adSetName: "Polônia", code: "PL", searchEN: "Poland", langName: "POLONÊS", langCode: "pl" },
+            { adSetName: "Ucrânia", code: "UA", searchEN: "Ukraine", langName: "UCRANIANO", langCode: "uk", priority: true },
+            { adSetName: "Filipinas", code: "PH", searchEN: "Philippines", langName: "FILIPINO", langCode: "tl" }
+        ]
+    },
+    "BLOCO-03": {
+        id: "BLOCO-03",
+        title: "BLOCO 03 - Francês (fr)",
+        langCode: "fr",
+        langName: "FRANCÊS",
+        countries: [
+            { adSetName: "França", code: "FR", searchEN: "France", langName: "FRANCÊS", langCode: "fr" },
+            { adSetName: "Benin", code: "BJ", searchEN: "Benin", langName: "FRANCÊS", langCode: "fr" },
+            { adSetName: "Burkina Faso", code: "BF", searchEN: "Burkina Faso", langName: "FRANCÊS", langCode: "fr" },
+            { adSetName: "República do Congo", code: "CG", searchEN: "Republic of the Congo", langName: "FRANCÊS", langCode: "fr" },
+            { adSetName: "República Democrática do Congo", code: "CD", searchEN: "Democratic Republic of the Congo", langName: "FRANCÊS", langCode: "fr" },
+            { adSetName: "Costa do Marfim", code: "CI", searchEN: "Ivory Coast", langName: "FRANCÊS", langCode: "fr" },
+            { adSetName: "Gabão", code: "GA", searchEN: "Gabon", langName: "FRANCÊS", langCode: "fr" },
+            { adSetName: "Guiné", code: "GN", searchEN: "Guinea", langName: "FRANCÊS", langCode: "fr" },
+            { adSetName: "Mali", code: "ML", searchEN: "Mali", langName: "FRANCÊS", langCode: "fr" },
+            { adSetName: "Senegal", code: "SN", searchEN: "Senegal", langName: "FRANCÊS", langCode: "fr" },
+            { adSetName: "Togo", code: "TG", searchEN: "Togo", langName: "FRANCÊS", langCode: "fr" },
+            { adSetName: "Burundi", code: "BI", searchEN: "Burundi", langName: "FRANCÊS", langCode: "fr" },
+            { adSetName: "Camarões", code: "CM", searchEN: "Cameroon", langName: "FRANCÊS", langCode: "fr" },
+            { adSetName: "Canadá", code: "CA", searchEN: "Canada", langName: "FRANCÊS", langCode: "fr" },
+            { adSetName: "Haiti", code: "HT", searchEN: "Haiti", langName: "FRANCÊS", langCode: "fr" },
+            { adSetName: "Madagascar", code: "MG", searchEN: "Madagascar", langName: "FRANCÊS", langCode: "fr" },
+            { adSetName: "Suíça", code: "CH", searchEN: "Switzerland", langName: "FRANCÊS", langCode: "fr", note: "⚠️ SUBIR SOMENTE APÓS DESATIVAR SUÍÇA ALEMÃO" },
+            { adSetName: "Argélia", code: "DZ", searchEN: "Algeria", langName: "FRANCÊS", langCode: "fr" },
+            { adSetName: "Mauritânia", code: "MR", searchEN: "Mauritania", langName: "FRANCÊS", langCode: "fr" }
+        ]
+    },
+    "BLOCO-04": {
+        id: "BLOCO-04",
+        title: "BLOCO 04 - Russo (ru)",
+        langCode: "ru",
+        langName: "RUSSO",
+        countries: [
+            { adSetName: "Cazaquistão", code: "KZ", searchEN: "Kazakhstan", langName: "RUSSO", langCode: "ru" },
+            { adSetName: "Uzbequistão", code: "UZ", searchEN: "Uzbekistan", langName: "RUSSO", langCode: "ru" },
+            { adSetName: "Belarus", code: "BY", searchEN: "Belarus", langName: "RUSSO", langCode: "ru" },
+            { adSetName: "Azerbaijão", code: "AZ", searchEN: "Azerbaijan", langName: "RUSSO", langCode: "ru" },
+            { adSetName: "Tadjiquistão", code: "TJ", searchEN: "Tajikistan", langName: "RUSSO", langCode: "ru" },
+            { adSetName: "Quirguistão", code: "KG", searchEN: "Kyrgyzstan", langName: "RUSSO", langCode: "ru" },
+            { adSetName: "Armênia", code: "AM", searchEN: "Armenia", langName: "RUSSO", langCode: "ru" },
+            { adSetName: "Geórgia", code: "GE", searchEN: "Georgia", langName: "RUSSO", langCode: "ru" },
+            { adSetName: "Lituânia", code: "LT", searchEN: "Lithuania", langName: "RUSSO", langCode: "ru" }
+        ]
+    },
+    "BLOCO-05": {
+        id: "BLOCO-05",
+        title: "BLOCO 05 - Árabe (ar)",
+        langCode: "ar",
+        langName: "ÁRABE",
+        countries: [
+            { adSetName: "Egito", code: "EG", searchEN: "Egypt", langName: "ÁRABE", langCode: "ar" },
+            { adSetName: "Marrocos", code: "MA", searchEN: "Morocco", langName: "ÁRABE", langCode: "ar" },
+            { adSetName: "Líbia", code: "LY", searchEN: "Libya", langName: "ÁRABE", langCode: "ar" },
+            { adSetName: "Iraque", code: "IQ", searchEN: "Iraq", langName: "ÁRABE", langCode: "ar" },
+            { adSetName: "Tunísia", code: "TN", searchEN: "Tunisia", langName: "ÁRABE", langCode: "ar" },
+            { adSetName: "Palestina", code: "PS", searchEN: "Palestine", langName: "ÁRABE", langCode: "ar" },
+            { adSetName: "Iêmen", code: "YE", searchEN: "Yemen", langName: "ÁRABE", langCode: "ar" },
+            { adSetName: "Jordânia", code: "JO", searchEN: "Jordan", langName: "ÁRABE", langCode: "ar" }
+        ]
+    },
+    "BLOCO-06": {
+        id: "BLOCO-06",
+        title: "BLOCO 06 - Inglês (en)",
+        langCode: "en",
+        langName: "INGLÊS",
+        countries: [
+            { adSetName: "Irlanda", code: "IE", searchEN: "Ireland", langName: "INGLÊS", langCode: "en" },
+            { adSetName: "África do Sul", code: "ZA", searchEN: "South Africa", langName: "INGLÊS", langCode: "en" },
+            { adSetName: "Reino Unido", code: "GB", searchEN: "United Kingdom", langName: "INGLÊS", langCode: "en" },
+            { adSetName: "Emirados Árabes Unidos", code: "AE", searchEN: "United Arab Emirates", langName: "INGLÊS", langCode: "en" },
+            { adSetName: "Nova Zelândia", code: "NZ", searchEN: "New Zealand", langName: "INGLÊS", langCode: "en" },
+            { adSetName: "Austrália", code: "AU", searchEN: "Australia", langName: "INGLÊS", langCode: "en" },
+            { adSetName: "Nigéria", code: "NG", searchEN: "Nigeria", langName: "INGLÊS", langCode: "en" },
+            { adSetName: "Jamaica", code: "JM", searchEN: "Jamaica", langName: "INGLÊS", langCode: "en" },
+            { adSetName: "Singapura", code: "SG", searchEN: "Singapore", langName: "INGLÊS", langCode: "en" }
+        ]
+    },
+    "BLOCO-OBS": {
+        id: "BLOCO-OBS",
+        title: "OBSERVAÇÕES - Rotação",
+        langCode: "multi",
+        langName: "ROTAÇÃO",
+        countries: [
+            { adSetName: "Marrocos Francês", code: "MA", searchEN: "Morocco", langName: "FRANCÊS", langCode: "fr", note: "⚠️ SOMENTE SUBIR APÓS DESATIVAR MARROCOS ÁRABE" },
+            { adSetName: "Tunísia Francês", code: "TN", searchEN: "Tunisia", langName: "FRANCÊS", langCode: "fr", note: "⚠️ SOMENTE SUBIR APÓS DESATIVAR TUNÍSIA ÁRABE" },
+            { adSetName: "Bélgica Francês", code: "BE", searchEN: "Belgium", langName: "FRANCÊS", langCode: "fr", note: "⚠️ SOMENTE SUBIR APÓS DESATIVAR BÉLGICA HOLANDÊS" },
+            { adSetName: "Argélia Árabe", code: "DZ", searchEN: "Algeria", langName: "ÁRABE", langCode: "ar", note: "⚠️ SOMENTE SUBIR APÓS DESATIVAR ARGÉLIA FRANCÊS" },
+            { adSetName: "Suíça Francês", code: "CH", searchEN: "Switzerland", langName: "FRANCÊS", langCode: "fr", note: "⚠️ SUBIR SOMENTE APÓS DESATIVAR SUÍÇA ALEMÃO" }
+        ]
+    }
+};
+
+let metaState = {
+    token: localStorage.getItem(STORAGE_KEYS.META_TOKEN) || META_DEFAULT_TOKEN,
+    defaultAccountId: localStorage.getItem(STORAGE_KEYS.META_ACCOUNT) || META_DEFAULT_ACCOUNT_ID,
+    user: null,
+    accounts: [],
+    selectedAccountId: '',
+    selectedAccount: null,
+    campaigns: [],
+    selectedCampaignId: '',
+    adsets: [],
+    selectedAdSetId: '',
+    selectedAdSet: null,
+    activeBlockId: 'BLOCO-01',
+    checkedCountries: {},
+    isDuplicating: false,
+    initialized: false
+};
+
+function getMetaToken() {
+    return metaState.token || META_DEFAULT_TOKEN;
+}
+
+// Inicializa a API do Meta
+async function initMetaApi() {
+    // 1. Tenta sincronizar com o backend local caso esteja rodando
+    try {
+        const resp = await fetch('/api/meta/config');
+        if (resp.ok) {
+            const data = await resp.json();
+            if (data.meta_access_token) {
+                metaState.token = data.meta_access_token;
+                localStorage.setItem(STORAGE_KEYS.META_TOKEN, data.meta_access_token);
+            }
+            if (data.default_account_id) {
+                metaState.defaultAccountId = data.default_account_id;
+                localStorage.setItem(STORAGE_KEYS.META_ACCOUNT, data.default_account_id);
+            }
+        }
+    } catch (e) {
+        // Backend não rodando localmente (ex: GitHub Pages), usa localStorage ou token padrão
+    }
+
+    // 2. Renderiza abas de blocos de países
+    renderBlockNav();
+    selectCountryBlock('BLOCO-01');
+
+    // 3. Valida token e carrega contas
+    await testAndReloadMetaApi(false);
+}
+
+// Quando a aba de duplicador for aberta
+function onDuplicatorTabOpened() {
+    if (!metaState.initialized) {
+        testAndReloadMetaApi(false);
+    }
+}
+
+// Quando a aba de configurações for aberta
+function onSettingsTabOpened() {
+    const tokenInput = document.getElementById('meta-token-input');
+    const accountInput = document.getElementById('meta-default-account-input');
+    if (tokenInput) tokenInput.value = metaState.token || '';
+    if (accountInput) accountInput.value = metaState.defaultAccountId || '';
+}
+
+// Testa e recarrega contas da Meta
+async function testAndReloadMetaApi(forceReload = false) {
+    const token = getMetaToken();
+    if (!token) return;
+
+    try {
+        const res = await fetch(`https://graph.facebook.com/${META_GRAPH_VERSION}/me?access_token=${encodeURIComponent(token)}&fields=id,name,permissions`);
+        const data = await res.json();
+
+        if (data.error) {
+            console.error('Erro na Meta API:', data.error);
+            updateMetaStatusUI(false, data.error.message);
+            return;
+        }
+
+        metaState.user = data;
+        metaState.initialized = true;
+        updateMetaStatusUI(true, null, data);
+
+        // Carrega contas
+        await loadMetaAccounts(forceReload);
+
+    } catch (err) {
+        console.error('Falha de rede ao conectar à Meta API:', err);
+        updateMetaStatusUI(false, err.message);
+    }
+}
+
+// Atualiza elementos de status na interface
+function updateMetaStatusUI(isSuccess, errorMessage = null, userData = null) {
+    const badgeOverview = document.getElementById('badge-meta-status');
+    const userHeading = document.getElementById('meta-user-heading');
+    const statusDesc = document.getElementById('meta-status-desc');
+    const cardSubinfo = document.getElementById('meta-card-subinfo');
+
+    const dupName = document.getElementById('duplicador-user-name');
+    const dupBadge = document.getElementById('duplicador-api-badge');
+    const dupSub = document.getElementById('duplicador-user-sub');
+
+    if (isSuccess && userData) {
+        if (badgeOverview) {
+            badgeOverview.className = 'badge-status status-active';
+            badgeOverview.innerText = '🟢 Conectado';
+        }
+        if (userHeading) userHeading.innerText = `Meta Marketing API (${userData.name})`;
+        if (statusDesc) statusDesc.innerText = `Conexão ativa com Graph API ${META_GRAPH_VERSION}. Token com permissão total em todas as BMs.`;
+        if (cardSubinfo) cardSubinfo.innerText = `${userData.name} (ID: ${userData.id})`;
+
+        if (dupName) dupName.innerText = userData.name;
+        if (dupBadge) {
+            dupBadge.className = 'badge-status status-active';
+            dupBadge.innerText = `🟢 Meta API ${META_GRAPH_VERSION} Online`;
+        }
+        if (dupSub) dupSub.innerText = `ID: ${userData.id} • Permissões ativas: ads_management, ads_read, business_management`;
+    } else {
+        if (badgeOverview) {
+            badgeOverview.className = 'badge-status status-pending';
+            badgeOverview.innerText = '🔴 Erro de Conexão';
+        }
+        if (statusDesc) statusDesc.innerText = `Falha ao validar token: ${errorMessage || 'Token expirado ou inválido'}`;
+        if (dupBadge) {
+            dupBadge.className = 'badge-status status-pending';
+            dupBadge.innerText = '🔴 Desconectado';
+        }
+        if (dupSub) dupSub.innerText = `Erro: ${errorMessage || 'Verifique o token nas configurações'}`;
+    }
+}
+
+// Busca a lista de contas de anúncio do usuário
+async function loadMetaAccounts(forceReload = false) {
+    const token = getMetaToken();
+    const select = document.getElementById('select-meta-account');
+    const countLabel = document.getElementById('label-account-count');
+
+    if (!select) return;
+
+    if (metaState.accounts.length > 0 && !forceReload) {
+        populateAccountsSelect(metaState.accounts);
+        return;
+    }
+
+    if (countLabel) countLabel.innerText = '(Buscando contas...)';
+
+    try {
+        const url = `https://graph.facebook.com/${META_GRAPH_VERSION}/me/adaccounts?access_token=${encodeURIComponent(token)}&fields=id,name,account_id,account_status,currency,amount_spent&limit=150`;
+        const resp = await fetch(url);
+        const data = await resp.json();
+
+        if (data.data && Array.isArray(data.data)) {
+            // Ordena ativas primeiro
+            const sorted = data.data.sort((a, b) => {
+                if (a.account_status === 1 && b.account_status !== 1) return -1;
+                if (a.account_status !== 1 && b.account_status === 1) return 1;
+                return (a.name || '').localeCompare(b.name || '');
+            });
+
+            metaState.accounts = sorted;
+            populateAccountsSelect(sorted);
+
+            if (countLabel) countLabel.innerText = `(${sorted.length} contas encontradas)`;
+        } else {
+            select.innerHTML = '<option value="">Nenhuma conta encontrada</option>';
+            if (countLabel) countLabel.innerText = '(0 contas)';
+        }
+    } catch (e) {
+        console.error('Erro ao buscar contas:', e);
+        select.innerHTML = '<option value="">Erro ao carregar contas</option>';
+        if (countLabel) countLabel.innerText = '(Erro)';
+    }
+}
+
+function populateAccountsSelect(accounts) {
+    const select = document.getElementById('select-meta-account');
+    if (!select) return;
+
+    select.innerHTML = '';
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.innerText = 'Selecione uma conta de anúncios...';
+    select.appendChild(placeholder);
+
+    let defaultToSelect = '';
+
+    accounts.forEach(acc => {
+        const opt = document.createElement('option');
+        opt.value = acc.id; // Ex: act_522793227047438
+        const statusLabel = acc.account_status === 1 ? '🟢' : '⏸️';
+        opt.innerText = `${statusLabel} ${acc.name || 'Sem nome'} (${acc.id}) [${acc.currency || 'USD'}]`;
+        select.appendChild(opt);
+
+        if (!defaultToSelect) {
+            if (acc.id === metaState.defaultAccountId) {
+                defaultToSelect = acc.id;
+            } else if (acc.account_status === 1) {
+                defaultToSelect = acc.id;
+            }
+        }
+    });
+
+    if (defaultToSelect) {
+        select.value = defaultToSelect;
+        onMetaAccountSelected();
+    }
+}
+
+// Disparado ao trocar de conta de anúncios
+async function onMetaAccountSelected() {
+    const selectAcc = document.getElementById('select-meta-account');
+    const selectCamp = document.getElementById('select-meta-campaign');
+    const selectAdSet = document.getElementById('select-meta-adset');
+    const labelCamp = document.getElementById('label-campaign-count');
+    const currencyPrefix = document.getElementById('currency-prefix');
+
+    if (!selectAcc || !selectCamp) return;
+
+    const accountId = selectAcc.value;
+    metaState.selectedAccountId = accountId;
+
+    selectCamp.innerHTML = '<option value="">Carregando campanhas...</option>';
+    selectCamp.disabled = true;
+    if (selectAdSet) {
+        selectAdSet.innerHTML = '<option value="">Selecione uma campanha primeiro...</option>';
+        selectAdSet.disabled = true;
+    }
+    hideBaseAdSetPreview();
+
+    if (!accountId) {
+        selectCamp.innerHTML = '<option value="">Selecione uma conta primeiro...</option>';
+        return;
+    }
+
+    // Identifica moeda da conta
+    const accObj = metaState.accounts.find(a => a.id === accountId);
+    if (accObj && currencyPrefix) {
+        metaState.selectedAccount = accObj;
+        currencyPrefix.innerText = accObj.currency === 'BRL' ? 'R$ ' : (accObj.currency === 'EUR' ? '€ ' : '$ ');
+    }
+
+    if (labelCamp) labelCamp.innerText = '(Buscando...)';
+
+    const token = getMetaToken();
+    try {
+        const url = `https://graph.facebook.com/${META_GRAPH_VERSION}/${accountId}/campaigns?access_token=${encodeURIComponent(token)}&fields=id,name,status,objective&limit=100`;
+        const resp = await fetch(url);
+        const data = await resp.json();
+
+        if (data.data && Array.isArray(data.data) && data.data.length > 0) {
+            metaState.campaigns = data.data;
+            selectCamp.innerHTML = '';
+
+            let firstActive = '';
+            data.data.forEach(camp => {
+                const opt = document.createElement('option');
+                opt.value = camp.id;
+                const statusTag = camp.status === 'ACTIVE' ? '🟢' : '⏸️';
+                opt.innerText = `${statusTag} ${camp.name}`;
+                selectCamp.appendChild(opt);
+
+                if (!firstActive && camp.status === 'ACTIVE') {
+                    firstActive = camp.id;
+                }
+            });
+
+            selectCamp.disabled = false;
+            if (labelCamp) labelCamp.innerText = `(${data.data.length} campanhas)`;
+
+            if (firstActive) {
+                selectCamp.value = firstActive;
+            } else {
+                selectCamp.value = data.data[0].id;
+            }
+
+            onMetaCampaignSelected();
+        } else {
+            selectCamp.innerHTML = '<option value="">Nenhuma campanha nesta conta</option>';
+            if (labelCamp) labelCamp.innerText = '(0 campanhas)';
+        }
+    } catch (e) {
+        console.error('Erro ao buscar campanhas:', e);
+        selectCamp.innerHTML = '<option value="">Erro ao carregar campanhas</option>';
+        if (labelCamp) labelCamp.innerText = '(Erro)';
+    }
+}
+
+// Disparado ao trocar de campanha
+async function onMetaCampaignSelected() {
+    const selectCamp = document.getElementById('select-meta-campaign');
+    const selectAdSet = document.getElementById('select-meta-adset');
+    const labelAdSet = document.getElementById('label-adset-count');
+
+    if (!selectCamp || !selectAdSet) return;
+
+    const campaignId = selectCamp.value;
+    metaState.selectedCampaignId = campaignId;
+
+    selectAdSet.innerHTML = '<option value="">Carregando conjuntos base...</option>';
+    selectAdSet.disabled = true;
+    hideBaseAdSetPreview();
+
+    if (!campaignId) {
+        selectAdSet.innerHTML = '<option value="">Selecione uma campanha primeiro...</option>';
+        return;
+    }
+
+    if (labelAdSet) labelAdSet.innerText = '(Buscando...)';
+
+    const token = getMetaToken();
+    try {
+        const url = `https://graph.facebook.com/${META_GRAPH_VERSION}/${campaignId}/adsets?access_token=${encodeURIComponent(token)}&fields=id,name,daily_budget,targeting,status&limit=100`;
+        const resp = await fetch(url);
+        const data = await resp.json();
+
+        if (data.data && Array.isArray(data.data) && data.data.length > 0) {
+            metaState.adsets = data.data;
+            selectAdSet.innerHTML = '';
+
+            data.data.forEach(adset => {
+                const opt = document.createElement('option');
+                opt.value = adset.id;
+                const statusTag = adset.status === 'ACTIVE' ? '🟢' : '⏸️';
+                opt.innerText = `${statusTag} ${adset.name}`;
+                selectAdSet.appendChild(opt);
+            });
+
+            selectAdSet.disabled = false;
+            if (labelAdSet) labelAdSet.innerText = `(${data.data.length} conjuntos)`;
+
+            selectAdSet.value = data.data[0].id;
+            onMetaAdSetSelected();
+        } else {
+            selectAdSet.innerHTML = '<option value="">Nenhum conjunto nesta campanha</option>';
+            if (labelAdSet) labelAdSet.innerText = '(0 conjuntos)';
+        }
+    } catch (e) {
+        console.error('Erro ao buscar conjuntos:', e);
+        selectAdSet.innerHTML = '<option value="">Erro ao carregar conjuntos</option>';
+        if (labelAdSet) labelAdSet.innerText = '(Erro)';
+    }
+}
+
+// Disparado ao selecionar o conjunto base
+function onMetaAdSetSelected() {
+    const selectAdSet = document.getElementById('select-meta-adset');
+    if (!selectAdSet || !selectAdSet.value) {
+        hideBaseAdSetPreview();
+        return;
+    }
+
+    const adsetId = selectAdSet.value;
+    metaState.selectedAdSetId = adsetId;
+    const adset = metaState.adsets.find(a => a.id === adsetId);
+    metaState.selectedAdSet = adset;
+
+    if (adset) {
+        showBaseAdSetPreview(adset);
+    } else {
+        hideBaseAdSetPreview();
+    }
+}
+
+function showBaseAdSetPreview(adset) {
+    const box = document.getElementById('base-adset-details-box');
+    const nameEl = document.getElementById('preview-adset-name');
+    const metaEl = document.getElementById('preview-adset-meta');
+    const tagsEl = document.getElementById('preview-adset-tags');
+
+    if (!box) return;
+
+    if (nameEl) nameEl.innerText = `Conjunto Origem: ${adset.name}`;
+
+    const budgetVal = adset.daily_budget ? (parseInt(adset.daily_budget) / 100).toFixed(2) : '1.00';
+    const currencyStr = metaState.selectedAccount ? metaState.selectedAccount.currency : 'USD';
+    if (metaEl) metaEl.innerText = `Orçamento Base: ${currencyStr} ${budgetVal} | Status: ${adset.status}`;
+
+    if (tagsEl) {
+        tagsEl.innerHTML = '';
+        const countries = adset.targeting && adset.targeting.geo_locations && adset.targeting.geo_locations.countries
+            ? adset.targeting.geo_locations.countries
+            : [];
+
+        const tag1 = document.createElement('span');
+        tag1.className = 'adset-tag';
+        tag1.innerText = `📍 Países Origem: ${countries.join(', ') || 'Global'}`;
+        tagsEl.appendChild(tag1);
+
+        const tag2 = document.createElement('span');
+        tag2.className = 'adset-tag';
+        tag2.innerText = `🎯 Idade: ${adset.targeting ? (adset.targeting.age_min || 18) + '-' + (adset.targeting.age_max || 65) : '18-65'}`;
+        tagsEl.appendChild(tag2);
+
+        const tag3 = document.createElement('span');
+        tag3.className = 'adset-tag';
+        tag3.innerText = `✨ Criativos & Anúncios serão clonados automaticamente`;
+        tagsEl.appendChild(tag3);
+    }
+
+    box.classList.remove('twod-hidden');
+}
+
+function hideBaseAdSetPreview() {
+    const box = document.getElementById('base-adset-details-box');
+    if (box) box.classList.add('twod-hidden');
+}
+
+// Renderiza a barra de navegação dos blocos
+function renderBlockNav() {
+    const nav = document.getElementById('blocks-tab-nav');
+    if (!nav) return;
+
+    nav.innerHTML = '';
+    Object.keys(META_COUNTRY_BLOCKS).forEach(blockId => {
+        const block = META_COUNTRY_BLOCKS[blockId];
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = `block-tab-btn ${blockId === metaState.activeBlockId ? 'active' : ''}`;
+        btn.setAttribute('data-block', blockId);
+        btn.innerText = `${block.title} (${block.countries.length})`;
+        btn.onclick = () => selectCountryBlock(blockId);
+        nav.appendChild(btn);
+    });
+}
+
+// Seleciona um bloco de países
+function selectCountryBlock(blockId) {
+    if (!META_COUNTRY_BLOCKS[blockId]) return;
+
+    metaState.activeBlockId = blockId;
+    const block = META_COUNTRY_BLOCKS[blockId];
+
+    // Atualiza botões ativos
+    document.querySelectorAll('.block-tab-btn').forEach(btn => {
+        if (btn.getAttribute('data-block') === blockId) {
+            btn.classList.add('active');
+        } else {
+            btn.classList.remove('active');
+        }
+    });
+
+    const titleEl = document.getElementById('current-block-title');
+    if (titleEl) titleEl.innerText = block.title;
+
+    // Inicializa seleção padrão (todos marcados por padrão)
+    if (!metaState.checkedCountries[blockId]) {
+        metaState.checkedCountries[blockId] = {};
+        block.countries.forEach(c => {
+            metaState.checkedCountries[blockId][c.adSetName] = true;
+        });
+    }
+
+    renderCountriesGrid();
+}
+
+// Renderiza o grid de checkboxes dos países do bloco ativo
+function renderCountriesGrid() {
+    const grid = document.getElementById('countries-grid-container');
+    if (!grid) return;
+
+    const block = META_COUNTRY_BLOCKS[metaState.activeBlockId];
+    if (!block) return;
+
+    grid.innerHTML = '';
+    const currentChecks = metaState.checkedCountries[metaState.activeBlockId] || {};
+
+    block.countries.forEach(country => {
+        const isChecked = !!currentChecks[country.adSetName];
+
+        const card = document.createElement('label');
+        card.className = `country-card ${isChecked ? 'selected' : ''}`;
+
+        const chk = document.createElement('input');
+        chk.type = 'checkbox';
+        chk.checked = isChecked;
+        chk.onchange = (e) => {
+            currentChecks[country.adSetName] = e.target.checked;
+            if (e.target.checked) {
+                card.classList.add('selected');
+            } else {
+                card.classList.remove('selected');
+            }
+            updateBlockCounter();
+        };
+
+        const info = document.createElement('div');
+        info.className = 'country-info';
+
+        const nameDiv = document.createElement('div');
+        nameDiv.className = 'country-name';
+        nameDiv.innerHTML = `${country.adSetName} <span class="country-sub">(${country.code})</span>`;
+
+        const subDiv = document.createElement('div');
+        subDiv.className = 'country-sub';
+        subDiv.innerText = `${country.langName}${country.note ? ' • ' + country.note : ''}`;
+
+        info.appendChild(nameDiv);
+        info.appendChild(subDiv);
+
+        card.appendChild(chk);
+        card.appendChild(info);
+
+        if (country.priority) {
+            const star = document.createElement('span');
+            star.className = 'country-badge-star';
+            star.title = 'País Prioritário';
+            star.innerText = '⭐';
+            card.appendChild(star);
+        }
+
+        grid.appendChild(card);
+    });
+
+    updateBlockCounter();
+}
+
+function updateBlockCounter() {
+    const block = META_COUNTRY_BLOCKS[metaState.activeBlockId];
+    if (!block) return;
+
+    const currentChecks = metaState.checkedCountries[metaState.activeBlockId] || {};
+    const count = Object.values(currentChecks).filter(Boolean).length;
+    const badge = document.getElementById('current-block-selected-count');
+    if (badge) {
+        badge.innerText = `${count} de ${block.countries.length} selecionados`;
+    }
+}
+
+function toggleAllCountriesInBlock(checked) {
+    const block = META_COUNTRY_BLOCKS[metaState.activeBlockId];
+    if (!block) return;
+
+    if (!metaState.checkedCountries[metaState.activeBlockId]) {
+        metaState.checkedCountries[metaState.activeBlockId] = {};
+    }
+
+    block.countries.forEach(c => {
+        metaState.checkedCountries[metaState.activeBlockId][c.adSetName] = checked;
+    });
+
+    renderCountriesGrid();
+}
+
+function selectPriorityCountriesOnly() {
+    const block = META_COUNTRY_BLOCKS[metaState.activeBlockId];
+    if (!block) return;
+
+    if (!metaState.checkedCountries[metaState.activeBlockId]) {
+        metaState.checkedCountries[metaState.activeBlockId] = {};
+    }
+
+    block.countries.forEach(c => {
+        metaState.checkedCountries[metaState.activeBlockId][c.adSetName] = !!c.priority;
+    });
+
+    renderCountriesGrid();
+}
+
+// Registra mensagens no Terminal em tempo real
+function logMetaTerminal(message, type = 'info') {
+    const terminal = document.getElementById('meta-terminal-body');
+    const emptyLog = terminal ? terminal.querySelector('.terminal-log-empty') : null;
+    if (emptyLog) emptyLog.remove();
+
+    if (!terminal) return;
+
+    const now = new Date();
+    const timeStr = now.toTimeString().split(' ')[0];
+
+    const line = document.createElement('div');
+    line.className = `terminal-entry ${type}`;
+    line.innerHTML = `<span class="term-time">[${timeStr}]</span> <span class="term-text">${message}</span>`;
+    terminal.appendChild(line);
+
+    terminal.scrollTop = terminal.scrollHeight;
+}
+
+function clearMetaLog() {
+    const terminal = document.getElementById('meta-terminal-body');
+    if (terminal) {
+        terminal.innerHTML = '<div class="terminal-log-empty">Terminal limpo. Pronto para nova duplicação.</div>';
+    }
+    const clearBtn = document.getElementById('btn-clear-meta-log');
+    if (clearBtn) clearBtn.style.display = 'none';
+}
+
+// ========================================================
+// MOTOR DE DUPLICAÇÃO EM MASSA (META MARKETING API)
+// ========================================================
+
+async function startBatchDuplication() {
+    if (metaState.isDuplicating) return;
+
+    if (!metaState.selectedAccountId) {
+        alert('Por favor, selecione uma Conta de Anúncios.');
+        return;
+    }
+    if (!metaState.selectedCampaignId) {
+        alert('Por favor, selecione uma Campanha ativa.');
+        return;
+    }
+    if (!metaState.selectedAdSetId) {
+        alert('Por favor, selecione o Conjunto Base (Origem).');
+        return;
+    }
+
+    const block = META_COUNTRY_BLOCKS[metaState.activeBlockId];
+    const checks = metaState.checkedCountries[metaState.activeBlockId] || {};
+    const countriesToDuplicate = block.countries.filter(c => checks[c.adSetName]);
+
+    if (countriesToDuplicate.length === 0) {
+        alert('Selecione ao menos 1 país no bloco para duplicar.');
+        return;
+    }
+
+    const budgetInput = document.getElementById('input-daily-budget');
+    const budgetVal = parseFloat(budgetInput ? budgetInput.value : '1.00') || 1.0;
+    const initialStatus = document.getElementById('select-initial-status').value || 'PAUSED';
+    const nameFormat = document.getElementById('select-name-format').value || 'country_only';
+    const currencyStr = metaState.selectedAccount ? metaState.selectedAccount.currency : 'USD';
+
+    const confirmMsg = `Confirmar duplicação de ${countriesToDuplicate.length} conjuntos no Meta Ads?\n\n` +
+        `• Bloco: ${block.title}\n` +
+        `• Orçamento por conjunto: ${currencyStr} ${budgetVal.toFixed(2)}\n` +
+        `• Status Inicial: ${initialStatus === 'PAUSED' ? 'Pausado (Seguro)' : 'Ativo (Imediato)'}\n` +
+        `• Total de novos conjuntos: ${countriesToDuplicate.length}`;
+
+    if (!confirm(confirmMsg)) return;
+
+    metaState.isDuplicating = true;
+
+    // Atualiza UI para estado de execução
+    const startBtn = document.getElementById('btn-start-duplication');
+    const clearBtn = document.getElementById('btn-clear-meta-log');
+    const progressWrapper = document.getElementById('duplication-progress-wrapper');
+    const progressFill = document.getElementById('duplication-progress-fill');
+    const progressStatus = document.getElementById('progress-status-text');
+    const progressPct = document.getElementById('progress-percentage-text');
+    const termStatus = document.getElementById('terminal-live-status');
+
+    if (startBtn) {
+        startBtn.disabled = true;
+        startBtn.innerText = '⏳ Duplicando via API...';
+    }
+    if (clearBtn) clearBtn.style.display = 'inline-block';
+    if (progressWrapper) progressWrapper.classList.remove('twod-hidden');
+    if (termStatus) termStatus.innerText = 'Em execução...';
+
+    logMetaTerminal(`🚀 Iniciando processo de duplicação para ${countriesToDuplicate.length} países no bloco ${block.title}...`, 'info');
+    logMetaTerminal(`📦 Conjunto base: '${metaState.selectedAdSet ? metaState.selectedAdSet.name : metaState.selectedAdSetId}' (ID: ${metaState.selectedAdSetId})`, 'info');
+
+    const token = getMetaToken();
+    const budgetInCents = Math.round(budgetVal * 100);
+
+    let successCount = 0;
+    let failCount = 0;
+    const startTime = Date.now();
+
+    for (let i = 0; i < countriesToDuplicate.length; i++) {
+        const country = countriesToDuplicate[i];
+        const currentIdx = i + 1;
+        const total = countriesToDuplicate.length;
+
+        // Atualiza barra de progresso
+        const pct = Math.round(((currentIdx - 1) / total) * 100);
+        if (progressFill) progressFill.style.width = `${pct}%`;
+        if (progressPct) progressPct.innerText = `${pct}%`;
+        if (progressStatus) progressStatus.innerText = `[${currentIdx}/${total}] Clonando ${country.adSetName} (${country.code})...`;
+
+        logMetaTerminal(`[${currentIdx}/${total}] Duplicando conjunto para '${country.adSetName}' (${country.code})...`, 'info');
+
+        try {
+            // PASSO 1: Clona o conjunto base e seus criativos via POST /{adset_id}/copies
+            const copyUrl = `https://graph.facebook.com/${META_GRAPH_VERSION}/${metaState.selectedAdSetId}/copies?access_token=${encodeURIComponent(token)}`;
+            const copyResp = await fetch(copyUrl, { method: 'POST' });
+            const copyData = await copyResp.json();
+
+            if (copyData.error) {
+                throw new Error(copyData.error.message || 'Erro ao copiar conjunto');
+            }
+
+            const copiedAdSetId = copyData.copied_adset_id;
+
+            // PASSO 2: Formata o novo nome
+            let finalName = country.adSetName;
+            if (nameFormat === 'country_lang') {
+                finalName = `${country.adSetName} (${country.langName})`;
+            } else if (nameFormat === 'block_country') {
+                finalName = `${block.id.replace('BLOCO-', 'B')} - ${country.adSetName}`;
+            }
+
+            // PASSO 3: Configura segmentação de país exclusiva
+            const targeting = {
+                geo_locations: {
+                    countries: [country.code],
+                    location_types: ['frequently_in', 'home', 'recent']
+                }
+            };
+
+            // PASSO 4: Atualiza o conjunto clonado via POST /{copied_id}
+            const updateUrl = `https://graph.facebook.com/${META_GRAPH_VERSION}/${copiedAdSetId}`;
+            const formData = new URLSearchParams();
+            formData.append('access_token', token);
+            formData.append('name', finalName);
+            formData.append('daily_budget', budgetInCents.toString());
+            formData.append('status', initialStatus);
+            formData.append('targeting', JSON.stringify(targeting));
+
+            const updateResp = await fetch(updateUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: formData.toString()
+            });
+            const updateData = await updateResp.json();
+
+            if (updateData.error) {
+                throw new Error(updateData.error.message || 'Erro ao configurar conjunto clonado');
+            }
+
+            successCount++;
+            logMetaTerminal(`✅ [${currentIdx}/${total}] Conjunto '${finalName}' criado e configurado! (ID: ${copiedAdSetId})`, 'success');
+
+        } catch (err) {
+            failCount++;
+            console.error(`Erro ao duplicar para ${country.adSetName}:`, err);
+            logMetaTerminal(`❌ [${currentIdx}/${total}] Falha em ${country.adSetName}: ${err.message}`, 'error');
+        }
+
+        // Breve intervalo para respeitar taxa da Meta
+        await new Promise(r => setTimeout(r, 250));
+    }
+
+    const elapsedSecs = ((Date.now() - startTime) / 1000).toFixed(1);
+
+    // Finalização
+    if (progressFill) progressFill.style.width = '100%';
+    if (progressPct) progressPct.innerText = '100%';
+    if (progressStatus) progressStatus.innerText = 'Duplicação concluída!';
+    if (termStatus) termStatus.innerText = 'Concluído';
+
+    if (startBtn) {
+        startBtn.disabled = false;
+        startBtn.innerText = '🚀 Iniciar Nova Duplicação';
+    }
+    metaState.isDuplicating = false;
+
+    logMetaTerminal(`🎉 Operação finalizada em ${elapsedSecs}s! Sucesso: ${successCount} | Falhas: ${failCount}`, successCount > 0 ? 'success' : 'warning');
+}
+
+// Helpers da aba Configurações
+function toggleTokenVisibility() {
+    const input = document.getElementById('meta-token-input');
+    const btn = document.getElementById('btn-toggle-token-vis');
+    if (!input || !btn) return;
+
+    if (input.type === 'password') {
+        input.type = 'text';
+        btn.innerText = '🔒 Ocultar';
+    } else {
+        input.type = 'password';
+        btn.innerText = '👁️ Ver';
+    }
+}
+
+async function testMetaTokenFromUI() {
+    const tokenInput = document.getElementById('meta-token-input');
+    const resultBox = document.getElementById('meta-token-test-result');
+    const token = tokenInput ? tokenInput.value.trim() : '';
+
+    if (!token) {
+        alert('Por favor, cole um Token de Acesso.');
+        return;
+    }
+
+    if (resultBox) {
+        resultBox.className = '';
+        resultBox.style.background = 'rgba(59, 130, 246, 0.15)';
+        resultBox.style.color = '#3b82f6';
+        resultBox.innerText = '🔍 Validando token junto à Graph API da Meta...';
+        resultBox.classList.remove('twod-hidden');
+    }
+
+    try {
+        const res = await fetch(`https://graph.facebook.com/${META_GRAPH_VERSION}/me?access_token=${encodeURIComponent(token)}&fields=id,name,permissions`);
+        const data = await res.json();
+
+        if (data.error) {
+            if (resultBox) {
+                resultBox.style.background = 'rgba(239, 68, 68, 0.15)';
+                resultBox.style.color = '#ef4444';
+                resultBox.innerText = `❌ Erro no Token: ${data.error.message}`;
+            }
+            return;
+        }
+
+        const perms = (data.permissions && data.permissions.data)
+            ? data.permissions.data.filter(p => p.status === 'granted').map(p => p.permission).join(', ')
+            : 'public_profile';
+
+        if (resultBox) {
+            resultBox.style.background = 'rgba(16, 185, 129, 0.15)';
+            resultBox.style.color = '#10b981';
+            resultBox.innerHTML = `<strong>✅ Token Válido e Ativo!</strong><br>` +
+                `Usuário: <b>${data.name}</b> (ID: ${data.id})<br>` +
+                `Permissões ativas: <code>${perms}</code>`;
+        }
+    } catch (e) {
+        if (resultBox) {
+            resultBox.style.background = 'rgba(239, 68, 68, 0.15)';
+            resultBox.style.color = '#ef4444';
+            resultBox.innerText = `❌ Falha de rede: ${e.message}`;
+        }
+    }
+}
+
+async function saveMetaSettingsFromUI() {
+    const tokenInput = document.getElementById('meta-token-input');
+    const accountInput = document.getElementById('meta-default-account-input');
+
+    const token = tokenInput ? tokenInput.value.trim() : '';
+    const accountId = accountInput ? accountInput.value.trim() : '';
+
+    if (token) {
+        metaState.token = token;
+        localStorage.setItem(STORAGE_KEYS.META_TOKEN, token);
+    }
+    if (accountId) {
+        metaState.defaultAccountId = accountId;
+        localStorage.setItem(STORAGE_KEYS.META_ACCOUNT, accountId);
+    }
+
+    // Salva no backend local se estiver ativo
+    try {
+        await fetch('/api/meta/config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                meta_access_token: token,
+                default_account_id: accountId
+            })
+        });
+    } catch (e) {
+        // Ignora se estiver fora do localhost
+    }
+
+    alert('Configurações da Meta salvas com sucesso!');
+    testAndReloadMetaApi(true);
+}
+
 // Expõe funções globais para compatibilidade total com onclick
 window.switchTab = switchTab;
 window.setThemeMode = setThemeMode;
@@ -1151,12 +2157,27 @@ window.quickLogin = quickLogin;
 window.showLogin = showLogin;
 window.showApp = showApp;
 
+// Funções Meta Ads & Duplicador
+window.reloadMetaAccounts = loadMetaAccounts;
+window.onMetaAccountSelected = onMetaAccountSelected;
+window.onMetaCampaignSelected = onMetaCampaignSelected;
+window.onMetaAdSetSelected = onMetaAdSetSelected;
+window.selectCountryBlock = selectCountryBlock;
+window.toggleAllCountriesInBlock = toggleAllCountriesInBlock;
+window.selectPriorityCountriesOnly = selectPriorityCountriesOnly;
+window.startBatchDuplication = startBatchDuplication;
+window.clearMetaLog = clearMetaLog;
+window.toggleTokenVisibility = toggleTokenVisibility;
+window.testMetaTokenFromUI = testMetaTokenFromUI;
+window.saveMetaSettingsFromUI = saveMetaSettingsFromUI;
+
 // ========================================================
 // INICIALIZAÇÃO INFALÍVEL (EXECUTA IMEDIATO SE DOM JÁ CARREGADO)
 // ========================================================
 function startApp() {
     checkSession();
     checkSavedOneDriveHandle();
+    initMetaApi();
 }
 
 if (document.readyState === 'loading') {

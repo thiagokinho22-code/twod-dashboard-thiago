@@ -89,7 +89,7 @@
                 <button class="nav-item" data-tab="duplicador" onclick="switchTab('duplicador')">
                     <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
                     <span>Duplicador Meta Ads</span>
-                    <span class="tag-status">Em Breve</span>
+                    <span class="tag-status" style="background: rgba(16, 185, 129, 0.15); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.3);">Online</span>
                 </button>
 
                 <button class="nav-item" data-tab="fun-digital" onclick="switchTab('fun-digital')">
@@ -173,16 +173,19 @@
                         </div>
 
                         <!-- Card Meta Ads API -->
-                        <div class="status-card">
+                        <div class="status-card" id="card-meta-overview">
                             <div class="status-card-header">
                                 <div class="status-icon bg-indigo">
                                     <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M12 2C6.477 2 2 6.477 2 12c0 4.991 3.657 9.128 8.438 9.879V14.89h-2.54V12h2.54V9.797c0-2.506 1.492-3.89 3.777-3.89 1.094 0 2.238.195 2.238.195v2.46h-1.26c-1.243 0-1.63.771-1.63 1.562V12h2.773l-.443 2.89h-2.33v6.989C18.343 21.129 22 16.99 22 12c0-5.523-4.477-10-10-10z"/></svg>
                                 </div>
-                                <span class="badge-status status-pending">Token Pendente</span>
+                                <span class="badge-status status-active" id="badge-meta-status">🟢 Conectado</span>
                             </div>
-                            <h3>Meta Marketing API</h3>
-                            <p class="status-desc">Criação e duplicação direta de conjuntos sem navegador</p>
-                            <div class="card-footer-info">API Gratuita da Meta pronta para configuração</div>
+                            <h3 id="meta-user-heading">Meta Marketing API</h3>
+                            <p class="status-desc" id="meta-status-desc">Conexão ativa com Graph API v21.0. Acesso a 25+ contas de anúncios.</p>
+                            <div class="card-footer-info" style="display: flex; justify-content: space-between; align-items: center;">
+                                <span id="meta-card-subinfo">Thiago DuploCanto (Admin)</span>
+                                <button type="button" class="btn btn-outline" style="padding: 4px 10px; font-size: 11px;" onclick="switchTab('duplicador')">Abrir Duplicador 🚀</button>
+                            </div>
                         </div>
 
                         <!-- Card FUN Digital -->
@@ -384,17 +387,206 @@
                 <!-- ABA 4: DUPLICADOR META ADS                     -->
                 <!-- ============================================== -->
                 <section id="tab-duplicador" class="tab-pane">
-                    <div class="panel-card construction-card">
-                        <div class="construction-icon">🔄</div>
-                        <h2>Duplicador em Massa por Blocos de Países</h2>
-                        <span class="badge-wip">EM CONSTRUÇÃO</span>
-                        <p>Substituirá a extensão do Chrome que clica nos botões do Facebook. A API oficial duplicará 50 conjuntos em 2 segundos com orçamento de $1, anunciante verificado, tags UTM e cópias traduzidas.</p>
+                    
+                    <!-- BANNER SUPERIOR DE STATUS META -->
+                    <div class="meta-status-banner">
+                        <div class="meta-banner-info">
+                            <div class="meta-avatar-icon">
+                                <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M12 2C6.477 2 2 6.477 2 12c0 4.991 3.657 9.128 8.438 9.879V14.89h-2.54V12h2.54V9.797c0-2.506 1.492-3.89 3.777-3.89 1.094 0 2.238.195 2.238.195v2.46h-1.26c-1.243 0-1.63.771-1.63 1.562V12h2.773l-.443 2.89h-2.33v6.989C18.343 21.129 22 16.99 22 12c0-5.523-4.477-10-10-10z"/></svg>
+                            </div>
+                            <div>
+                                <div class="meta-banner-title">
+                                    <strong id="duplicador-user-name">Thiago DuploCanto</strong>
+                                    <span class="badge-status status-active" id="duplicador-api-badge">🟢 Meta API v21.0 Online</span>
+                                </div>
+                                <span class="meta-banner-sub" id="duplicador-user-sub">Token Ativo • Permissões: ads_management, ads_read, business_management</span>
+                            </div>
+                        </div>
+                        <div class="meta-banner-actions">
+                            <button type="button" class="btn btn-outline btn-sm" onclick="reloadMetaAccounts(true)">
+                                🔄 Recarregar Contas
+                            </button>
+                            <button type="button" class="btn btn-secondary btn-sm" onclick="switchTab('configuracoes')">
+                                ⚙️ Credenciais Meta
+                            </button>
+                        </div>
+                    </div>
 
-                        <div class="blocks-preview-grid">
-                            <div class="block-preview-pill">Bloco 1 (Países Tier 1)</div>
-                            <div class="block-preview-pill">Bloco 2 (América Latina - ES)</div>
-                            <div class="block-preview-pill">Bloco 3 (Europa)</div>
-                            <div class="block-preview-pill">Bloco 4 (Global / Expansão)</div>
+                    <!-- ETAPA 1: SELEÇÃO DE CONTA, CAMPANHA E CONJUNTO BASE -->
+                    <div class="panel-card" style="margin-bottom: 24px;">
+                        <div class="panel-card-header">
+                            <div>
+                                <h2>1. Selecione a Origem do Anúncio</h2>
+                                <p>Escolha a Conta de Anúncios, a Campanha ativa e o Conjunto Base (origem dos anúncios e criativos).</p>
+                            </div>
+                            <span class="badge-tag">Passo 1 de 3</span>
+                        </div>
+
+                        <div class="meta-select-grid">
+                            <!-- 1. Conta de Anúncio -->
+                            <div class="form-group">
+                                <label for="select-meta-account">
+                                    <strong>Conta de Anúncio:</strong>
+                                    <span class="text-muted" id="label-account-count">(Carregando...)</span>
+                                </label>
+                                <select id="select-meta-account" class="twod-select" onchange="onMetaAccountSelected()">
+                                    <option value="">Selecione uma conta...</option>
+                                </select>
+                            </div>
+
+                            <!-- 2. Campanha -->
+                            <div class="form-group">
+                                <label for="select-meta-campaign">
+                                    <strong>Campanha Ativa:</strong>
+                                    <span class="text-muted" id="label-campaign-count"></span>
+                                </label>
+                                <select id="select-meta-campaign" class="twod-select" onchange="onMetaCampaignSelected()" disabled>
+                                    <option value="">Selecione uma conta primeiro...</option>
+                                </select>
+                            </div>
+
+                            <!-- 3. Conjunto Base -->
+                            <div class="form-group">
+                                <label for="select-meta-adset">
+                                    <strong>Conjunto Base (Origem):</strong>
+                                    <span class="text-muted" id="label-adset-count"></span>
+                                </label>
+                                <select id="select-meta-adset" class="twod-select" onchange="onMetaAdSetSelected()" disabled>
+                                    <option value="">Selecione uma campanha primeiro...</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <!-- Card de resumo do Conjunto Base Selecionado -->
+                        <div id="base-adset-details-box" class="adset-preview-box twod-hidden">
+                            <div class="adset-preview-header">
+                                <span class="adset-icon">📦</span>
+                                <div>
+                                    <strong id="preview-adset-name">Nome do Conjunto</strong>
+                                    <div class="text-muted" id="preview-adset-meta">Orçamento: $1.00 | Segmentação detectada</div>
+                                </div>
+                            </div>
+                            <div class="adset-preview-tags" id="preview-adset-tags">
+                                <!-- Tags de segmentação -->
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ETAPA 2: ESCOLHA DO BLOCO DE PAÍSES E CONFIGURAÇÃO -->
+                    <div class="panel-card" style="margin-bottom: 24px;">
+                        <div class="panel-card-header">
+                            <div>
+                                <h2>2. Escolha o Bloco de Países & Configurações</h2>
+                                <p>Selecione o bloco de expansão internacional. Cada país marcado gerará um novo conjunto idêntico ao base.</p>
+                            </div>
+                            <span class="badge-tag">Passo 2 de 3</span>
+                        </div>
+
+                        <!-- SELETOR DE BLOCOS (TABS HORIZONTAIS) -->
+                        <div class="blocks-tab-nav" id="blocks-tab-nav">
+                            <!-- Inserido dinamicamente via JS -->
+                        </div>
+
+                        <!-- AÇÕES RÁPIDAS DE SELEÇÃO E CONTADOR -->
+                        <div class="block-controls-bar">
+                            <div class="block-info-label">
+                                <strong id="current-block-title">BLOCO 01 - Espanhol (es)</strong>
+                                <span class="badge-count" id="current-block-selected-count">15 selecionados</span>
+                            </div>
+                            <div class="block-quick-actions">
+                                <button type="button" class="btn-chip" onclick="toggleAllCountriesInBlock(true)">✓ Marcar Todos</button>
+                                <button type="button" class="btn-chip" onclick="toggleAllCountriesInBlock(false)">✕ Desmarcar Todos</button>
+                                <button type="button" class="btn-chip" onclick="selectPriorityCountriesOnly()">⭐ Apenas Prioritários</button>
+                            </div>
+                        </div>
+
+                        <!-- GRID DE CARDS/CHECKBOXES DE PAÍSES -->
+                        <div class="countries-grid-container" id="countries-grid-container">
+                            <!-- Cards de países gerados via JS -->
+                        </div>
+
+                        <!-- CONFIGURAÇÕES DE DISPARO -->
+                        <div class="duplication-settings-row">
+                            <div class="form-group" style="flex: 1; min-width: 180px;">
+                                <label for="input-daily-budget">
+                                    <strong>Orçamento Diário por Conjunto:</strong>
+                                </label>
+                                <div class="input-with-prefix">
+                                    <span class="input-prefix" id="currency-prefix">$</span>
+                                    <input type="number" id="input-daily-budget" value="1.00" step="0.50" min="1.00" class="twod-input">
+                                </div>
+                                <span class="help-text">Padrão: $1.00 (ou R$ 1,00)</span>
+                            </div>
+
+                            <div class="form-group" style="flex: 1; min-width: 220px;">
+                                <label for="select-initial-status">
+                                    <strong>Status dos Novos Conjuntos:</strong>
+                                </label>
+                                <select id="select-initial-status" class="twod-select">
+                                    <option value="PAUSED" selected>⏸️ Pausado (Recomendado - Revisão)</option>
+                                    <option value="ACTIVE">▶️ Ativo (Disparo Imediato)</option>
+                                </select>
+                                <span class="help-text">Pausado permite conferência antes do gasto</span>
+                            </div>
+
+                            <div class="form-group" style="flex: 1; min-width: 240px;">
+                                <label for="select-name-format">
+                                    <strong>Formato do Nome do Conjunto:</strong>
+                                </label>
+                                <select id="select-name-format" class="twod-select">
+                                    <option value="country_only" selected>[País] (Ex: Espanha)</option>
+                                    <option value="country_lang">[País (Idioma)] (Ex: Espanha (Espanhol))</option>
+                                    <option value="block_country">[Bloco - País] (Ex: B01 - Espanha)</option>
+                                </select>
+                                <span class="help-text">Identificação no Gerenciador de Anúncios</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ETAPA 3: DISPARO E TERMINAL DE EXECUÇÃO EM TEMPO REAL -->
+                    <div class="panel-card">
+                        <div class="panel-card-header">
+                            <div>
+                                <h2>3. Executar Duplicação em Massa</h2>
+                                <p>Disparo instantâneo via Meta Marketing API. Nenhum clique manual em tela é necessário.</p>
+                            </div>
+                            <span class="badge-tag">Passo 3 de 3</span>
+                        </div>
+
+                        <div class="execution-trigger-bar">
+                            <button type="button" class="btn btn-primary btn-lg" id="btn-start-duplication" onclick="startBatchDuplication()">
+                                🚀 Iniciar Duplicação via Meta API
+                            </button>
+                            <button type="button" class="btn btn-outline" id="btn-clear-meta-log" onclick="clearMetaLog()" style="display: none;">
+                                🧹 Limpar Terminal
+                            </button>
+                        </div>
+
+                        <!-- BARRA DE PROGRESSO -->
+                        <div id="duplication-progress-wrapper" class="progress-wrapper twod-hidden">
+                            <div class="progress-header">
+                                <span id="progress-status-text">Criando conjuntos...</span>
+                                <span id="progress-percentage-text">0%</span>
+                            </div>
+                            <div class="progress-bar-bg">
+                                <div id="duplication-progress-fill" class="progress-bar-fill" style="width: 0%;"></div>
+                            </div>
+                        </div>
+
+                        <!-- TERMINAL / CONSOLE DE LOG AO VIVO -->
+                        <div class="meta-terminal-wrapper" id="meta-terminal-wrapper">
+                            <div class="terminal-header">
+                                <div class="terminal-dots">
+                                    <span class="dot dot-red"></span>
+                                    <span class="dot dot-yellow"></span>
+                                    <span class="dot dot-green"></span>
+                                </div>
+                                <span class="terminal-title">Terminal de Execução em Tempo Real (Meta Marketing API)</span>
+                                <span class="terminal-status" id="terminal-live-status">Pronto para iniciar</span>
+                            </div>
+                            <div class="terminal-body" id="meta-terminal-body">
+                                <div class="terminal-log-empty">Nenhuma duplicação iniciada ainda. Selecione os países acima e clique em "Iniciar Duplicação".</div>
+                            </div>
                         </div>
                     </div>
                 </section>
@@ -539,6 +731,38 @@
                                 </div>
                                 <span class="help-text">Ex: Das 06:00 às 18:00 o sistema ficará Claro. Fora desse intervalo, mudará automaticamente para Escuro.</span>
                             </div>
+                        </div>
+
+                        <div class="settings-section">
+                            <h3>Meta Marketing API (Facebook Ads)</h3>
+                            <p class="text-muted" style="margin-bottom: 16px;">Configure ou renove o seu Token de Acesso da Meta para alimentar o Duplicador de Conjuntos e a automação de campanhas.</p>
+                            
+                            <div class="form-group" style="margin-bottom: 14px;">
+                                <label for="meta-token-input">
+                                    <strong>Access Token (User Token / System User):</strong>
+                                </label>
+                                <div style="display: flex; gap: 8px;">
+                                    <input type="password" id="meta-token-input" class="twod-input" placeholder="EAA..." style="flex: 1; font-family: monospace; font-size: 12px;">
+                                    <button type="button" class="btn btn-outline" id="btn-toggle-token-vis" onclick="toggleTokenVisibility()">👁️ Ver</button>
+                                </div>
+                                <span class="help-text">Gerado no Meta for Developers (Graph API Explorer) ou no Business Manager (Usuário do Sistema).</span>
+                            </div>
+
+                            <div class="form-grid-2" style="margin-bottom: 16px;">
+                                <div class="form-group">
+                                    <label for="meta-default-account-input">
+                                        <strong>Conta de Anúncio Padrão (ID):</strong>
+                                    </label>
+                                    <input type="text" id="meta-default-account-input" class="twod-input" placeholder="act_522793227047438">
+                                    <span class="help-text">ID da conta pré-selecionada no Duplicador.</span>
+                                </div>
+                                <div class="form-group" style="align-self: flex-end; display: flex; gap: 10px;">
+                                    <button type="button" class="btn btn-primary" onclick="saveMetaSettingsFromUI()">💾 Salvar Token</button>
+                                    <button type="button" class="btn btn-outline" onclick="testMetaTokenFromUI()">🔍 Testar Conexão</button>
+                                </div>
+                            </div>
+
+                            <div id="meta-token-test-result" class="twod-hidden" style="padding: 12px 16px; border-radius: 8px; font-size: 13px; line-height: 1.5;"></div>
                         </div>
 
                         <div class="settings-section">

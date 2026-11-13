@@ -7,6 +7,19 @@ from urllib.parse import urlparse, unquote
 # Diretório base do dashboard (onde ficam index.html, styles.css, app.js)
 DASHBOARD_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
+# Variáveis do arquivo .env
+def load_env_vars():
+    env_path = os.path.join(os.path.dirname(__file__), ".env")
+    data = {}
+    if os.path.exists(env_path):
+        with open(env_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    k, v = line.split("=", 1)
+                    data[k.strip()] = v.strip()
+    return data
+
 # Auto-detecta a pasta do OneDrive de Trabalho
 DEFAULT_WORK_DIR = os.path.join(os.path.expanduser("~"), "OneDrive", "Documentos", "Trabalho")
 if not os.path.exists(DEFAULT_WORK_DIR):
@@ -172,6 +185,14 @@ class APIHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 self._send_json({"success": False, "error": str(e)}, 500)
 
+        elif path == "/api/meta/config":
+            env_vars = load_env_vars()
+            self._send_json({
+                "success": True,
+                "meta_access_token": env_vars.get("META_ACCESS_TOKEN", ""),
+                "default_account_id": env_vars.get("DEFAULT_AD_ACCOUNT_ID", "act_522793227047438")
+            })
+
         elif path.startswith("/api/audio/"):
             parts = path.replace("/api/audio/", "").split("/")
             if len(parts) >= 2:
@@ -202,6 +223,36 @@ class APIHandler(BaseHTTPRequestHandler):
         elif path in ["/styles.css", "/app.js", "/README.md"]:
             self._serve_file(os.path.join(DASHBOARD_DIR, path.lstrip("/")))
 
+        else:
+            self._send_json({"error": "Rota não encontrada"}, 404)
+
+    def do_POST(self):
+        parsed = urlparse(self.path)
+        path = unquote(parsed.path)
+
+        if path == "/api/meta/config":
+            try:
+                content_len = int(self.headers.get("Content-Length", 0))
+                post_body = self.rfile.read(content_len).decode("utf-8")
+                payload = json.loads(post_body) if post_body else {}
+                env_path = os.path.join(os.path.dirname(__file__), ".env")
+                token = payload.get("meta_access_token", "").strip()
+                account = payload.get("default_account_id", "").strip()
+
+                current = load_env_vars()
+                if token:
+                    current["META_ACCESS_TOKEN"] = token
+                if account:
+                    current["DEFAULT_AD_ACCOUNT_ID"] = account
+
+                with open(env_path, "w", encoding="utf-8") as f:
+                    f.write("# TwoD Hub - Variaveis de Ambiente\n")
+                    for k, v in current.items():
+                        f.write(f"{k}={v}\n")
+
+                self._send_json({"success": True, "message": "Configurações salvas no .env"})
+            except Exception as e:
+                self._send_json({"success": False, "error": str(e)}, 500)
         else:
             self._send_json({"error": "Rota não encontrada"}, 404)
 
