@@ -51,6 +51,10 @@
   2. Substituiu a varredura recursiva síncrona de subpastas pelo motor não-bloqueante `/delta` em segundo plano (`_sync_graph_delta_worker` e `backend/.graph_cache.json`), concluindo a indexação de todos os **1.218 nichos** (987 nichos com **4.098 áudios** e 624 nichos com **19.598 vídeos**).
   3. Corrigiu `/api/graph/file/{item_id}` (removendo `$select` para que o OneDrive pessoal retorne `@microsoft.graph.downloadUrl`) e validou redirecionamento HTTP `302` direto para a CDN oficial da Microsoft (`my.microsoftpersonalcontent.com`) tanto para áudio quanto para vídeo.
   4. Adicionou configuração da **URL do Servidor Backend** na aba **Configurações** (`#backend-url-input` em `index.html` e `app.js?v=6.6`), validada sem erros de console no Chrome headless, além do arquivo `render.yaml` para deploy 24/7 no Render.
+- **Thiago:** Configurou as variáveis no Render e realizou o primeiro deploy do Web Service (`https://twod-dashboard-thiago.onrender.com`).
+- **Agente:**
+  1. Validou ao vivo a API na nuvem (`https://twod-dashboard-thiago.onrender.com/api/status`, `/api/onedrive/graph-status` e `/api/onedrive/niches?source=graph`), confirmando `mode: "graph_cloud"`, conta `thiago.100g@hotmail.com` conectada, indexação `/delta` ativa e streaming HTTP `302` via CDN Microsoft para áudio e vídeo direto do Render.
+  2. Definiu `https://twod-dashboard-thiago.onrender.com` como URL padrão de nuvem em `getDefaultBackendUrl()` (`app.js?v=6.7` e `index.html`), garantindo conexão automática 24/7 no GitHub Pages mesmo com o PC principal desligado.
 
 ---
 *(Este arquivo será atualizado continuamente conforme avançamos no desenvolvimento)*

@@ -630,10 +630,16 @@ function deleteUser(username) {
 // INTEGRAÇÃO ONEDRIVE & LEITOR DE ARQUIVOS NATIVO
 // ========================================================
 
+const CLOUD_BACKEND_URL = 'https://twod-dashboard-thiago.onrender.com';
+
 function getDefaultBackendUrl() {
-    return (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'))
-        ? window.location.origin
-        : 'http://localhost:8000';
+    if (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
+        return window.location.origin;
+    }
+    if (typeof window !== 'undefined' && window.location.hostname.endsWith('.onrender.com')) {
+        return window.location.origin;
+    }
+    return CLOUD_BACKEND_URL;
 }
 
 let API_BASE_URL = (localStorage.getItem('twod_backend_url') || getDefaultBackendUrl()).replace(/\/+$/, '');
