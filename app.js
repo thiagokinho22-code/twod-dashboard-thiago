@@ -1142,7 +1142,7 @@ function changeMyPassword() {
 // META MARKETING API & DUPLICADOR POR BLOCOS DE PAÍSES
 // ========================================================
 
-const META_DEFAULT_TOKEN = 'EAAO1VpZB2A6kBSxrQK9f7ZAbnb5yirsabRy6DX0JEiUuwTMEDe4LZBmnXCUaxB1TyPVeJ3zjKe8Oi3Jq1v2AzayMChpZBv7O9OpkoOZAM1k5OwKRWzg23wXm1TH1QaTHKXZAT1t1gXZAsalm70pzvFZA2IydYLSFiWMYJYlUfui5q9j28wnZB9KpB7Uo6h6chTB4f1L6ZBw5BO2F4qasyZCqJNB01hEZBQQf6QE5NjeSMv4NQ2SdZAWlZCIOjA1GCzqC5vsGGAaQibWeE84oiyOXKU2sJX1NNKZCvUN';
+const META_DEFAULT_TOKEN = 'EAAO1VpZB2A6kBSz2fdMv3hhG5g5NZAUZC13I1NB2ZCDxt1C8Nzjd3jGJZCBa41fzxNA5SRnHWdvBFm37Azq8wajZARsiEn1bPSgHINCARZAbaM7631DTjCUdOyiGHpu7LsPN6ihXdjAyrecZC9HsFT2S3Ny3nRZBWIW5jllZBWghk5paaw5fngnqn165rlNPV1TtxRGWZAuNh4ZCjMTv1pFrJZCxNVzX4lkoCS052CVYCGE5U0eZCp7yGPiks4Gl1LS1nPa6tn6ZBsJGOa5tZAxRLSevneEH0vToifm3';
 const META_DEFAULT_ACCOUNT_ID = 'act_522793227047438';
 const META_GRAPH_VERSION = 'v21.0';
 
@@ -1941,6 +1941,20 @@ async function startBatchDuplication() {
     const token = getMetaToken();
     const budgetInCents = 100; // Sempre 1 dólar ($1.00 USD = 100 centavos)
 
+    // Busca previamente todos os anúncios e criativos do conjunto base
+    let baseAds = [];
+    try {
+        const adsUrl = `https://graph.facebook.com/${META_GRAPH_VERSION}/${metaState.selectedAdSetId}/ads?access_token=${encodeURIComponent(token)}&fields=id,name,status,creative&limit=50`;
+        const adsResp = await fetch(adsUrl);
+        const adsData = await adsResp.json();
+        if (adsData.data && Array.isArray(adsData.data)) {
+            baseAds = adsData.data;
+        }
+        logMetaTerminal(`📋 Anúncios identificados no conjunto base: ${baseAds.length} anúncio(s)`, 'info');
+    } catch (e) {
+        console.warn('Não foi possível ler anúncios prévios do conjunto:', e);
+    }
+
     let successCount = 0;
     let failCount = 0;
     const startTime = Date.now();
@@ -1959,8 +1973,8 @@ async function startBatchDuplication() {
         logMetaTerminal(`[${currentIdx}/${total}] Duplicando conjunto para '${country.adSetName}' (${country.code})...`, 'info');
 
         try {
-            // PASSO 1: Clona o conjunto base E TODOS OS SEUS ANÚNCIOS/CRIATIVOS via POST /{adset_id}/copies com deep_copy=true
-            const copyUrl = `https://graph.facebook.com/${META_GRAPH_VERSION}/${metaState.selectedAdSetId}/copies?access_token=${encodeURIComponent(token)}&deep_copy=true&status_option=${encodeURIComponent(initialStatus)}`;
+            // PASSO 1: Clona a estrutura do conjunto base via POST /{adset_id}/copies
+            const copyUrl = `https://graph.facebook.com/${META_GRAPH_VERSION}/${metaState.selectedAdSetId}/copies?access_token=${encodeURIComponent(token)}`;
             const copyResp = await fetch(copyUrl, { method: 'POST' });
             const copyData = await copyResp.json();
 
@@ -2006,8 +2020,31 @@ async function startBatchDuplication() {
                 throw new Error(updateData.error.message || 'Erro ao configurar conjunto clonado');
             }
 
+            // PASSO 5: Clona todos os anúncios/criativos do conjunto base para o novo conjunto
+            let adsCreated = 0;
+            for (const baseAd of baseAds) {
+                if (baseAd.creative && baseAd.creative.id) {
+                    const createAdUrl = `https://graph.facebook.com/${META_GRAPH_VERSION}/${metaState.selectedAccountId}/ads`;
+                    const adData = new URLSearchParams();
+                    adData.append('access_token', token);
+                    adData.append('name', baseAd.name || finalName);
+                    adData.append('adset_id', copiedAdSetId);
+                    adData.append('creative', JSON.stringify({ creative_id: baseAd.creative.id }));
+                    adData.append('status', initialStatus);
+
+                    const adResp = await fetch(createAdUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                        body: adData.toString()
+                    });
+                    const adResult = await adResp.json();
+                    if (adResult.id) adsCreated++;
+                }
+            }
+
             successCount++;
-            logMetaTerminal(`✅ [${currentIdx}/${total}] Conjunto '${finalName}' criado e configurado! (ID: ${copiedAdSetId})`, 'success');
+            const adsMsg = adsCreated > 0 ? `com ${adsCreated} anúncio(s)` : 'sem anúncios';
+            logMetaTerminal(`✅ [${currentIdx}/${total}] Conjunto '${finalName}' criado ${adsMsg}! (ID: ${copiedAdSetId})`, 'success');
 
         } catch (err) {
             failCount++;
