@@ -74,6 +74,10 @@ O projeto foi retomado a partir de `PROJETO_CONTEXTO.md`.
       - Conforme alinhado com Thiago ("a gente só trabalha com dólar"), removeu-se qualquer conversão ou exibição de reais/outras moedas.
       - O campo de orçamento diário foi travado e padronizado visualmente e programmaticamente como **fixo em $1.00 USD** (`100` centavos na Meta API), impedindo qualquer erro operacional de digitação.
       - Commit `feb2106` enviado ao GitHub Pages.
+  17. **Ajuste da Tela de Login (Exigência Obrigatória ao Entrar):**
+      - Removida a persistência automática de sessão em `localStorage` que fazia o painel entrar direto como Thiago nos recarregamentos.
+      - O TwoD Hub agora **sempre** abre na tela de login, permitindo a Thiago, Alexandre ou Wesley escolherem seu perfil de acesso (ou usar os chips rápidos de 1 clique).
+      - Commit `dd27081` enviado ao GitHub Pages.
 
 ---
 *(Este arquivo será atualizado continuamente conforme avançamos no desenvolvimento)*
