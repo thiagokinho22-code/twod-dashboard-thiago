@@ -1,6 +1,7 @@
 import os
 import json
 import time
+import uuid
 import threading
 import mimetypes
 import urllib.request
@@ -851,6 +852,15 @@ class APIHandler(BaseHTTPRequestHandler):
                 self._send_json({"error": "URL de download indisponível", "detail": meta}, 404)
                 return
 
+            if qs.get("format", [""])[0] == "json":
+                self._send_json({
+                    "success": True,
+                    "id": item_id,
+                    "name": meta.get("name", ""),
+                    "download_url": dl_url,
+                })
+                return
+
             self.send_response(302)
             self.send_header("Location", dl_url)
             self.send_header("Access-Control-Allow-Origin", "*")
@@ -894,7 +904,7 @@ class APIHandler(BaseHTTPRequestHandler):
         elif path == "/" or path == "/index.html":
             self._serve_file(os.path.join(DASHBOARD_DIR, "index.html"))
 
-        elif path in ["/styles.css", "/app.js", "/README.md"]:
+        elif path in ["/styles.css", "/app.js", "/campaign_builder.js", "/README.md"]:
             self._serve_file(os.path.join(DASHBOARD_DIR, path.lstrip("/")))
 
         else:
@@ -917,6 +927,122 @@ class APIHandler(BaseHTTPRequestHandler):
 
                 save_env_vars(updates)
                 self._send_json({"success": True, "message": "Configurações salvas no .env"})
+            except Exception as e:
+                self._send_json({"success": False, "error": str(e)}, 500)
+
+        elif path == "/api/meta/upload-video":
+            try:
+                content_len = int(self.headers.get("Content-Length", 0))
+                post_body = self.rfile.read(content_len).decode("utf-8")
+                payload = json.loads(post_body) if post_body else {}
+
+                account_id = payload.get("account_id", "").strip()
+                access_token = payload.get("access_token", "").strip()
+                title = payload.get("title", "criativo.mp4").strip()
+                local_path_rel = payload.get("local_url", "").strip()
+                graph_item_id = payload.get("graph_item_id", "").strip()
+                graph_version = payload.get("graph_version", "v21.0").strip()
+
+                if not account_id or not access_token:
+                    self._send_json({"success": False, "error": "account_id e access_token obrigatórios"}, 400)
+                    return
+
+                video_bytes = None
+                filename = os.path.basename(local_path_rel) if local_path_rel else (title if title.endswith(".mp4") else f"{title}.mp4")
+
+                if local_path_rel.startswith("/api/video/"):
+                    parts = unquote(local_path_rel.replace("/api/video/", "")).split("/")
+                    if len(parts) >= 3:
+                        filepath = os.path.join(DEFAULT_WORK_DIR, "Vídeos", parts[0], parts[1], "/".join(parts[2:]))
+                        if os.path.isfile(filepath):
+                            with open(filepath, "rb") as vf:
+                                video_bytes = vf.read()
+                elif graph_item_id:
+                    tok, err = get_graph_access_token()
+                    if not tok:
+                        self._send_json({"success": False, "error": err or "OneDrive não autenticado"}, 401)
+                        return
+                    meta = _graph_get(f"https://graph.microsoft.com/v1.0/me/drive/items/{graph_item_id}", tok)
+                    dl_url = meta.get("@microsoft.graph.downloadUrl") or meta.get("@content.downloadUrl")
+                    if dl_url:
+                        with urllib.request.urlopen(dl_url, timeout=120) as vr:
+                            video_bytes = vr.read()
+
+                if not video_bytes:
+                    self._send_json({"success": False, "error": "Arquivo de vídeo não encontrado para upload"}, 404)
+                    return
+
+                boundary = "----TwoDHubBoundary" + uuid.uuid4().hex
+                parts_bin = []
+                for field_name, field_val in [("access_token", access_token), ("title", title)]:
+                    parts_bin.append(
+                        f"--{boundary}\r\nContent-Disposition: form-data; name=\"{field_name}\"\r\n\r\n{field_val}\r\n".encode("utf-8")
+                    )
+                parts_bin.append(
+                    f"--{boundary}\r\nContent-Disposition: form-data; name=\"source\"; filename=\"{filename}\"\r\nContent-Type: video/mp4\r\n\r\n".encode("utf-8")
+                )
+                parts_bin.append(video_bytes)
+                parts_bin.append(f"\r\n--{boundary}--\r\n".encode("utf-8"))
+                body = b"".join(parts_bin)
+
+                upload_url = f"https://graph-video.facebook.com/{graph_version}/{account_id}/advideos"
+                req = urllib.request.Request(
+                    upload_url,
+                    data=body,
+                    headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+                    method="POST",
+                )
+                try:
+                    with urllib.request.urlopen(req, timeout=180) as resp:
+                        res_json = json.loads(resp.read().decode("utf-8"))
+                        self._send_json({"success": True, "result": res_json})
+                except urllib.error.HTTPError as he:
+                    err_txt = he.read().decode("utf-8", errors="ignore")
+                    self._send_json({"success": False, "error": err_txt}, he.code)
+            except Exception as e:
+                self._send_json({"success": False, "error": str(e)}, 500)
+
+        elif path == "/api/translate":
+            try:
+                content_len = int(self.headers.get("Content-Length", 0))
+                post_body = self.rfile.read(content_len).decode("utf-8")
+                payload = json.loads(post_body) if post_body else {}
+
+                texts = payload.get("texts", [])
+                target_lang = (payload.get("target_lang") or "es").strip()
+                source_lang = (payload.get("source_lang") or "pt").strip()
+
+                tl_map = {"iw": "he", "tl": "fil"}
+                tl_code = tl_map.get(target_lang, target_lang)
+
+                translated = []
+                for txt in texts:
+                    if not txt or not isinstance(txt, str):
+                        translated.append(txt)
+                        continue
+                    stripped = txt.strip()
+                    if tl_code.lower() == source_lang.lower() or not any(c.isalpha() for c in stripped):
+                        translated.append(txt)
+                        continue
+                    try:
+                        q_url = "https://translate.googleapis.com/translate_a/single?" + urllib.parse.urlencode({
+                            "client": "gtx",
+                            "sl": source_lang,
+                            "tl": tl_code,
+                            "dt": "t",
+                            "q": txt,
+                        })
+                        req = urllib.request.Request(q_url, headers={"User-Agent": "Mozilla/5.0"})
+                        with urllib.request.urlopen(req, timeout=10) as resp:
+                            raw = json.loads(resp.read().decode("utf-8"))
+                            joined = "".join(seg[0] for seg in raw[0] if seg and seg[0])
+                            if stripped == stripped.upper() and any(c.isalpha() for c in stripped):
+                                joined = joined.upper()
+                            translated.append(joined)
+                    except Exception:
+                        translated.append(txt)
+
+                self._send_json({"success": True, "target_lang": target_lang, "translations": translated})
             except Exception as e:
                 self._send_json({"success": False, "error": str(e)}, 500)
         else:

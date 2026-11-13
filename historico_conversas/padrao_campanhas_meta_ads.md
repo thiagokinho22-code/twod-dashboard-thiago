@@ -12,8 +12,9 @@
 - **Advantage+ / Recomendações da Meta:** desativar quando possível.
 - **Padrão de Nome:**
   `PostID,NomeDoNicho,XXX-NOMEDOSITE-00,Quempostou,TIPODECAMPANHA-00`
-  - Exemplo observado no Ads Manager: `25079,ReceitasDaVovo,MON-TWODCOMPANY-...` / `22942,Autoescola,MON-TWODCOMPANY-10,Alexandre,...`
-  - `TIPODECAMPANHA-00`: `PostID` ou `UTM-01` *(em confirmação de formato exato para casos não-UTM)*.
+  - `XXX-NOMEDOSITE-00` = nome da conta de anúncios (ex.: `MON-TWODCOMPANY-01`, `MON-TWODCOMPANY-10`).
+  - `TIPODECAMPANHA-00` = **`PostID-01`** ou **`UTM-01`** (incrementando `-01`, `-02`...).
+  - Exemplos observados: `25079,ReceitasDaVovo,MON-TWODCOMPANY-01,Thiago,PostID-01` / `22942,Autoescola,MON-TWODCOMPANY-10,Alexandre,UTM-01`.
 
 ---
 
@@ -38,23 +39,24 @@
 - **Instagram & Threads:** usar a **Página do Facebook selecionada** ("use page").
 - **Estrutura de Mídias (Novo Padrão: 1 Criativo por Anúncio):**
   - Pastas no OneDrive possuem vídeos numerados `1` a `6` por idioma: **3 quadrados (Feed 1–3)** e **3 Reels (4–6)**.
-  - Espaço reservado como `"Em construção"` para o futuro formato **`4x3`**.
-  - Quantidade de criativos encontrados no nicho/idioma define quantos anúncios serão criados no conjunto: **Criativo `1.mp4` → Anúncio 1**, **Criativo `2.mp4` → Anúncio 2**, ..., **Criativo `6.mp4` → Anúncio 6**.
+  - Espaço reservado como `"Em construção"` para o futuro formato **`4x3`** (`07`, `08`, `09` — total de 3 vídeos por formato).
+  - Quantidade de criativos encontrados no nicho/idioma define quantos anúncios serão criados no conjunto: nomes individuais simples **`01`**, **`02`**, **`03`**, ..., **`06`** (e futuramente até **`09`**).
 - **Textos no formato `2 - 3 - 2`:**
+  - Textos já ficam prontos em português (planejamento semanal, com futuro módulo gerador dentro do painel) e são traduzidos integralmente para o idioma de cada campanha/país.
   - **Primary text (2):**
     1. Texto 1 em **TODO MAIÚSCULO**
     2. Texto 2 escrito normal (*sentence case*)
   - **Headline (3):**
     1. `🔥` (ou 1 emoji do nicho) + palavra/frase bem curta (ex.: `🔥 TEXTO AQUI`)
     2. Emoji do nicho + variação curta 2
-    3. `✅ APLICATIVO GRÁTIS` *(sempre em todos; validar tradução por idioma)*
+    3. `✅ APLICATIVO GRÁTIS` *(sempre em todos; traduzido quando em outro idioma)*
   - **Description (2):**
     1. `⭐⭐⭐⭐⭐`
-    2. `⬇️ BAIXE AGORA` *(validar tradução por idioma)*
+    2. `⬇️ BAIXE AGORA` *(traduzido quando em outro idioma)*
 - **URL de Destino + Tags de Idioma (`TranslateX Cache`):**
   - Base em português sem prefixo `/pt/`: ex. `https://twodcompany.com/25079/slug/`
   - Outros idiomas recebem `/{tag}/` antes do ID: ex. `https://twodcompany.com/es/25079/descarga-app-cocina-platos-tradicionales-deliciosos/`
-  - Tags visíveis no print do `TranslateX Cache`: `ro`, `ar`, `no`, `iw`, `vi`, `ko`, `bg`, `cs`, `hr`, `th`, `lt`, `uk`, `fi`, `hi`, `hu`, `bn`, `sk`, `sl`, `id`, `en`, `fr`, `es`, `de`, `it`, `nl`, `ru`, `pt`, `ja`, `tr`, `pl`, `sv`, `da`, `zh-CN`, `zh-TW`, `el`, `tl`, `ms`, `et`, `ca`, `lv`, `ur`, `sr`, `fa`, `sw`, `sq`, `hy`, `is`, `bs`, `lb`, `af`. *(Topo da lista rolada não visível no print).*
+  - Lista completa `TranslateX Cache` (Print 9, confirmada integralmente): `ro`, `ar`, `no`, `iw`, `vi`, `ko`, `bg`, `cs`, `hr`, `th`, `lt`, `uk`, `fi`, `hi`, `hu`, `bn`, `sk`, `sl`, `id`, `en`, `fr`, `es`, `de`, `it`, `nl`, `ru`, `pt`, `ja`, `tr`, `pl`, `sv`, `da`, `zh-CN`, `zh-TW`, `el`, `tl`, `ms`, `et`, `ca`, `lv`, `ur`, `sr`, `fa`, `sw`, `sq`, `hy`, `is`, `bs`, `lb`, `af`.
 - **Call to Action (CTA):** sempre **`Download`**.
 - **Extensões de Chamada / Mensagem (WhatsApp/Messenger/Ligações):** sempre **desativar**.
 - **Parâmetros de URL (somente para campanhas `UTM`):**
@@ -65,9 +67,5 @@
 
 ---
 
-## 4. Pendências de Alinhamento antes de Implementação
-1. Formato exato do sufixo `TIPODECAMPANHA-00` quando não for `UTM-01` (ex.: `PostID-01` ou `25079-01`?).
-2. Regra de tradução dos textos `2-3-2` (`APLICATIVO GRÁTIS`, `BAIXE AGORA`, etc.) para idiomas estrangeiros.
-3. Nomenclatura exata de cada um dos 1–6 anúncios individuais (`Pais - 01`, `01`, `Criativo 01`?).
-4. Se os arquivos do WordPress já possuem mapa de prefixos/pixels por site ou se devemos cadastrar a lista `Site ↔ BM ↔ Prefixo XXX ↔ Pixel` direto no TwoD Hub.
-5. Inspecionar via Meta API (`GET`) uma campanha ativa modelo para espelhar as flags exatas de `ad_click`, `VALUE`, `Futuretech Dynamics LLC` e desativação de Advantage+.
+## 4. Calibração via Campanha Modelo (Somente Leitura)
+- Botão **"🔎 Ler Parâmetros de Campanha Modelo"** dentro da aba **Gerador de Campanhas** faz apenas um `GET` (sem alterar nada) numa campanha existente da conta para capturar automaticamente Pixel, evento `ad_click`, flags de `Futuretech Dynamics LLC` (*Ad transparency*), `VALUE` e configurações internas da Meta API usadas naquela BM.

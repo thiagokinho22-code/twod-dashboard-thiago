@@ -83,7 +83,7 @@
                 <button class="nav-item" data-tab="gerador-campanhas" onclick="switchTab('gerador-campanhas')">
                     <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="16"></line><line x1="8" y1="12" x2="16" y2="12"></line></svg>
                     <span>Gerador de Campanhas</span>
-                    <span class="tag-status">Em Breve</span>
+                    <span class="tag-status" style="background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3);">Padrão TwoD</span>
                 </button>
 
                 <button class="nav-item" data-tab="duplicador" onclick="switchTab('duplicador')">
@@ -369,30 +369,374 @@
                 </section>
 
                 <!-- ============================================== -->
-                <!-- ABA 3: GERADOR DE CAMPANHAS (NOVO)             -->
+                <!-- ABA 3: GERADOR DE CAMPANHAS (PADRÃO TWOD)      -->
                 <!-- ============================================== -->
                 <section id="tab-gerador-campanhas" class="tab-pane">
-                    <div class="panel-card construction-card">
-                        <div class="construction-icon">🚀</div>
-                        <h2>Gerador Rápido de Campanhas Meta Ads</h2>
-                        <span class="badge-wip">EM CONSTRUÇÃO</span>
-                        <p>Diga adeus ao Gerenciador de Anúncios pesado do Facebook! Esta ferramenta permitirá subir novas campanhas, definir públicos, orçamento e criativos diretamente por aqui em segundos através da Marketing API oficial.</p>
-                        
-                        <div class="mock-fields-preview">
-                            <div class="mock-input-row">
-                                <span class="mock-label">Conta de Anúncios:</span>
-                                <span class="mock-val">TwoD Company (BM Principal)</span>
+
+                    <!-- BANNER SUPERIOR META API (COMPARTILHADO) -->
+                    <div class="meta-status-banner">
+                        <div class="meta-banner-info">
+                            <div class="meta-avatar-icon">
+                                <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M12 2C6.477 2 2 6.477 2 12c0 4.991 3.657 9.128 8.438 9.879V14.89h-2.54V12h2.54V9.797c0-2.506 1.492-3.89 3.777-3.89 1.094 0 2.238.195 2.238.195v2.46h-1.26c-1.243 0-1.63.771-1.63 1.562V12h2.773l-.443 2.89h-2.33v6.989C18.343 21.129 22 16.99 22 12c0-5.523-4.477-10-10-10z"/></svg>
                             </div>
-                            <div class="mock-input-row">
-                                <span class="mock-label">Objetivo:</span>
-                                <span class="mock-val">Tráfego / Vendas</span>
+                            <div>
+                                <div class="meta-banner-title">
+                                    <strong id="cb-user-name">Gerador de Campanhas Padrão TwoD</strong>
+                                    <span class="badge-status status-pending" id="cb-api-badge">⏳ Verificando Token...</span>
+                                </div>
+                                <span class="meta-banner-sub" id="cb-user-sub">Conecte o Access Token da Meta para carregar Contas, Pixels e Páginas da BM.</span>
                             </div>
-                            <div class="mock-input-row">
-                                <span class="mock-label">Orçamento Diário Padrão:</span>
-                                <span class="mock-val">$1.00 USD por Conjunto</span>
+                        </div>
+                        <div class="meta-banner-actions">
+                            <button type="button" class="btn btn-outline btn-sm" onclick="reloadMetaAccounts(true)">
+                                🔄 Recarregar Contas
+                            </button>
+                            <button type="button" class="btn btn-secondary btn-sm" onclick="toggleCampaignBuilderTokenBox()">
+                                🔑 Conectar / Token
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- CONEXÃO RÁPIDA DE TOKEN META DENTRO DO GERADOR -->
+                    <div id="cb-token-box" class="panel-card twod-hidden" style="margin-bottom: 24px; border: 1px solid rgba(59, 130, 246, 0.35);">
+                        <div class="panel-card-header" style="margin-bottom: 14px;">
+                            <div>
+                                <h2 style="font-size: 16px;">🔑 Conectar API do Facebook (Meta Ads)</h2>
+                                <p>O mesmo token serve para o Gerador de Campanhas e para o Duplicador em Massa.</p>
+                            </div>
+                            <button type="button" class="btn btn-outline btn-sm" onclick="toggleCampaignBuilderTokenBox(false)">✕ Fechar</button>
+                        </div>
+                        <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
+                            <input type="password" id="cb-token-input" class="twod-input" placeholder="Cole seu Access Token da Meta aqui (EAA...)" style="flex: 1; min-width: 240px; font-family: monospace; font-size: 12px;">
+                            <button type="button" class="btn btn-outline btn-sm" id="btn-toggle-cb-token-vis" onclick="toggleTokenVisibility('cb-token-input', 'btn-toggle-cb-token-vis')">👁️ Ver</button>
+                            <button type="button" class="btn btn-primary btn-sm" onclick="saveMetaSettingsFromUI('campaign_builder')">💾 Conectar & Salvar</button>
+                            <button type="button" class="btn btn-outline btn-sm" onclick="testMetaTokenFromUI('cb-token-input', 'cb-token-test-result')">🔍 Testar</button>
+                        </div>
+                        <div id="cb-token-test-result" class="twod-hidden" style="margin-top: 12px; padding: 12px 16px; border-radius: 8px; font-size: 13px; line-height: 1.5;"></div>
+                    </div>
+
+                    <!-- PASSO 1: CONTA, PIXEL, PÁGINAS DA BM & LEITOR DE MODELO -->
+                    <div class="panel-card" style="margin-bottom: 24px;">
+                        <div class="panel-card-header">
+                            <div>
+                                <h2>1. Conta, Pixel (ad_click) & Páginas da BM</h2>
+                                <p>Páginas são filtradas estritamente pela BM da conta selecionada e alternadas automaticamente para pulverizar volume.</p>
+                            </div>
+                            <span class="badge-tag">Passo 1 de 4</span>
+                        </div>
+
+                        <div class="cb-fixed-rules-bar">
+                            <span class="cb-rule-pill">🎯 Objetivo: <strong>Sales (AUCTION)</strong></span>
+                            <span class="cb-rule-pill">💰 Budget: <strong>ABO ($1.00 USD/dia)</strong></span>
+                            <span class="cb-rule-pill">🌐 Conversão: <strong>Website • Max Value • ad_click</strong></span>
+                            <span class="cb-rule-pill">🛡️ Transparency: <strong>Futuretech Dynamics LLC</strong></span>
+                            <span class="cb-rule-pill">🚫 Chamadas & Advantage+: <strong>Desativados</strong></span>
+                            <span class="cb-rule-pill">⬇️ CTA: <strong>Download</strong></span>
+                        </div>
+
+                        <div class="meta-select-grid">
+                            <div class="form-group">
+                                <label for="cb-account-select">
+                                    <strong>Conta de Anúncios:</strong>
+                                    <span class="text-muted" id="cb-bm-badge"></span>
+                                </label>
+                                <select id="cb-account-select" class="twod-select" onchange="onCampaignBuilderAccountChanged()">
+                                    <option value="">Conecte seu Token Meta acima...</option>
+                                </select>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="cb-pixel-select">
+                                    <strong>Pixel (Dataset do Site):</strong>
+                                    <span class="text-muted" id="cb-pixel-count"></span>
+                                </label>
+                                <select id="cb-pixel-select" class="twod-select">
+                                    <option value="">Selecione uma conta primeiro...</option>
+                                </select>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="cb-model-campaign-select">
+                                    <strong>Copiar Ajustes Internos de Modelo (Opcional):</strong>
+                                </label>
+                                <div style="display: flex; gap: 8px;">
+                                    <select id="cb-model-campaign-select" class="twod-select" style="flex: 1;">
+                                        <option value="">Selecione uma campanha existente...</option>
+                                    </select>
+                                    <button type="button" class="btn btn-outline btn-sm" onclick="inspectModelCampaign()" title="Faz apenas leitura (GET) sem alterar nada na campanha">🔎 Ler Modelo</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div id="cb-model-inspector-box" class="cb-model-inspector-box twod-hidden"></div>
+
+                        <div style="margin-top: 16px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+                                <div>
+                                    <strong>📄 Páginas da BM para Rotação Automática</strong>
+                                    <span class="text-muted" id="cb-pages-meta" style="font-size: 12px; margin-left: 6px;">Instagram & Threads: Usar Página selecionada</span>
+                                </div>
+                                <div style="display: flex; gap: 8px;">
+                                    <button type="button" class="btn-chip" onclick="toggleAllBuilderPages(true)">✓ Marcar Todas da BM</button>
+                                    <button type="button" class="btn-chip" onclick="toggleAllBuilderPages(false)">✕ Limpar</button>
+                                </div>
+                            </div>
+                            <div id="cb-pages-grid" class="cb-pages-grid">
+                                <div class="text-muted" style="font-size: 12px;">Selecione uma Conta de Anúncios para listar as páginas desta BM...</div>
                             </div>
                         </div>
                     </div>
+
+                    <!-- PASSO 2: NOMENCLATURA DA CAMPANHA & URL BASE -->
+                    <div class="panel-card" style="margin-bottom: 24px;">
+                        <div class="panel-card-header">
+                            <div>
+                                <h2>2. Identificação da Campanha & URL (TranslateX)</h2>
+                                <p>Padrão TwoD: <code>PostID,NomeDoNicho,XXX-NOMEDOSITE-00,Quempostou,TIPODECAMPANHA-00</code></p>
+                            </div>
+                            <span class="badge-tag">Passo 2 de 4</span>
+                        </div>
+
+                        <div class="form-grid-2" style="gap: 14px; margin-bottom: 14px;">
+                            <div class="form-group">
+                                <label for="cb-post-id"><strong>PostID:</strong></label>
+                                <input type="text" id="cb-post-id" class="twod-input" placeholder="Ex: 25079" oninput="updateCampaignNamePreview()">
+                            </div>
+                            <div class="form-group">
+                                <label for="cb-niche-slug"><strong>NomeDoNicho (PascalCase):</strong></label>
+                                <input type="text" id="cb-niche-slug" class="twod-input" placeholder="Ex: ReceitasDaVovo" oninput="updateCampaignNamePreview()">
+                            </div>
+                            <div class="form-group">
+                                <label for="cb-account-code"><strong>XXX-NOMEDOSITE-00 (Conta):</strong></label>
+                                <input type="text" id="cb-account-code" class="twod-input" placeholder="Ex: MON-TWODCOMPANY-01" oninput="updateCampaignNamePreview()">
+                            </div>
+                            <div class="form-group">
+                                <label for="cb-author"><strong>Quem postou:</strong></label>
+                                <input type="text" id="cb-author" class="twod-input" placeholder="Ex: Thiago ou Alexandre" oninput="updateCampaignNamePreview()">
+                            </div>
+                            <div class="form-group">
+                                <label for="cb-campaign-type"><strong>TIPODECAMPANHA-00:</strong></label>
+                                <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                                    <input type="text" id="cb-campaign-type" class="twod-input" value="PostID-01" style="flex: 1; min-width: 140px;" oninput="onCampaignTypeChanged()">
+                                    <button type="button" class="btn-chip" onclick="setCampaignTypePreset('PostID-01')">PostID-01</button>
+                                    <button type="button" class="btn-chip" onclick="setCampaignTypePreset('UTM-01')">UTM-01</button>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label for="cb-advertiser-name"><strong>Ad Transparency (Advertiser):</strong></label>
+                                <input type="text" id="cb-advertiser-name" class="twod-input" value="Futuretech Dynamics LLC">
+                            </div>
+                        </div>
+
+                        <div class="cb-name-preview-box">
+                            <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap;">
+                                <strong style="font-size: 12px; color: var(--accent-primary);">🏷️ NOME FINAL DA CAMPANHA (editável):</strong>
+                                <span id="cb-utm-status-tag" class="cb-rule-pill">Sem UTM</span>
+                            </div>
+                            <input type="text" id="cb-campaign-name-preview" class="twod-input" style="font-weight: 700; font-family: monospace;" placeholder="25079,ReceitasDaVovo,MON-TWODCOMPANY-01,Thiago,PostID-01">
+                        </div>
+
+                        <div class="form-grid-2" style="gap: 14px; margin-top: 16px;">
+                            <div class="form-group">
+                                <label for="cb-base-url"><strong>URL Base do Artigo (sem idioma ou já com URL do site):</strong></label>
+                                <input type="url" id="cb-base-url" class="twod-input" placeholder="https://twodcompany.com/25079/descarga-app-cocina..." oninput="updateUrlPreview()">
+                                <span class="help-text" id="cb-localized-url-preview">Português mantém URL limpa sem <code>/pt/</code>; outros idiomas inserem <code>/es/</code>, <code>/fr/</code>, <code>/de/</code> etc.</span>
+                            </div>
+                            <div class="form-group">
+                                <label><strong>Parâmetro UTM (para campanhas UTM):</strong></label>
+                                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; margin-bottom: 6px; font-size: 13px;">
+                                    <input type="checkbox" id="cb-use-utm" onchange="updateUrlPreview()">
+                                    <span>Ativar rastreamento UTM no Anúncio</span>
+                                </label>
+                                <input type="text" id="cb-utm-params" class="twod-input" value="utm_source={{site_source_name}}&utm_medium={{placement}}&utm_campaign={{adset.id}}&utm_content={{ad.id}}" style="font-family: monospace; font-size: 11px;">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- PASSO 3: CRIATIVOS DO ONEDRIVE (1 CRIATIVO POR ANÚNCIO: 01..06 + 4x3 EM CONSTRUÇÃO) -->
+                    <div class="panel-card" style="margin-bottom: 24px;">
+                        <div class="panel-card-header">
+                            <div>
+                                <h2>3. Mídias do OneDrive (1 Criativo por Anúncio)</h2>
+                                <p>Cada vídeo selecionado vira um anúncio individual (<code>01</code>, <code>02</code>... até <code>06</code>). Slots <code>07–09 (4x3)</code> reservados para o novo formato.</p>
+                            </div>
+                            <span class="badge-tag">Passo 3 de 4</span>
+                        </div>
+
+                        <div class="form-grid-2" style="gap: 14px;">
+                            <div class="form-group">
+                                <label for="cb-niche-search">
+                                    <strong>Nicho no OneDrive:</strong>
+                                    <span class="text-muted" id="cb-niche-count-label">(Carregando nichos...)</span>
+                                </label>
+                                <input type="text" id="cb-niche-search" list="cb-niche-datalist" class="twod-input" placeholder="Digite para buscar o nicho no OneDrive..." onchange="onCampaignBuilderNicheSelected()" oninput="onCampaignBuilderNicheInput()">
+                                <datalist id="cb-niche-datalist"></datalist>
+                            </div>
+                            <div class="form-group">
+                                <label for="cb-video-lang-select"><strong>Pasta de Idioma dos Vídeos:</strong></label>
+                                <select id="cb-video-lang-select" class="twod-select" onchange="renderBuilderCreativesGrid()">
+                                    <option value="AUTO">✨ Automático (pelo idioma do conjunto/bloco)</option>
+                                </select>
+                                <span class="help-text" id="cb-creatives-summary">Selecione um nicho do OneDrive para visualizar os vídeos 1–6.</span>
+                            </div>
+                        </div>
+
+                        <div id="cb-creatives-grid" class="cb-creative-grid">
+                            <div class="text-muted" style="font-size: 13px; grid-column: 1 / -1;">Escolha um nicho do OneDrive acima para listar Feed (01–03), Reels (04–06) e 4x3 (07–09 Em construção).</div>
+                        </div>
+                    </div>
+
+                    <!-- PASSO 4: TEXTOS 2-3-2 + DESTINO DOS PAÍSES + PUBLICAÇÃO -->
+                    <div class="panel-card" style="margin-bottom: 24px;">
+                        <div class="panel-card-header">
+                            <div>
+                                <h2>4. Textos (2 - 3 - 2), Países & Publicação</h2>
+                                <p>Modelo padrão 2 Textos Principais, 3 Headlines, 2 Descrições • 📅 Gerador Semanal Automático de Textos: <em>Em Breve</em></p>
+                            </div>
+                            <span class="badge-tag">Passo 4 de 4</span>
+                        </div>
+
+                        <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; padding: 10px 12px; border-radius: 8px; background: var(--bg-page); border: 1px solid var(--border-color);">
+                            <strong style="font-size: 12px;">🌐 Traduzir textos atuais (2-3-2) para revisão:</strong>
+                            <select id="cb-translate-lang-select" class="twod-select" style="width: auto; min-width: 170px;">
+                                <option value="es">Espanhol (es)</option>
+                                <option value="en">Inglês (en)</option>
+                                <option value="fr">Francês (fr)</option>
+                                <option value="de">Alemão (de)</option>
+                                <option value="it">Italiano (it)</option>
+                                <option value="nl">Holandês (nl)</option>
+                                <option value="ru">Russo (ru)</option>
+                                <option value="ar">Árabe (ar)</option>
+                                <option value="ro">Romeno (ro)</option>
+                                <option value="hu">Húngaro (hu)</option>
+                                <option value="pl">Polonês (pl)</option>
+                                <option value="uk">Ucraniano (uk)</option>
+                                <option value="id">Indonésio (id)</option>
+                                <option value="hi">Hindi (hi)</option>
+                            </select>
+                            <button type="button" class="btn btn-outline btn-sm" id="btn-cb-translate" onclick="translateBuilderTexts()">🌐 Traduzir Agora</button>
+                            <label style="display: flex; align-items: center; gap: 6px; font-size: 12px; margin-left: auto; cursor: pointer;">
+                                <input type="checkbox" id="cb-auto-translate-per-country" checked>
+                                <span>Traduzir automaticamente por idioma de cada país em blocos multi-idioma</span>
+                            </label>
+                        </div>
+
+                        <div class="cb-text-232-grid" style="margin-bottom: 20px;">
+                            <div class="cb-text-col">
+                                <div style="display: flex; justify-content: space-between; align-items: center;">
+                                    <strong>Primary text (2 de 5)</strong>
+                                    <button type="button" class="btn-chip" onclick="uppercasePrimaryText1()">AA Maiúsculo</button>
+                                </div>
+                                <div class="form-group">
+                                    <label style="font-size: 11px;">Texto Principal 1 (TODO MAIÚSCULO):</label>
+                                    <textarea id="cb-primary-1" class="twod-input" rows="2" placeholder="TEXTO AQUI SOBRE O NICHO EM MAIÚSCULO"></textarea>
+                                </div>
+                                <div class="form-group">
+                                    <label style="font-size: 11px;">Texto Principal 2 (Escrito normal):</label>
+                                    <textarea id="cb-primary-2" class="twod-input" rows="2" placeholder="Texto aqui escrito normalmente sobre o aplicativo..."></textarea>
+                                </div>
+                            </div>
+
+                            <div class="cb-text-col">
+                                <strong>Headline (3 de 5)</strong>
+                                <div class="form-group">
+                                    <label style="font-size: 11px;">Headline 1 (Emoji do nicho + frase curta):</label>
+                                    <input type="text" id="cb-headline-1" class="twod-input" placeholder="🔥 TEXTO AQUI">
+                                </div>
+                                <div class="form-group">
+                                    <label style="font-size: 11px;">Headline 2 (Emoji do nicho + variação 2):</label>
+                                    <input type="text" id="cb-headline-2" class="twod-input" placeholder="🔥 TEXTO AQUI 2">
+                                </div>
+                                <div class="form-group">
+                                    <label style="font-size: 11px;">Headline 3 (Fixo padrão):</label>
+                                    <input type="text" id="cb-headline-3" class="twod-input" value="✅ APLICATIVO GRÁTIS">
+                                </div>
+                            </div>
+
+                            <div class="cb-text-col">
+                                <strong>Description (2 de 5) & Destino</strong>
+                                <div class="form-group">
+                                    <label style="font-size: 11px;">Description 1:</label>
+                                    <input type="text" id="cb-desc-1" class="twod-input" value="⭐⭐⭐⭐⭐">
+                                </div>
+                                <div class="form-group">
+                                    <label style="font-size: 11px;">Description 2:</label>
+                                    <input type="text" id="cb-desc-2" class="twod-input" value="⬇️ BAIXE AGORA">
+                                </div>
+                                <div class="form-group">
+                                    <label style="font-size: 11px;">Agendamento (Opcional — vazio = imediato):</label>
+                                    <input type="datetime-local" id="cb-schedule-start" class="twod-input">
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- PRESETS DE PAÍSES / BLOCOS -->
+                        <div style="margin-bottom: 14px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 10px;">
+                                <strong>🌍 Conjuntos (Países) que serão criados dentro desta Campanha ($1.00 USD/dia cada):</strong>
+                                <span class="badge-count" id="cb-selected-countries-badge">1 selecionado</span>
+                            </div>
+                            <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px;">
+                                <button type="button" class="btn-chip" onclick="applyBuilderCountryPreset('BR')">🇧🇷 Brasil (PT)</button>
+                                <button type="button" class="btn-chip" onclick="applyBuilderCountryPreset('US_EN')">🇺🇸 Estados Unidos (Inglês)</button>
+                                <button type="button" class="btn-chip" onclick="applyBuilderCountryPreset('US_ES')">🇺🇸 Estados Unidos (Espanhol • Spanish All)</button>
+                                <button type="button" class="btn-chip" onclick="applyBuilderCountryPreset('BLOCO-01')">🇪🇸 Bloco 01 (Espanhol)</button>
+                                <button type="button" class="btn-chip" onclick="applyBuilderCountryPreset('BLOCO-02')">🇪🇺 Bloco 02 (Multi)</button>
+                                <button type="button" class="btn-chip" onclick="applyBuilderCountryPreset('BLOCO-03')">🇫🇷 Bloco 03 (Francês)</button>
+                                <button type="button" class="btn-chip" onclick="applyBuilderCountryPreset('BLOCO-04')">🇷🇺 Bloco 04 (Russo)</button>
+                                <button type="button" class="btn-chip" onclick="applyBuilderCountryPreset('BLOCO-05')">🇸🇦 Bloco 05 (Árabe)</button>
+                                <button type="button" class="btn-chip" onclick="applyBuilderCountryPreset('BLOCO-06')">🇬🇧 Bloco 06 (Inglês)</button>
+                            </div>
+                            <div id="cb-countries-grid" class="countries-grid-container" style="max-height: 220px; overflow-y: auto;"></div>
+                        </div>
+
+                        <div class="duplication-settings-row" style="margin-bottom: 16px;">
+                            <div class="form-group" style="flex: 1; min-width: 220px;">
+                                <label for="cb-initial-status"><strong>Status Inicial ao Subir:</strong></label>
+                                <select id="cb-initial-status" class="twod-select">
+                                    <option value="PAUSED">⏸️ Pausado (Para Revisar Antes de Ativar)</option>
+                                    <option value="ACTIVE">🟢 Ativo (Rodar Imediatamente)</option>
+                                </select>
+                            </div>
+                            <div class="form-group" style="flex: 1; min-width: 220px;">
+                                <label><strong>Resumo da Publicação:</strong></label>
+                                <div id="cb-launch-summary" class="cb-rule-pill" style="display: block; padding: 10px 12px; border-radius: 8px; font-size: 13px;">
+                                    1 Campanha • 1 Conjunto ($1/dia) • até 6 Anúncios
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="execution-trigger-bar">
+                            <button type="button" class="btn btn-primary btn-lg" id="btn-cb-launch" onclick="launchStandardCampaign()" style="flex: 1;">
+                                🚀 CRIAR CAMPANHA PADRÃO + CONJUNTOS + ANÚNCIOS VIA API
+                            </button>
+                            <button type="button" class="btn btn-outline" id="btn-cb-clear-log" onclick="clearBuilderTerminal()" style="display: none;">
+                                Limpar Log
+                            </button>
+                        </div>
+
+                        <div id="cb-progress-wrapper" class="progress-wrapper twod-hidden">
+                            <div class="progress-header">
+                                <span id="cb-progress-status">Preparando criação na Meta API...</span>
+                                <span id="cb-progress-pct">0%</span>
+                            </div>
+                            <div class="progress-bar-bg">
+                                <div id="cb-progress-fill" class="progress-bar-fill" style="width: 0%"></div>
+                            </div>
+                        </div>
+
+                        <div class="meta-terminal-wrapper">
+                            <div class="terminal-header">
+                                <span class="term-dots"><i></i><i></i><i></i></span>
+                                <span class="term-title">meta-campaign-builder@twod-api:~</span>
+                                <span class="term-status" id="cb-terminal-status">Aguardando configuração</span>
+                            </div>
+                            <div class="terminal-body" id="cb-terminal-body">
+                                <div class="terminal-log-empty">Preencha os passos 1 a 4 e clique no botão acima para criar sua campanha padrão no Meta Ads...</div>
+                            </div>
+                        </div>
+                    </div>
+
                 </section>
 
                 <!-- ============================================== -->
@@ -898,7 +1242,8 @@
         </div>
     </div>
 
-    <script src="app.js?v=6.8"></script>
+    <script src="app.js?v=6.9"></script>
+    <script src="campaign_builder.js?v=1.0"></script>
 </body>
 </html>
 

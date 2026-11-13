@@ -66,6 +66,11 @@
 - **Agente:**
   1. Documentou integralmente toda a especificação técnica e mapeamento dos 9 prints em [`padrao_campanhas_meta_ads.md`](./padrao_campanhas_meta_ads.md).
   2. Levantou os 5 pontos finais de alinhamento (sufixo `PostID` vs `UTM-01`, tradução de textos `2-3-2` por idioma, nome dos 1–6 anúncios individuais, tabela `Site ↔ BM ↔ Pixel` e leitura `GET` de campanha-modelo na Meta API) antes de construir o Publicador Padrão + upgrade do Duplicador.
+- **Thiago:** Respondeu os alinhamentos (`PostID-01`, `-00` como número da conta ex.: `MON-TWODCOMPANY-01`, nomes individuais dos anúncios apenas `01`, `02`... `06` e futuro até `09` para `4x3` [3 de cada formato], tradução completa por idioma com futuro gerador semanal, e pediu explicação simples do leitor de modelo).
+- **Agente:**
+  1. Implementou a aba completa **Gerador de Campanhas Padrão TwoD** (`#tab-gerador-campanhas` em `index.html`, `styles.css`, `app.js?v=6.9` e módulo dedicado `campaign_builder.js?v=1.0`).
+  2. Integrou no `backend/server.py`: `/api/graph/file/{id}?format=json` (URL direta CDN Microsoft para Meta `advideos`), `POST /api/meta/upload-video` (fallback multipart) e `POST /api/translate` (tradução automática de `2-3-2` preservando maiúsculas e emojis).
+  3. Validou sintaxe Python, rotas HTTP (`/campaign_builder.js`, `?format=json`, `/api/translate`) e fluxo completo no Chrome headless CDP (zero erros JS no console, 1.218 nichos carregados, resolução automática de vídeos por idioma/país, slots `01–06` + `07–09 4x3 Em Construção`, URLs estilo `TranslateX` sem `/pt/`, UTMs e nomenclatura padrão).
 
 ---
 *(Este arquivo será atualizado continuamente conforme avançamos no desenvolvimento)*

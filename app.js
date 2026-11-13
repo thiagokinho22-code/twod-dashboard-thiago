@@ -440,6 +440,10 @@ function switchTab(tabId) {
 
     if (tabId === 'duplicador') {
         onDuplicatorTabOpened();
+    } else if (tabId === 'gerador-campanhas') {
+        if (typeof window.onCampaignBuilderTabOpened === 'function') {
+            window.onCampaignBuilderTabOpened();
+        }
     } else if (tabId === 'configuracoes') {
         onSettingsTabOpened();
     }
@@ -1186,6 +1190,9 @@ function renderOneDriveStatsAndTable() {
     });
 
     filterNichesTable();
+    if (typeof window.onCampaignBuilderNichesReady === 'function') {
+        window.onCampaignBuilderNichesReady();
+    }
 }
 
 // Filtro e Renderização da Tabela
@@ -1677,6 +1684,9 @@ function updateMetaStatusUI(isSuccess, errorMessage = null, userData = null) {
             dupSub.innerHTML = `⚠️ ${errorMessage || 'Nenhum token configurado.'} <a href="javascript:void(0)" onclick="toggleDuplicatorTokenBox(true)" style="color: var(--accent-primary); text-decoration: underline; font-weight: 600; margin-left: 6px;">Conectar Token aqui →</a>`;
         }
     }
+    if (typeof window.onCampaignBuilderMetaStatus === 'function') {
+        window.onCampaignBuilderMetaStatus(isSuccess, errorMessage, userData);
+    }
 }
 
 // Busca a lista de contas de anúncio do usuário
@@ -1695,7 +1705,7 @@ async function loadMetaAccounts(forceReload = false) {
     if (countLabel) countLabel.innerText = '(Buscando contas...)';
 
     try {
-        const url = `https://graph.facebook.com/${META_GRAPH_VERSION}/me/adaccounts?access_token=${encodeURIComponent(token)}&fields=id,name,account_id,account_status,currency,amount_spent&limit=150`;
+        const url = `https://graph.facebook.com/${META_GRAPH_VERSION}/me/adaccounts?access_token=${encodeURIComponent(token)}&fields=id,name,account_id,account_status,currency,amount_spent,business{id,name}&limit=150`;
         const resp = await fetch(url);
         const data = await resp.json();
 
@@ -1709,6 +1719,9 @@ async function loadMetaAccounts(forceReload = false) {
 
             metaState.accounts = sorted;
             populateAccountsSelect(sorted);
+            if (typeof window.onCampaignBuilderAccountsReady === 'function') {
+                window.onCampaignBuilderAccountsReady();
+            }
 
             if (countLabel) countLabel.innerText = `(${sorted.length} contas encontradas)`;
             const metaDescEl = document.getElementById('meta-status-desc');
@@ -2586,17 +2599,21 @@ async function testMetaTokenFromUI(inputId = 'meta-token-input', resultBoxId = '
 async function saveMetaSettingsFromUI(source = 'configuracoes') {
     const cfgTokenInput = document.getElementById('meta-token-input');
     const dupTokenInput = document.getElementById('duplicador-token-input');
+    const cbTokenInput = document.getElementById('cb-token-input');
     const accountInput = document.getElementById('meta-default-account-input');
 
-    const primaryTokenInput = (source === 'duplicador' && dupTokenInput) ? dupTokenInput : cfgTokenInput;
+    const primaryTokenInput = (source === 'duplicador' && dupTokenInput)
+        ? dupTokenInput
+        : (source === 'campaign_builder' && cbTokenInput ? cbTokenInput : cfgTokenInput);
     const token = primaryTokenInput ? primaryTokenInput.value.trim() : '';
     const accountId = (source === 'configuracoes' && accountInput)
         ? accountInput.value.trim()
         : (metaState.defaultAccountId || '');
 
-    // Mantém os dois inputs sincronizados
+    // Mantém todos os inputs de token sincronizados
     if (cfgTokenInput) cfgTokenInput.value = token;
     if (dupTokenInput) dupTokenInput.value = token;
+    if (cbTokenInput) cbTokenInput.value = token;
 
     if (token) {
         metaState.token = token;
