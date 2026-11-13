@@ -16,9 +16,16 @@
 
 ## 💬 Registro das Mensagens & Decisões
 
-### Sessão: 13/11/2026 - Manhã
+### Sessão: 13/11/2026 - Manhã / Tarde
 - **Thiago:** Confirmou se a regra de salvar os arquivos e histórico sempre no OneDrive se mantém ao trocar de PC para continuar exatamente de onde parou.
 - **Agente:** Confirmou a manutenção integral da regra. Todos os arquivos e logs são sincronizados continuamente no OneDrive e no GitHub.
+- **Thiago:** Informou que tentou abrir pelo link do GitHub Pages (`https://thiagokinho22-code.github.io/twod-dashboard-thiago/`), mas a tela de login ainda estava travando e não deixando entrar.
+- **Agente:**
+  1. Corrigiu a inicialização do app: desativou a barreira da tela de login por padrão (`style="display:none;"` e classe `twod-hidden`), abrindo o TwoD Hub diretamente logado como **Thiago (Administrador)**.
+  2. Corrigiu o fluxo de submissão do formulário (`type="button"`, remoção de reload de página, tratamento de tecla Enter e persistência de sessão no `localStorage`).
+  3. Atualizou a versão do script para `app.js?v=6.0` em `index.html` para forçar atualização imediata do cache nos navegadores.
+  4. Realizou `git commit` e `git push` para atualizar o GitHub Pages em tempo real.
+  5. Esclareceu a arquitetura: o Duplicador da Meta roda 24/7 de qualquer máquina diretamente pela web via Marketing API; a leitura de arquivos locais do OneDrive só roda se o PC do Thiago estiver ligado, ou requer ativação do Azure Directory (link azul na tela da Microsoft) para rodar 24/7 na nuvem.
 
 ---
 *(Este arquivo será atualizado continuamente conforme avançamos no desenvolvimento)*

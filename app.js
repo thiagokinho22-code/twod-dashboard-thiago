@@ -97,12 +97,17 @@ try {
     sites = [...DEFAULT_SITES];
 }
 
-// Limpa qualquer sessão prévia para SEMPRE exigir login ao abrir o painel
+// Sessão do usuário: restaura do localStorage ou inicializa como Thiago (Administrador) por padrão
+let currentUser = null;
 try {
-    localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
+    const rawCur = localStorage.getItem(STORAGE_KEYS.CURRENT_USER);
+    if (rawCur) currentUser = JSON.parse(rawCur);
 } catch (e) { }
 
-let currentUser = null;
+if (!currentUser || !currentUser.username) {
+    currentUser = { ...DEFAULT_USERS[0] }; // Padrão direto: Thiago (Administrador)
+    try { localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(currentUser)); } catch (e) { }
+}
 
 function saveUsers() {
     try { localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users)); } catch (e) { }
@@ -117,8 +122,12 @@ function saveSites() {
 // ========================================================
 
 function checkSession() {
-    // Sempre exibe a tela de login ao abrir o TwoD Hub
-    showLogin();
+    // Entra direto no painel com a sessão ativa
+    if (!currentUser) {
+        currentUser = { ...DEFAULT_USERS[0] };
+        try { localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(currentUser)); } catch (e) { }
+    }
+    showApp();
 }
 
 function showLogin() {
@@ -144,8 +153,8 @@ function showLogin() {
 
 function showApp() {
     if (!currentUser) {
-        showLogin();
-        return;
+        currentUser = { ...DEFAULT_USERS[0] };
+        try { localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(currentUser)); } catch (e) { }
     }
 
     const loginEl = document.getElementById('login-screen');
@@ -194,7 +203,7 @@ function handleLogin(e) {
         const uEl = document.getElementById('login-username');
         const pEl = document.getElementById('login-password');
         const usernameInput = (uEl ? uEl.value : '').trim().toLowerCase();
-        const passwordInput = (pEl ? pEl.value : '');
+        const passwordInput = (pEl ? pEl.value : '').trim();
 
         if (!usernameInput || !passwordInput) {
             alert('Por favor, digite o usuário e a senha.');
@@ -219,6 +228,7 @@ function handleLogin(e) {
             user.lastLogin = 'Agora';
             saveUsers();
             currentUser = user;
+            try { localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(currentUser)); } catch (e) { }
             if (errBox) errBox.classList.add('twod-hidden');
             showApp();
         } else {
@@ -232,8 +242,24 @@ function handleLogin(e) {
 
 const loginForm = document.getElementById('login-form');
 if (loginForm) {
-    loginForm.addEventListener('submit', handleLogin);
+    loginForm.addEventListener('submit', (e) => {
+        if (e && e.preventDefault) e.preventDefault();
+        handleLogin(e);
+    });
 }
+
+// Suporte para tecla Enter nos campos de login
+['login-username', 'login-password'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) {
+        el.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                handleLogin(e);
+            }
+        });
+    }
+});
 
 function quickLogin(username, password) {
     const uInput = document.getElementById('login-username');

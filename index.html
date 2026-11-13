@@ -11,7 +11,7 @@
     <!-- ========================================== -->
     <!-- TELA DE LOGIN / AUTENTICAÇÃO               -->
     <!-- ========================================== -->
-    <div id="login-screen" class="login-overlay">
+    <div id="login-screen" class="login-overlay twod-hidden" style="display: none;">
         <div class="login-card">
             <div class="login-brand">
                 <div class="brand-logo">
@@ -23,20 +23,20 @@
                 <p>Central de Automações e Performance</p>
             </div>
 
-            <form id="login-form" onsubmit="return handleLogin(event);">
+            <form id="login-form" onsubmit="event.preventDefault(); handleLogin(event); return false;">
                 <div class="form-group">
                     <label for="login-username">Usuário</label>
-                    <input type="text" id="login-username" placeholder="Digite seu usuário..." required autocomplete="username">
+                    <input type="text" id="login-username" placeholder="Digite seu usuário..." autocomplete="username">
                 </div>
 
                 <div class="form-group">
                     <label for="login-password">Senha</label>
-                    <input type="password" id="login-password" placeholder="Digite sua senha..." required autocomplete="current-password">
+                    <input type="password" id="login-password" placeholder="Digite sua senha..." autocomplete="current-password">
                 </div>
 
                 <div id="login-error" class="login-error-msg twod-hidden">Usuário ou senha incorretos.</div>
 
-                <button type="submit" class="btn btn-primary btn-block">Acessar Painel</button>
+                <button type="button" class="btn btn-primary btn-block" onclick="handleLogin(event)">Acessar Painel</button>
             </form>
 
             <div class="quick-login-box">
@@ -53,7 +53,7 @@
     <!-- ========================================== -->
     <!-- APLICAÇÃO PRINCIPAL (DASHBOARD)            -->
     <!-- ========================================== -->
-    <div id="app-container" class="app-layout twod-hidden">
+    <div id="app-container" class="app-layout">
         
         <!-- SIDEBAR LATERAL -->
         <aside class="sidebar">
@@ -853,7 +853,7 @@
         </div>
     </div>
 
-    <script src="app.js?v=5.5"></script>
+    <script src="app.js?v=6.0"></script>
 </body>
 </html>
 
