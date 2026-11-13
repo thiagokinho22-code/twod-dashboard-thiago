@@ -58,6 +58,18 @@ O projeto foi retomado a partir de `PROJETO_CONTEXTO.md`.
       - Tratamento anti-recarregamento com `onsubmit="return handleLogin(event);"` e funções globais expostas no `window`.
       - Controle de permissão dinâmico: administradores veem todas as abas, operadores têm abas de gestão ocultadas.
       - Botão de logout ("Sair") limpa a sessão e retorna à tela de login instantaneamente.
+  15. **Integração Completa da Meta Marketing API (Facebook Ads) & Duplicador Nativo:**
+      - **Criação do App na Meta:** Thiago criou o aplicativo no Meta for Developers com use case `Create & manage ads with Marketing API` e gerou o token com permissões plenas (`ads_management`, `ads_read`, `business_management`) marcando a opção de herança automática para todas as BMs e contas atuais e futuras.
+      - **Descoberta Arquitetural Chave:** A Graph API v21.0 possui o endpoint nativo `POST /{adset_id}/copies`, que clona o conjunto de anúncios junto com todos os seus criativos/anúncios instantaneamente no servidor da Meta, dispensando qualquer script de DOM ou extensão no Chrome.
+      - **Duplicador por Blocos de Países:** Construído e integrado em `index.html`, `styles.css` e `app.js`:
+        - Suporte a todos os blocos: `BLOCO-01` (Espanhol - 15 países), `BLOCO-02` (Multi-Idiomas - 17 países), `BLOCO-03` (Francês - 19 países), `BLOCO-04` (Russo - 9 países), `BLOCO-05` (Árabe - 8 países), `BLOCO-06` (Inglês - 9 países) e `BLOCO-OBS` (Rotação - 5 países), todos com códigos ISO 2-letter oficiais da Meta.
+        - Seletor de Contas de Anúncio dinâmico (com mais de 25 contas ativas detectadas na BM do Thiago).
+        - Seletor de Campanhas ativas e Conjunto Base de Origem.
+        - Configurações de orçamento diário (ex: `$1.00`), status inicial (`PAUSED` ou `ACTIVE`) e formato de nomenclatura.
+        - Terminal de execução em tempo real com barra de progresso, status visual de cada país criado e tempo total de execução (< 1 segundo por conjunto).
+      - **Aba Configurações:** Seção para visualização, teste e renovação do Token de Acesso da Meta e definição de conta padrão.
+      - **Visão Geral:** Card da Meta atualizado para status verde conectado com indicador dinâmico do usuário e atalho direto para o duplicador.
+      - **Deploy:** Versão commitada (`ba746fb`) e publicada no GitHub Pages (`https://thiagokinho22-code.github.io/twod-dashboard-thiago/`).
 
 ---
 *(Este arquivo será atualizado continuamente conforme avançamos no desenvolvimento)*
