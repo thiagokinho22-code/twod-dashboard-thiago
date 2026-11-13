@@ -396,11 +396,14 @@ const tabTitles = {
 
 function initTabs() {
     document.querySelectorAll('.nav-item').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            if (e && e.preventDefault) e.preventDefault();
-            const tabId = btn.getAttribute('data-tab');
-            switchTab(tabId);
-        });
+        if (!btn.dataset.tabBound && !btn.getAttribute('onclick')) {
+            btn.dataset.tabBound = '1';
+            btn.addEventListener('click', (e) => {
+                if (e && e.preventDefault) e.preventDefault();
+                const tabId = btn.getAttribute('data-tab');
+                switchTab(tabId);
+            });
+        }
     });
 
     const savedTab = localStorage.getItem(STORAGE_KEYS.ACTIVE_TAB) || 'visao-geral';
@@ -415,6 +418,12 @@ function switchTab(tabId) {
     if (tabId === 'usuarios' && !isAdmin) {
         tabId = 'visao-geral';
     }
+
+    if (!document.getElementById(`tab-${tabId}`)) {
+        tabId = 'visao-geral';
+    }
+
+    try { localStorage.setItem(STORAGE_KEYS.ACTIVE_TAB, tabId); } catch (e) { }
 
     document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
     document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
@@ -2150,7 +2159,6 @@ async function startBatchDuplication() {
     logMetaTerminal(`🚀 Iniciando processo de duplicação para ${countriesToDuplicate.length} países no bloco ${block.title}...`, 'info');
     logMetaTerminal(`📦 Conjunto base: '${metaState.selectedAdSet ? metaState.selectedAdSet.name : metaState.selectedAdSetId}' (ID: ${metaState.selectedAdSetId})`, 'info');
 
-    const token = getMetaToken();
     const budgetInCents = 100; // Sempre 1 dólar ($1.00 USD = 100 centavos)
 
     // Busca previamente todos os anúncios e criativos do conjunto base

@@ -26,6 +26,11 @@
   3. Atualizou a versão do script para `app.js?v=6.0` em `index.html` para forçar atualização imediata do cache nos navegadores.
   4. Realizou `git commit` e `git push` para atualizar o GitHub Pages em tempo real.
   5. Esclareceu a arquitetura: o Duplicador da Meta roda 24/7 de qualquer máquina diretamente pela web via Marketing API; a leitura de arquivos locais do OneDrive só roda se o PC do Thiago estiver ligado, ou requer ativação do Azure Directory (link azul na tela da Microsoft) para rodar 24/7 na nuvem.
+- **Thiago:** Reportou que alguma coisa quebrou a dashboard e não estava dando para clicar em nenhuma opção.
+- **Agente:**
+  1. Diagnosticou via console do Chrome headless a causa raiz exata: o commit `40c45be` havia declarado `const token = getMetaToken();` duas vezes dentro da função `startBatchDuplication()` (`app.js`), causando `Uncaught SyntaxError: Identifier 'token' has already been declared` que impedia o navegador de carregar todo o `app.js` (travando tanto o login anterior quanto todos os cliques e abas).
+  2. Removeu a declaração duplicada de `const token`, adicionou proteção contra cliques duplicados e persistência da aba ativa em `initTabs()`/`switchTab()`, e atualizou para `app.js?v=6.1`.
+  3. Validou todas as 8 abas, alternância de tema, modais, listagem de 1.218 nichos e fluxo de logout/login no Chrome headless via CDP sem nenhum erro no console.
 
 ---
 *(Este arquivo será atualizado continuamente conforme avançamos no desenvolvimento)*
