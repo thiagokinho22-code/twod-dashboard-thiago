@@ -97,17 +97,15 @@ try {
     sites = [...DEFAULT_SITES];
 }
 
-// Sessão do usuário: restaura do localStorage ou inicializa como Thiago (Administrador) por padrão
+// Sessão do usuário: restaura do localStorage se houver sessão salva
 let currentUser = null;
 try {
     const rawCur = localStorage.getItem(STORAGE_KEYS.CURRENT_USER);
-    if (rawCur) currentUser = JSON.parse(rawCur);
+    if (rawCur) {
+        const parsed = JSON.parse(rawCur);
+        if (parsed && parsed.username) currentUser = parsed;
+    }
 } catch (e) { }
-
-if (!currentUser || !currentUser.username) {
-    currentUser = { ...DEFAULT_USERS[0] }; // Padrão direto: Thiago (Administrador)
-    try { localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(currentUser)); } catch (e) { }
-}
 
 function saveUsers() {
     try { localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users)); } catch (e) { }
@@ -122,12 +120,11 @@ function saveSites() {
 // ========================================================
 
 function checkSession() {
-    // Entra direto no painel com a sessão ativa
-    if (!currentUser) {
-        currentUser = { ...DEFAULT_USERS[0] };
-        try { localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(currentUser)); } catch (e) { }
+    if (currentUser && currentUser.username) {
+        showApp();
+    } else {
+        showLogin();
     }
-    showApp();
 }
 
 function showLogin() {
@@ -152,9 +149,9 @@ function showLogin() {
 }
 
 function showApp() {
-    if (!currentUser) {
-        currentUser = { ...DEFAULT_USERS[0] };
-        try { localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(currentUser)); } catch (e) { }
+    if (!currentUser || !currentUser.username) {
+        showLogin();
+        return;
     }
 
     const loginEl = document.getElementById('login-screen');

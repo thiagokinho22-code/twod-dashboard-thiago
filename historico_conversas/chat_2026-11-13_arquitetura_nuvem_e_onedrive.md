@@ -7,7 +7,7 @@
 ## 📌 Contexto & Status Atual
 1. **Regra de Persistência no OneDrive:** Todos os arquivos de código, documentação e transcrições de chat continuam 100% centralizados nesta pasta `twod-dashboard/` no OneDrive e sincronizados no GitHub.
 2. **Dashboard Web:** Publicada no GitHub Pages em `https://thiagokinho22-code.github.io/twod-dashboard-thiago/` e com servidor local em `http://localhost:8000`.
-3. **Tela de Login:** Desativada temporariamente para acesso direto como Administrador (`Thiago`).
+3. **Tela de Login:** Restaurada com persistência de sessão no `localStorage`, suporte completo para tecla Enter, botão Acessar e Chips rápidos (`app.js?v=6.3`).
 4. **Backend Local:** Servidor Python 3.11 (`backend/server.py`) com cache em memória, mapeando 1.218 nichos do OneDrive.
 5. **Decisão Arquitetural Pendente:**
    - Para funcionamento 24/7 com o PC desligado, a API precisa rodar na nuvem conectada ao OneDrive via Microsoft Graph API (desbloqueando via *signing up for Azure* na conta pessoal `@hotmail.com`) ou utilizando armazenamento em nuvem dedicado.
@@ -36,6 +36,10 @@
   1. Adicionou o painel rápido **🔑 Conectar API do Facebook (Meta Ads)** diretamente no topo da aba **Duplicador Meta Ads** (`index.html` e `app.js?v=6.2`), sincronizado com Configurações e abrindo automaticamente se não houver token salvo.
   2. Validou no Chrome headless (`app.js?v=6.2`) com zero erros no console.
   3. Preparou orientações objetivas para obter `Client ID` / `Client Secret` no Azure/Entra ID para a API própria do OneDrive na nuvem (Render/Railway) e aguarda o padrão das campanhas do Facebook.
+- **Thiago:** Pediu para voltar com a tela de login já que o erro raiz foi resolvido.
+- **Agente:**
+  1. Reativou a tela de login em `index.html` e ajustou `checkSession()`/`showApp()` em `app.js?v=6.3` para exigir login quando sem sessão e manter o usuário logado no `localStorage` ao atualizar a página.
+  2. Validou no Chrome headless (11 checagens: bloqueio inicial, erro de senha, login com Enter, persistência no `localStorage`, logout e permissões de Alexandre vs. Thiago).
 
 ---
 *(Este arquivo será atualizado continuamente conforme avançamos no desenvolvimento)*
