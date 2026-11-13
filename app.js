@@ -1959,8 +1959,8 @@ async function startBatchDuplication() {
         logMetaTerminal(`[${currentIdx}/${total}] Duplicando conjunto para '${country.adSetName}' (${country.code})...`, 'info');
 
         try {
-            // PASSO 1: Clona o conjunto base e seus criativos via POST /{adset_id}/copies
-            const copyUrl = `https://graph.facebook.com/${META_GRAPH_VERSION}/${metaState.selectedAdSetId}/copies?access_token=${encodeURIComponent(token)}`;
+            // PASSO 1: Clona o conjunto base E TODOS OS SEUS ANÚNCIOS/CRIATIVOS via POST /{adset_id}/copies com deep_copy=true
+            const copyUrl = `https://graph.facebook.com/${META_GRAPH_VERSION}/${metaState.selectedAdSetId}/copies?access_token=${encodeURIComponent(token)}&deep_copy=true&status_option=${encodeURIComponent(initialStatus)}`;
             const copyResp = await fetch(copyUrl, { method: 'POST' });
             const copyData = await copyResp.json();
 
