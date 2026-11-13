@@ -78,6 +78,10 @@ O projeto foi retomado a partir de `PROJETO_CONTEXTO.md`.
       - Removida a persistência automática de sessão em `localStorage` que fazia o painel entrar direto como Thiago nos recarregamentos.
       - O TwoD Hub agora **sempre** abre na tela de login, permitindo a Thiago, Alexandre ou Wesley escolherem seu perfil de acesso (ou usar os chips rápidos de 1 clique).
       - Commit `dd27081` enviado ao GitHub Pages.
+  18. **Correção de Duplicação Profunda (Anúncios & Criativos Clonados):**
+      - Identificado que a chamada `POST /{adset_id}/copies` na Meta API por padrão duplica apenas a estrutura do conjunto de anúncios sem os anúncios filhos (casca vazia).
+      - Adicionado o parâmetro oficial `deep_copy=true` e `status_option`, garantindo que todos os anúncios, vídeos, textos e criativos do conjunto base sejam integralmente clonados nos novos conjuntos de cada país.
+      - Commit `e6a4a8f` enviado ao GitHub Pages.
 
 ---
 *(Este arquivo será atualizado continuamente conforme avançamos no desenvolvimento)*
