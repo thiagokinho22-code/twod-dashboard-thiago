@@ -62,6 +62,10 @@
      - **Meta Ads:** inicia como `⏳ Verificando...`, exibe status real do token e total real de contas de anúncio carregadas.
      - **FUN Digital & WordPress:** atualizam contadores reais de sites ativos/ocultos em tempo real com botões diretos para suas abas.
   2. Validou no Chrome headless (`app.js?v=6.8`, zero erros no console, card inicial atualizando automaticamente com os 1.218 nichos).
+- **Thiago:** Enviou o fluxo operacional completo + 9 prints do Ads Manager e TranslateX Cache definindo o padrão oficial de subida de campanhas no Facebook (Sales, ABO $1/dia, `ad_click`, `Futuretech Dynamics LLC`, rotação de páginas por BM, novo formato de 1 criativo por anúncio numerados de 1 a 6 com `4x3` reservado como "em construção", textos `2-3-2`, URLs com tag de idioma + UTMs e desativação de Advantage+).
+- **Agente:**
+  1. Documentou integralmente toda a especificação técnica e mapeamento dos 9 prints em [`padrao_campanhas_meta_ads.md`](./padrao_campanhas_meta_ads.md).
+  2. Levantou os 5 pontos finais de alinhamento (sufixo `PostID` vs `UTM-01`, tradução de textos `2-3-2` por idioma, nome dos 1–6 anúncios individuais, tabela `Site ↔ BM ↔ Pixel` e leitura `GET` de campanha-modelo na Meta API) antes de construir o Publicador Padrão + upgrade do Duplicador.
 
 ---
 *(Este arquivo será atualizado continuamente conforme avançamos no desenvolvimento)*
