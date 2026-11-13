@@ -1142,7 +1142,7 @@ function changeMyPassword() {
 // META MARKETING API & DUPLICADOR POR BLOCOS DE PAÍSES
 // ========================================================
 
-const META_DEFAULT_TOKEN = 'EAAO1VpZB2A6kBSz2fdMv3hhG5g5NZAUZC13I1NB2ZCDxt1C8Nzjd3jGJZCBa41fzxNA5SRnHWdvBFm37Azq8wajZARsiEn1bPSgHINCARZAbaM7631DTjCUdOyiGHpu7LsPN6ihXdjAyrecZC9HsFT2S3Ny3nRZBWIW5jllZBWghk5paaw5fngnqn165rlNPV1TtxRGWZAuNh4ZCjMTv1pFrJZCxNVzX4lkoCS052CVYCGE5U0eZCp7yGPiks4Gl1LS1nPa6tn6ZBsJGOa5tZAxRLSevneEH0vToifm3';
+const META_DEFAULT_TOKEN = '';
 const META_DEFAULT_ACCOUNT_ID = 'act_522793227047438';
 const META_GRAPH_VERSION = 'v21.0';
 
@@ -1355,7 +1355,14 @@ function onSettingsTabOpened() {
 // Testa e recarrega contas da Meta
 async function testAndReloadMetaApi(forceReload = false) {
     const token = getMetaToken();
-    if (!token) return;
+    if (!token) {
+        updateMetaStatusUI(false, 'Nenhum token configurado.');
+        const selectAcc = document.getElementById('select-meta-account');
+        const countLabel = document.getElementById('label-account-count');
+        if (selectAcc) selectAcc.innerHTML = '<option value="">Cole seu Token na aba Configurações primeiro...</option>';
+        if (countLabel) countLabel.innerText = '(Sem token)';
+        return;
+    }
 
     try {
         const res = await fetch(`https://graph.facebook.com/${META_GRAPH_VERSION}/me?access_token=${encodeURIComponent(token)}&fields=id,name,permissions`);
@@ -1364,6 +1371,10 @@ async function testAndReloadMetaApi(forceReload = false) {
         if (data.error) {
             console.error('Erro na Meta API:', data.error);
             updateMetaStatusUI(false, data.error.message);
+            const selectAcc = document.getElementById('select-meta-account');
+            const countLabel = document.getElementById('label-account-count');
+            if (selectAcc) selectAcc.innerHTML = '<option value="">Token inválido ou expirado</option>';
+            if (countLabel) countLabel.innerText = '(Erro)';
             return;
         }
 
@@ -1397,7 +1408,7 @@ function updateMetaStatusUI(isSuccess, errorMessage = null, userData = null) {
             badgeOverview.innerText = '🟢 Conectado';
         }
         if (userHeading) userHeading.innerText = `Meta Marketing API (${userData.name})`;
-        if (statusDesc) statusDesc.innerText = `Conexão ativa com Graph API ${META_GRAPH_VERSION}. Token com permissão total em todas as BMs.`;
+        if (statusDesc) statusDesc.innerText = `Conexão ativa com Graph API ${META_GRAPH_VERSION}. Token salvo com segurança no seu navegador.`;
         if (cardSubinfo) cardSubinfo.innerText = `${userData.name} (ID: ${userData.id})`;
 
         if (dupName) dupName.innerText = userData.name;
@@ -1409,14 +1420,20 @@ function updateMetaStatusUI(isSuccess, errorMessage = null, userData = null) {
     } else {
         if (badgeOverview) {
             badgeOverview.className = 'badge-status status-pending';
-            badgeOverview.innerText = '🔴 Erro de Conexão';
+            badgeOverview.innerText = '🔴 Desconectado';
         }
-        if (statusDesc) statusDesc.innerText = `Falha ao validar token: ${errorMessage || 'Token expirado ou inválido'}`;
+        if (userHeading) userHeading.innerText = 'Meta Marketing API (Desconectado)';
+        if (statusDesc) statusDesc.innerText = errorMessage ? `Status: ${errorMessage}` : 'Token não configurado ou expirado. Configure na aba Configurações.';
+        if (cardSubinfo) cardSubinfo.innerText = 'Nenhum token ativo no navegador';
+
+        if (dupName) dupName.innerText = 'Duplicador Meta Ads';
         if (dupBadge) {
             dupBadge.className = 'badge-status status-pending';
-            dupBadge.innerText = '🔴 Desconectado';
+            dupBadge.innerText = '🔴 Sem Token Ativo';
         }
-        if (dupSub) dupSub.innerText = `Erro: ${errorMessage || 'Verifique o token nas configurações'}`;
+        if (dupSub) {
+            dupSub.innerHTML = `⚠️ ${errorMessage || 'Nenhum token configurado.'} <a href="javascript:void(0)" onclick="switchTab('configuracoes')" style="color: var(--accent-primary); text-decoration: underline; font-weight: 600; margin-left: 6px;">Preencher Token nas Configurações →</a>`;
+        }
     }
 }
 
@@ -2045,6 +2062,13 @@ function clearMetaLog() {
 async function startBatchDuplication() {
     if (metaState.isDuplicating) return;
 
+    const token = getMetaToken();
+    if (!token) {
+        alert('Por favor, informe seu Token de Acesso da Meta na aba Configurações antes de duplicar.');
+        switchTab('configuracoes');
+        return;
+    }
+
     if (!metaState.selectedAccountId) {
         alert('Por favor, selecione uma Conta de Anúncios.');
         return;
@@ -2324,10 +2348,17 @@ async function saveMetaSettingsFromUI() {
     if (token) {
         metaState.token = token;
         localStorage.setItem(STORAGE_KEYS.META_TOKEN, token);
+    } else {
+        metaState.token = '';
+        localStorage.removeItem(STORAGE_KEYS.META_TOKEN);
     }
+
     if (accountId) {
         metaState.defaultAccountId = accountId;
         localStorage.setItem(STORAGE_KEYS.META_ACCOUNT, accountId);
+    } else {
+        metaState.defaultAccountId = '';
+        localStorage.removeItem(STORAGE_KEYS.META_ACCOUNT);
     }
 
     // Salva no backend local se estiver ativo
@@ -2344,7 +2375,18 @@ async function saveMetaSettingsFromUI() {
         // Ignora se estiver fora do localhost
     }
 
-    alert('Configurações da Meta salvas com sucesso!');
+    if (!token) {
+        metaState.user = null;
+        metaState.accounts = [];
+        metaState.campaigns = [];
+        metaState.adsets = [];
+        metaState.initialized = false;
+        updateMetaStatusUI(false, 'Token removido.');
+        alert('Token removido com sucesso!');
+        return;
+    }
+
+    alert('Token salvo com sucesso no seu navegador!');
     testAndReloadMetaApi(true);
 }
 

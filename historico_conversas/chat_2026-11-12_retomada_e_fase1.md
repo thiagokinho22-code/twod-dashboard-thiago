@@ -103,5 +103,12 @@ O projeto foi retomado a partir de `PROJETO_CONTEXTO.md`.
       - **Atualização Dinâmica em Tempo Real:** Conforme a duplicação em massa acontece, cada país clonado tem seu card transformado em `✅ Já na Campanha`, seu checkbox desmarcado e o badge do bloco incrementado ao vivo sem precisar recarregar a página.
       - Versão do script atualizada para `app.js?v=5.4`. Commit `f6da850` enviado para a branch `main` e publicado no GitHub Pages.
 
+  21. **Blindagem de Segurança & Remoção de Tokens Hardcoded:**
+      - Alinhado com Thiago sobre a segurança de chaves de API: o repositório no GitHub é público, o que tornaria inseguro manter qualquer token de acesso fixo no código-fonte.
+      - Removido 100% dos tokens de teste fixos em `app.js` (`META_DEFAULT_TOKEN = ''`) e `backend/.env`.
+      - O dashboard agora opera com **preenchimento manual sob demanda**: cada usuário informa seu token de acesso na aba **Configurações**, salvando localmente apenas no `localStorage` do seu próprio navegador.
+      - Interface adaptada com alertas claros de status desconectado, atalhos visuais para abrir as Configurações quando sem token, e validações para não permitir disparos acidentais sem credencial.
+      - Versão do script atualizada para `app.js?v=5.5`.
+
 ---
 *(Este arquivo será atualizado continuamente conforme avançamos no desenvolvimento)*
