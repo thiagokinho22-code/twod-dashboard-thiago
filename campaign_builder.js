@@ -50,6 +50,7 @@ let cbState = {
     pages: [],
     selectedPageIds: new Set(),
     pixels: [],
+    customConversions: [],
     campaigns: [],
     selectedNicheName: '',
     selectedNicheObj: null,
@@ -191,6 +192,7 @@ async function onCampaignBuilderAccountChanged() {
     cbState.bmId = cbState.selectedAccount?.business?.id || '';
     cbState.bmName = cbState.selectedAccount?.business?.name || '';
     cbState.calibratedModel = null;
+    cbState.customConversions = [];
 
     const bmBadge = document.getElementById('cb-bm-badge');
     if (bmBadge) {
@@ -210,6 +212,7 @@ async function onCampaignBuilderAccountChanged() {
 
     await Promise.all([
         loadBuilderPixels(accountId),
+        loadBuilderCustomConversions(accountId),
         loadBuilderPagesForBM(accountId, cbState.bmId),
         loadBuilderModelCampaigns(accountId)
     ]);
@@ -260,6 +263,18 @@ async function loadBuilderPixels(accountId) {
         if (countEl) countEl.innerText = `(${pixels.length} disponíveis)`;
     } catch (e) {
         select.innerHTML = '<option value="">Erro ao buscar pixels</option>';
+    }
+}
+
+async function loadBuilderCustomConversions(accountId) {
+    const token = getMetaToken();
+    if (!token || !accountId) return;
+    try {
+        const resp = await fetch(`https://graph.facebook.com/${META_GRAPH_VERSION}/${accountId}/customconversions?access_token=${encodeURIComponent(token)}&fields=id,name,custom_event_type,pixel&limit=50`);
+        const data = await resp.json();
+        cbState.customConversions = Array.isArray(data.data) ? data.data : [];
+    } catch (e) {
+        cbState.customConversions = [];
     }
 }
 
@@ -397,7 +412,7 @@ async function inspectModelCampaign() {
         const campResp = await fetch(`https://graph.facebook.com/${META_GRAPH_VERSION}/${campId}?access_token=${encodeURIComponent(token)}&fields=id,name,objective,buying_type,is_adset_budget_sharing_enabled`);
         const campData = await campResp.json();
 
-        const adsetsResp = await fetch(`https://graph.facebook.com/${META_GRAPH_VERSION}/${campId}/adsets?access_token=${encodeURIComponent(token)}&fields=id,name,optimization_goal,billing_event,bid_strategy,destination_type,promoted_object,targeting,dsa_beneficiary,dsa_payor,daily_budget&limit=1`);
+        const adsetsResp = await fetch(`https://graph.facebook.com/${META_GRAPH_VERSION}/${campId}/adsets?access_token=${encodeURIComponent(token)}&fields=id,name,optimization_goal,billing_event,bid_strategy,destination_type,promoted_object,targeting,dsa_beneficiary,dsa_payor,regional_regulated_categories,regional_regulation_identities,daily_budget&limit=1`);
         const adsetsData = await adsetsResp.json();
         const sampleAdSet = (adsetsData.data && adsetsData.data[0]) || null;
 
@@ -430,14 +445,17 @@ async function inspectModelCampaign() {
 
         if (box) {
             const po = sampleAdSet?.promoted_object ? JSON.stringify(sampleAdSet.promoted_object) : 'Não detectado';
+            const optType = sampleCreative?.asset_feed_spec?.optimization_type || 'STANDARD';
+            const regInfo = sampleAdSet?.dsa_beneficiary
+                || (sampleAdSet?.regional_regulation_identities?.universal_beneficiary ? `BM ID ${sampleAdSet.regional_regulation_identities.universal_beneficiary}` : 'Não definido na amostra');
             box.innerHTML = `
                 <strong>✅ Parâmetros espelhados do modelo:</strong> <code>${campData.name}</code><br>
                 • <b>Objective:</b> <code>${campData.objective}</code> |
                 <b>Optimization:</b> <code>${sampleAdSet?.optimization_goal || 'VALUE'}</code> |
                 <b>Destination:</b> <code>${sampleAdSet?.destination_type || 'WEBSITE'}</code><br>
                 • <b>Promoted Object (Pixel/Evento):</b> <code>${po}</code><br>
-                • <b>DSA Transparency:</b> <code>${sampleAdSet?.dsa_beneficiary || 'Não definido na amostra'}</code> |
-                <b>Criativo API:</b> <code>${sampleCreative?.asset_feed_spec ? 'asset_feed_spec (2-3-2)' : 'object_story_spec'}</code>
+                • <b>Transparency / DSA:</b> <code>${regInfo}</code> |
+                <b>Criativo API:</b> <code>${sampleCreative?.asset_feed_spec ? `video_data + ${optType} (2-3-2)` : 'object_story_spec'}</code>
             `;
         }
     } catch (e) {
@@ -1019,6 +1037,83 @@ async function uploadOneDriveVideoToMeta(accountId, video, token, uploadCache) {
     return result;
 }
 
+function buildPromotedObjectForPixel(pixelId, modelAdSet) {
+    const modelPo = modelAdSet?.promoted_object;
+    if (modelPo && modelPo.pixel_id === pixelId) {
+        const sanitized = {
+            pixel_id: pixelId,
+            custom_event_type: modelPo.custom_event_type || 'OTHER',
+            smart_pse_enabled: false
+        };
+        if (modelPo.custom_conversion_id) {
+            sanitized.custom_conversion_id = modelPo.custom_conversion_id;
+        } else if (modelPo.custom_event_str) {
+            sanitized.custom_event_str = modelPo.custom_event_str;
+        } else {
+            sanitized.custom_event_str = 'ad_click';
+        }
+        return sanitized;
+    }
+
+    const matchedCc = (cbState.customConversions || []).find(cc =>
+        cc.pixel?.id === pixelId && /ad[_\s-]*click/i.test(cc.name || '')
+    );
+    if (matchedCc) {
+        return {
+            pixel_id: pixelId,
+            custom_event_type: matchedCc.custom_event_type || 'OTHER',
+            custom_conversion_id: matchedCc.id,
+            smart_pse_enabled: false
+        };
+    }
+
+    return {
+        pixel_id: pixelId,
+        custom_event_type: 'OTHER',
+        custom_event_str: 'ad_click',
+        smart_pse_enabled: false
+    };
+}
+
+const EU_DSA_COUNTRIES = new Set([
+    'AT', 'BE', 'BG', 'HR', 'CY', 'CZ', 'DK', 'EE', 'FI', 'FR',
+    'DE', 'GR', 'HU', 'IE', 'IT', 'LV', 'LT', 'LU', 'MT', 'NL',
+    'PL', 'PT', 'RO', 'SK', 'SI', 'ES', 'SE'
+]);
+
+async function createAdSetWithFallbacks(accountId, adSetPayload, token) {
+    let res = await metaFormPost(`/${accountId}/adsets`, adSetPayload, token);
+    const tried = new Set();
+
+    for (let attempt = 0; attempt < 5 && res.error; attempt++) {
+        const msg = (res.error.message || '').toLowerCase();
+        const sub = String(res.error.error_subcode || '');
+
+        if (!tried.has('dsa') && (msg.includes('dsa_beneficiary') || msg.includes('dsa_payor') || msg.includes('beneficiary'))) {
+            tried.add('dsa');
+            delete adSetPayload.dsa_beneficiary;
+            delete adSetPayload.dsa_payor;
+        } else if (!tried.has('reg') && (msg.includes('regional_regulat') || msg.includes('universal_beneficiary') || msg.includes('voluntary_verification'))) {
+            tried.add('reg');
+            delete adSetPayload.regional_regulation_identities;
+            delete adSetPayload.regional_regulated_categories;
+        } else if (!tried.has('dest') && (msg.includes('destination_type') || msg.includes('promoted_object') || sub === '1487877')) {
+            tried.add('dest');
+            delete adSetPayload.destination_type;
+        } else if (!tried.has('locale') && adSetPayload.targeting?.locales && (msg.includes('locale') || msg.includes('targeting'))) {
+            tried.add('locale');
+            adSetPayload.targeting.locales = [7, 23];
+        } else if (!tried.has('value') && msg.includes('value')) {
+            tried.add('value');
+            adSetPayload.optimization_goal = 'OFFSITE_CONVERSIONS';
+        } else {
+            break;
+        }
+        res = await metaFormPost(`/${accountId}/adsets`, adSetPayload, token);
+    }
+    return res;
+}
+
 async function launchStandardCampaign() {
     if (cbState.isLaunching) return;
 
@@ -1138,7 +1233,7 @@ async function launchStandardCampaign() {
             const targeting = {
                 geo_locations: {
                     countries: [country.code],
-                    location_types: ['home', 'recent']
+                    location_types: ['frequently_in', 'home', 'recent']
                 },
                 age_min: 18,
                 targeting_automation: { advantage_audience: 0 }
@@ -1148,9 +1243,7 @@ async function launchStandardCampaign() {
             }
 
             const modelAdSet = cbState.calibratedModel?.adset;
-            const promotedObj = modelAdSet?.promoted_object
-                ? { ...modelAdSet.promoted_object, pixel_id: pixelId }
-                : { pixel_id: pixelId, custom_event_type: 'OTHER', custom_event_str: 'ad_click' };
+            const promotedObj = buildPromotedObjectForPixel(pixelId, modelAdSet);
 
             const adSetPayload = {
                 name: country.adSetName,
@@ -1159,12 +1252,32 @@ async function launchStandardCampaign() {
                 billing_event: 'IMPRESSIONS',
                 optimization_goal: modelAdSet?.optimization_goal || 'VALUE',
                 bid_strategy: modelAdSet?.bid_strategy || 'LOWEST_COST_WITHOUT_CAP',
-                destination_type: 'WEBSITE',
                 status: initialStatus,
                 promoted_object: promotedObj,
                 targeting
             };
-            if (advertiserName) {
+            if (modelAdSet?.destination_type && modelAdSet.destination_type !== 'UNDEFINED') {
+                adSetPayload.destination_type = modelAdSet.destination_type;
+            } else if (!modelAdSet) {
+                adSetPayload.destination_type = 'WEBSITE';
+            }
+
+            const universalEntityId = modelAdSet?.regional_regulation_identities?.universal_beneficiary || cbState.bmId;
+            if (universalEntityId) {
+                adSetPayload.regional_regulation_identities = {
+                    universal_beneficiary: universalEntityId,
+                    universal_payer: modelAdSet?.regional_regulation_identities?.universal_payer || universalEntityId
+                };
+            }
+            if (country.code === 'BR') {
+                adSetPayload.regional_regulated_categories = ['BRAZIL_REGULATION', 'VOLUNTARY_VERIFICATION'];
+            } else if (country.code === 'ES') {
+                adSetPayload.regional_regulated_categories = ['SPAIN_FINSERV', 'VOLUNTARY_VERIFICATION'];
+            } else if (universalEntityId) {
+                adSetPayload.regional_regulated_categories = ['VOLUNTARY_VERIFICATION'];
+            }
+
+            if (advertiserName && (EU_DSA_COUNTRIES.has(country.code) || modelAdSet?.dsa_beneficiary)) {
                 adSetPayload.dsa_beneficiary = advertiserName;
                 adSetPayload.dsa_payor = advertiserName;
             }
@@ -1172,20 +1285,7 @@ async function launchStandardCampaign() {
                 adSetPayload.start_time = new Date(scheduleRaw).toISOString();
             }
 
-            let adSetRes = await metaFormPost(`/${accountId}/adsets`, adSetPayload, token);
-            // Retry automático caso conta exija remoção de dsa_* em regiões não-DSA ou OFFSITE_CONVERSIONS
-            if (adSetRes.error) {
-                const msg = (adSetRes.error.message || '').toLowerCase();
-                if (msg.includes('dsa_beneficiary') || msg.includes('dsa_payor')) {
-                    delete adSetPayload.dsa_beneficiary;
-                    delete adSetPayload.dsa_payor;
-                    adSetRes = await metaFormPost(`/${accountId}/adsets`, adSetPayload, token);
-                }
-                if (adSetRes.error && msg.includes('value')) {
-                    adSetPayload.optimization_goal = 'OFFSITE_CONVERSIONS';
-                    adSetRes = await metaFormPost(`/${accountId}/adsets`, adSetPayload, token);
-                }
-            }
+            const adSetRes = await createAdSetWithFallbacks(accountId, adSetPayload, token);
 
             if (adSetRes.error || !adSetRes.id) {
                 logBuilderTerminal(`❌ [${country.adSetName}] Erro ao criar conjunto: ${adSetRes.error?.message || JSON.stringify(adSetRes)}`, 'error');
@@ -1208,17 +1308,28 @@ async function launchStandardCampaign() {
                 const page = activePages[pageCursor % activePages.length];
                 pageCursor++;
 
+                const videoData = {
+                    video_id: asset.video_id,
+                    call_to_action: {
+                        type: 'DOWNLOAD',
+                        value: { link: localizedUrl }
+                    }
+                };
+                if (asset.thumbnail_url) {
+                    videoData.image_url = asset.thumbnail_url;
+                }
+
                 const creativePayload = {
                     name: `${country.adSetName} - ${asset.adName}`,
-                    object_story_spec: { page_id: page.id },
+                    object_story_spec: {
+                        page_id: page.id,
+                        video_data: videoData
+                    },
                     asset_feed_spec: {
-                        videos: [{ video_id: asset.video_id, thumbnail_url: asset.thumbnail_url || undefined }],
                         bodies: [{ text: tp1 }, { text: tp2 }],
                         titles: [{ text: th1 }, { text: th2 }, { text: th3 }],
                         descriptions: [{ text: d1 }, { text: td2 }],
-                        ad_formats: ['SINGLE_VIDEO'],
-                        call_to_action_types: ['DOWNLOAD'],
-                        link_urls: [{ website_url: localizedUrl }]
+                        optimization_type: 'DEGREES_OF_FREEDOM'
                     },
                     degrees_of_freedom_spec: {
                         creative_features_spec: {

@@ -71,6 +71,15 @@
   1. Implementou a aba completa **Gerador de Campanhas Padrão TwoD** (`#tab-gerador-campanhas` em `index.html`, `styles.css`, `app.js?v=6.9` e módulo dedicado `campaign_builder.js?v=1.0`).
   2. Integrou no `backend/server.py`: `/api/graph/file/{id}?format=json` (URL direta CDN Microsoft para Meta `advideos`), `POST /api/meta/upload-video` (fallback multipart) e `POST /api/translate` (tradução automática de `2-3-2` preservando maiúsculas e emojis).
   3. Validou sintaxe Python, rotas HTTP (`/campaign_builder.js`, `?format=json`, `/api/translate`) e fluxo completo no Chrome headless CDP (zero erros JS no console, 1.218 nichos carregados, resolução automática de vídeos por idioma/país, slots `01–06` + `07–09 4x3 Em Construção`, URLs estilo `TranslateX` sem `/pt/`, UTMs e nomenclatura padrão).
+- **Thiago:** Forneceu o Access Token da Meta Marketing API para conexão e calibragem direta na conta.
+- **Agente:**
+  1. Salvou `META_ACCESS_TOKEN` e `DEFAULT_AD_ACCOUNT_ID=act_522793227047438` apenas no arquivo local protegido `backend/.env` (fora do git).
+  2. Inspecionou em modo somente leitura (`GET`) campanhas, conjuntos, conversões personalizadas e criativos reais das contas `MON-TWODCOMPANY-01` (`act_522793227047438`) e `CDZ-Blog.Blingalax-05` (`act_1631235808311708`), confirmando conta ativa de `Thiago DuploCanto` com acesso às contas de anúncios, `Pixel de TWODCOMPANY 01` (`1166550684896417`), Custom Conversion `Ad Click` (`1310525259931924`) e as 14 páginas isoladas da BM `MON Digital`.
+  3. Calibrou `campaign_builder.js?v=1.1` com base no formato real da Graph API v21.0:
+     - Criativos `2-3-2` via `object_story_spec.video_data` + `asset_feed_spec` (`optimization_type: "DEGREES_OF_FREEDOM"`) e desativação explícita de Advantage+ (`degrees_of_freedom_spec`).
+     - Resolução automática de `custom_conversion_id` (`Ad Click`) e sanitização de `pixel_rule` na criação de `promoted_object`.
+     - Fallback automático de `destination_type`, `regional_regulation_identities`, `dsa_beneficiary`/`dsa_payor` (UE/BR/US) e `locales` (`Spanish (All)` -> `[1002]` com fallback `[7, 23]`).
+  4. Validou ponta a ponta no Chrome headless CDP (`campaign_builder.js?v=1.1`): `Thiago DuploCanto`, 46 contas carregadas, Pixel `Pixel de TWODCOMPANY 01` auto-selecionado, 14 páginas da BM `MON Digital`, inspeção automática da campanha modelo `25143,SudokuDiario,MON-TWODCOMPANY-01,Alexandre,UTM-1`, resolução de 7 cards de criativos do nicho `5G 05.05.25` e `CHROME_JS_ERRORS: []`.
 
 ---
 *(Este arquivo será atualizado continuamente conforme avançamos no desenvolvimento)*
