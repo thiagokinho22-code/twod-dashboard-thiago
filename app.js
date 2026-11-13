@@ -483,10 +483,16 @@ function renderSitesTable() {
         tbody.appendChild(tr);
     });
 
-    // Atualiza contadores
+    // Atualiza contadores na aba FUN Digital e no card da Visão Geral
     const totalVisiveis = sites.filter(s => !s.hidden).length;
+    const totalOcultos = sites.length - totalVisiveis;
     document.getElementById('badge-total-sites').innerText = totalVisiveis;
-    document.getElementById('sites-counter-text').innerText = `${totalVisiveis} sites ativos na fila (${sites.length - totalVisiveis} ocultos em teste)`;
+    document.getElementById('sites-counter-text').innerText = `${totalVisiveis} sites ativos na fila (${totalOcultos} ocultos em teste)`;
+
+    const funHeading = document.getElementById('fun-card-heading');
+    const funSub = document.getElementById('fun-card-subinfo');
+    if (funHeading) funHeading.innerText = `FUN Digital (${totalVisiveis} Sites)`;
+    if (funSub) funSub.innerText = `${totalVisiveis} ativos na fila (${totalOcultos} ocultos)`;
 }
 
 function toggleSiteVisibility(id) {
@@ -669,6 +675,85 @@ let oneDriveData = {
     audioFilesMap: new Map(), // chave: `${nicheName}_${lang}` -> File/Handle
     videoFilesMap: new Map()  // chave: `${nicheName}_${num}` -> File/Handle
 };
+let oneDriveOverviewMeta = {
+    state: 'connecting',
+    mode: 'graph_cloud',
+    hydrating: false,
+    folderName: ''
+};
+
+function updateOneDriveOverviewCard(opts = {}) {
+    oneDriveOverviewMeta = { ...oneDriveOverviewMeta, ...opts };
+    const badge = document.getElementById('badge-onedrive-status');
+    const heading = document.getElementById('onedrive-card-heading');
+    const desc = document.getElementById('onedrive-card-desc');
+    const subinfo = document.getElementById('onedrive-card-subinfo');
+    if (!badge || !heading || !desc || !subinfo) return;
+
+    const {
+        state,
+        mode,
+        hydrating,
+        folderName,
+        nichesCount = oneDriveData.niches.length,
+        audiosCount = 0,
+        videosCount = 0
+    } = oneDriveOverviewMeta;
+
+    let apiHost = API_BASE_URL;
+    try { apiHost = new URL(API_BASE_URL).host; } catch (e) { }
+
+    if (state === 'connecting') {
+        badge.className = 'badge-status status-pending';
+        badge.innerText = '⏳ Conectando...';
+        heading.innerText = 'Microsoft OneDrive';
+        desc.innerText = `Consultando API (${apiHost}) e cache de mídia...`;
+        subinfo.innerText = 'Verificando status...';
+        return;
+    }
+
+    if (state === 'auth_pending') {
+        badge.className = 'badge-status status-pending';
+        badge.innerText = '🟡 Autorizar Nuvem';
+        heading.innerText = 'Microsoft OneDrive (OAuth Pendente)';
+        desc.innerText = `Servidor online em ${apiHost}, mas falta autorizar a conta Microsoft em Criativos.`;
+        subinfo.innerText = 'Clique em Abrir Criativos para autorizar';
+        return;
+    }
+
+    if (state === 'connected') {
+        const isCloud = mode === 'graph_cloud';
+        badge.className = 'badge-status status-active';
+        badge.innerText = hydrating
+            ? `⏳ Sincronizando (${nichesCount} nichos)`
+            : (isCloud ? '☁️ Conectado 24/7' : '🟢 Conectado');
+
+        heading.innerText = isCloud
+            ? 'Microsoft OneDrive (Nuvem 24/7)'
+            : (folderName ? `Microsoft OneDrive (${folderName})` : 'Microsoft OneDrive (Local)');
+
+        if (nichesCount > 0) {
+            desc.innerText = hydrating
+                ? `Graph API ativa • ${nichesCount} nichos (${audiosCount} áudios, ${videosCount} vídeos) indexando em segundo plano...`
+                : `Conectado via ${isCloud ? 'Microsoft Graph API' : 'leitura local'} • ${nichesCount} nichos, ${audiosCount} áudios e ${videosCount} vídeos.`;
+        } else {
+            desc.innerText = isCloud
+                ? 'Conectado à conta Microsoft. Carregando índice de pastas...'
+                : 'Conectado à pasta local. Carregando arquivos...';
+        }
+
+        subinfo.innerText = isCloud
+            ? `API Nuvem: ${apiHost}`
+            : (oneDriveData.isApiMode ? `API Local: ${apiHost}` : 'Leitura direta via navegador');
+        return;
+    }
+
+    badge.className = 'badge-status status-pending';
+    badge.innerText = '🔴 Desconectado';
+    heading.innerText = 'Microsoft OneDrive';
+    desc.innerText = `Servidor (${apiHost}) indisponível no momento e nenhuma pasta local conectada.`;
+    subinfo.innerText = 'Conecte pela nuvem ou pasta local em Criativos';
+}
 
 async function connectOneDriveCloudAPI() {
     try {
@@ -686,6 +771,7 @@ async function connectOneDriveCloudAPI() {
 
 // 1. Conexão Automática via API Backend
 async function checkBackendAPI() {
+    updateOneDriveOverviewCard({ state: 'connecting' });
     try {
         const res = await fetch(`${API_BASE_URL}/api/status`);
         if (!res.ok) return false;
@@ -704,11 +790,25 @@ async function checkBackendAPI() {
 
         if (data.status === 'online' && data.onedrive_accessible) {
             console.log('✅ Backend API detectado:', data);
+            updateOneDriveOverviewCard({
+                state: 'connected',
+                mode: data.mode,
+                hydrating: Boolean(data.hydrating),
+                nichesCount: data.graph_count || oneDriveData.niches.length
+            });
             await loadNichesFromAPI(false, data);
             return true;
         }
+
+        if (data.status === 'online' && data.graph_configured && !data.graph_connected) {
+            updateOneDriveOverviewCard({ state: 'auth_pending', mode: data.mode });
+            return false;
+        }
     } catch (e) {
-        console.log('Backend API não detectado localmente.');
+        console.log('Backend API não detectado no momento.');
+    }
+    if (!oneDriveHandle) {
+        updateOneDriveOverviewCard({ state: 'disconnected' });
     }
     return false;
 }
@@ -740,6 +840,9 @@ async function loadNichesFromAPI(forceReload = false, statusData = null) {
         if (json.success && json.niches) {
             oneDriveData.niches = json.niches;
             oneDriveData.isApiMode = true;
+            oneDriveOverviewMeta.state = 'connected';
+            oneDriveOverviewMeta.mode = json.source === 'graph' ? 'graph_cloud' : 'local_folder';
+            oneDriveOverviewMeta.hydrating = Boolean(json.hydrating);
             renderOneDriveStatsAndTable();
             if (badge && json.source === 'graph') {
                 badge.textContent = json.hydrating
@@ -1073,6 +1176,15 @@ function renderOneDriveStatsAndTable() {
     document.getElementById('stat-audios-count').textContent = totalAudios;
     document.getElementById('stat-videos-count').textContent = totalVideos;
 
+    updateOneDriveOverviewCard({
+        state: 'connected',
+        mode: oneDriveData.isApiMode ? oneDriveOverviewMeta.mode : 'browser_folder',
+        folderName: oneDriveHandle ? oneDriveHandle.name : '',
+        nichesCount: totalNiches,
+        audiosCount: totalAudios,
+        videosCount: totalVideos
+    });
+
     filterNichesTable();
 }
 
@@ -1218,10 +1330,15 @@ async function checkSavedOneDriveHandle() {
             if (perm === 'granted') {
                 oneDriveHandle = saved;
                 scanOneDriveFiles();
+                return;
             }
         }
     } catch (e) {
         console.log('Nenhum handle pré-salvo do OneDrive.');
+    }
+
+    if (oneDriveOverviewMeta.state === 'connecting') {
+        updateOneDriveOverviewCard({ state: 'disconnected' });
     }
 }
 
@@ -1594,6 +1711,10 @@ async function loadMetaAccounts(forceReload = false) {
             populateAccountsSelect(sorted);
 
             if (countLabel) countLabel.innerText = `(${sorted.length} contas encontradas)`;
+            const metaDescEl = document.getElementById('meta-status-desc');
+            if (metaDescEl) {
+                metaDescEl.innerText = `Conexão ativa com Graph API ${META_GRAPH_VERSION}. ${sorted.length} contas de anúncio carregadas.`;
+            }
         } else {
             select.innerHTML = '<option value="">Nenhuma conta encontrada</option>';
             if (countLabel) countLabel.innerText = '(0 contas)';

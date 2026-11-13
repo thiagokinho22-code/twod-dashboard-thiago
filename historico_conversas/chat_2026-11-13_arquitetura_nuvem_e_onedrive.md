@@ -55,6 +55,13 @@
 - **Agente:**
   1. Validou ao vivo a API na nuvem (`https://twod-dashboard-thiago.onrender.com/api/status`, `/api/onedrive/graph-status` e `/api/onedrive/niches?source=graph`), confirmando `mode: "graph_cloud"`, conta `thiago.100g@hotmail.com` conectada, indexação `/delta` ativa e streaming HTTP `302` via CDN Microsoft para áudio e vídeo direto do Render.
   2. Definiu `https://twod-dashboard-thiago.onrender.com` como URL padrão de nuvem em `getDefaultBackendUrl()` (`app.js?v=6.7` e `index.html`), garantindo conexão automática 24/7 no GitHub Pages mesmo com o PC principal desligado.
+- **Thiago:** Apontou que a tela inicial (`Visão Geral`) continuava mostrando o card do OneDrive como "Aguardando Conexão" em vez de conversar com os menus reais.
+- **Agente:**
+  1. Conectou os 4 cards da tela inicial (`#tab-visao-geral` em `index.html`) diretamente aos dados em tempo real das respectivas abas via `app.js?v=6.8`:
+     - **OneDrive (`updateOneDriveOverviewCard`):** reflete estado real (`Conectando`, `Sincronizando`, `☁️ Conectado 24/7` ou `🟢 Conectado` local, `Autorizar Nuvem`, `Desconectado`), além dos totais reais de nichos/áudios/vídeos e botão `Abrir Criativos 🎬`.
+     - **Meta Ads:** inicia como `⏳ Verificando...`, exibe status real do token e total real de contas de anúncio carregadas.
+     - **FUN Digital & WordPress:** atualizam contadores reais de sites ativos/ocultos em tempo real com botões diretos para suas abas.
+  2. Validou no Chrome headless (`app.js?v=6.8`, zero erros no console, card inicial atualizando automaticamente com os 1.218 nichos).
 
 ---
 *(Este arquivo será atualizado continuamente conforme avançamos no desenvolvimento)*

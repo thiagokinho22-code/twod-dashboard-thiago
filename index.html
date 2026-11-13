@@ -160,16 +160,19 @@
                 <section id="tab-visao-geral" class="tab-pane active">
                     <div class="grid-cards-connections">
                         <!-- Card OneDrive -->
-                        <div class="status-card">
+                        <div class="status-card" id="card-onedrive-overview">
                             <div class="status-card-header">
                                 <div class="status-icon bg-blue">
                                     <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z"/></svg>
                                 </div>
-                                <span class="badge-status status-pending">Aguardando Conexão</span>
+                                <span class="badge-status status-pending" id="badge-onedrive-status">⏳ Verificando...</span>
                             </div>
-                            <h3>Microsoft OneDrive</h3>
-                            <p class="status-desc">Pasta local: <code>OneDrive\Documentos\Trabalho</code></p>
-                            <div class="card-footer-info">Pronto para integrar via Microsoft Graph API</div>
+                            <h3 id="onedrive-card-heading">Microsoft OneDrive</h3>
+                            <p class="status-desc" id="onedrive-card-desc">Verificando conexão com a API na nuvem e pasta local...</p>
+                            <div class="card-footer-info" style="display: flex; justify-content: space-between; align-items: center;">
+                                <span id="onedrive-card-subinfo">Consultando backend...</span>
+                                <button type="button" class="btn btn-outline" style="padding: 4px 10px; font-size: 11px;" onclick="switchTab('criativos')">Abrir Criativos 🎬</button>
+                            </div>
                         </div>
 
                         <!-- Card Meta Ads API -->
@@ -178,40 +181,46 @@
                                 <div class="status-icon bg-indigo">
                                     <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M12 2C6.477 2 2 6.477 2 12c0 4.991 3.657 9.128 8.438 9.879V14.89h-2.54V12h2.54V9.797c0-2.506 1.492-3.89 3.777-3.89 1.094 0 2.238.195 2.238.195v2.46h-1.26c-1.243 0-1.63.771-1.63 1.562V12h2.773l-.443 2.89h-2.33v6.989C18.343 21.129 22 16.99 22 12c0-5.523-4.477-10-10-10z"/></svg>
                                 </div>
-                                <span class="badge-status status-active" id="badge-meta-status">🟢 Conectado</span>
+                                <span class="badge-status status-pending" id="badge-meta-status">⏳ Verificando...</span>
                             </div>
                             <h3 id="meta-user-heading">Meta Marketing API</h3>
-                            <p class="status-desc" id="meta-status-desc">Conexão ativa com Graph API v21.0. Acesso a 25+ contas de anúncios.</p>
+                            <p class="status-desc" id="meta-status-desc">Verificando token salvo no navegador...</p>
                             <div class="card-footer-info" style="display: flex; justify-content: space-between; align-items: center;">
-                                <span id="meta-card-subinfo">Thiago DuploCanto (Admin)</span>
+                                <span id="meta-card-subinfo">Aguardando verificação</span>
                                 <button type="button" class="btn btn-outline" style="padding: 4px 10px; font-size: 11px;" onclick="switchTab('duplicador')">Abrir Duplicador 🚀</button>
                             </div>
                         </div>
 
                         <!-- Card FUN Digital -->
-                        <div class="status-card">
+                        <div class="status-card" id="card-fun-overview">
                             <div class="status-card-header">
                                 <div class="status-icon bg-emerald">
                                     <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M13 2L3 14h8l-1 8 11-12h-8l1-8z" /></svg>
                                 </div>
-                                <span class="badge-status status-active">Extensão Ativa</span>
+                                <span class="badge-status status-active" id="badge-fun-status">⚡ Extensão Ativa</span>
                             </div>
-                            <h3>FUN Digital (9 Sites)</h3>
-                            <p class="status-desc">Automação de fila desenvolvida por Alexandre (TwoD AutoFill)</p>
-                            <div class="card-footer-info">9 sites configurados na fila diária</div>
+                            <h3 id="fun-card-heading">FUN Digital (9 Sites)</h3>
+                            <p class="status-desc" id="fun-card-desc">Automação de fila desenvolvida por Alexandre (TwoD AutoFill)</p>
+                            <div class="card-footer-info" style="display: flex; justify-content: space-between; align-items: center;">
+                                <span id="fun-card-subinfo">9 sites configurados na fila diária</span>
+                                <button type="button" class="btn btn-outline" style="padding: 4px 10px; font-size: 11px;" onclick="switchTab('fun-digital')">Ver Fila ⚡</button>
+                            </div>
                         </div>
 
                         <!-- Card WordPress -->
-                        <div class="status-card">
+                        <div class="status-card" id="card-wp-overview">
                             <div class="status-card-header">
                                 <div class="status-icon bg-cyan">
                                     <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><circle cx="12" cy="12" r="10"></circle></svg>
                                 </div>
-                                <span class="badge-status status-pending">Aguardando WP-API</span>
+                                <span class="badge-status status-pending" id="badge-wp-status">🔧 Em Construção</span>
                             </div>
                             <h3>WordPress Blogs</h3>
                             <p class="status-desc">Rede de sites (Simplificandocomcafe, Twod, Kiuvix...)</p>
-                            <div class="card-footer-info">Ajuste de tags e comentários em massa</div>
+                            <div class="card-footer-info" style="display: flex; justify-content: space-between; align-items: center;">
+                                <span id="wp-card-subinfo">Ajuste de tags e comentários em massa</span>
+                                <button type="button" class="btn btn-outline" style="padding: 4px 10px; font-size: 11px;" onclick="switchTab('wordpress')">Abrir Aba 📝</button>
+                            </div>
                         </div>
                     </div>
 
@@ -889,7 +898,7 @@
         </div>
     </div>
 
-    <script src="app.js?v=6.7"></script>
+    <script src="app.js?v=6.8"></script>
 </body>
 </html>
 
