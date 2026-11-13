@@ -1611,6 +1611,145 @@ body {
     color: #fbbf24;
 }
 
+/* ======================================================== */
+/* VERIFICAÇÃO VISUAL DE PAÍSES JÁ CRIADOS NA CAMPANHA      */
+/* ======================================================== */
+
+.block-tab-btn.is-complete {
+    border-color: rgba(16, 185, 129, 0.4);
+    background: rgba(16, 185, 129, 0.08);
+    color: #10b981;
+}
+
+.block-tab-btn.is-complete.active {
+    background: var(--accent-emerald) !important;
+    border-color: var(--accent-emerald) !important;
+    color: white !important;
+}
+
+.block-tab-badge {
+    font-size: 10px;
+    font-weight: 700;
+    padding: 2px 7px;
+    border-radius: 10px;
+    margin-left: 6px;
+    display: inline-block;
+    vertical-align: middle;
+}
+
+.block-tab-badge.badge-complete {
+    background: rgba(16, 185, 129, 0.2);
+    color: #10b981;
+}
+
+.block-tab-btn.active .block-tab-badge.badge-complete {
+    background: rgba(255, 255, 255, 0.25);
+    color: white;
+}
+
+.block-tab-badge.badge-partial {
+    background: rgba(245, 158, 11, 0.2);
+    color: #f59e0b;
+}
+
+.block-tab-btn.active .block-tab-badge.badge-partial {
+    background: rgba(255, 255, 255, 0.25);
+    color: white;
+}
+
+.block-tab-badge.badge-empty {
+    background: rgba(100, 116, 139, 0.15);
+    color: var(--text-muted);
+}
+
+.block-tab-btn.active .block-tab-badge.badge-empty {
+    background: rgba(255, 255, 255, 0.25);
+    color: white;
+}
+
+.btn-chip-primary {
+    background: var(--accent-primary) !important;
+    color: white !important;
+    border-color: var(--accent-primary) !important;
+    font-weight: 700 !important;
+    box-shadow: 0 2px 5px rgba(59, 130, 246, 0.3);
+}
+
+.btn-chip-primary:hover {
+    background: var(--accent-hover) !important;
+    transform: translateY(-1px);
+}
+
+/* CARDS DE PAÍSES JÁ CRIADOS VS PENDENTES */
+.country-card.country-already-exists {
+    border-color: rgba(16, 185, 129, 0.35);
+    background: rgba(16, 185, 129, 0.05);
+}
+
+.country-card.country-already-exists:hover {
+    border-color: var(--accent-emerald);
+    background: rgba(16, 185, 129, 0.1);
+}
+
+.country-card.country-already-exists.selected {
+    border-color: var(--accent-emerald);
+    background: rgba(16, 185, 129, 0.15);
+}
+
+.country-status-pill {
+    font-size: 10px;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 6px;
+    display: inline-block;
+    margin-top: 2px;
+}
+
+.country-status-pill.pill-exists {
+    background: rgba(16, 185, 129, 0.15);
+    color: #10b981;
+    border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.country-status-pill.pill-pending {
+    background: rgba(100, 116, 139, 0.15);
+    color: var(--text-muted);
+    border: 1px solid var(--border-color);
+}
+
+.block-status-pills {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-left: 8px;
+}
+
+.stat-pill {
+    font-size: 11px;
+    font-weight: 700;
+    padding: 3px 8px;
+    border-radius: 12px;
+}
+
+.stat-pill-created {
+    background: rgba(16, 185, 129, 0.15);
+    color: #10b981;
+    border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.stat-pill-missing {
+    background: rgba(245, 158, 11, 0.15);
+    color: #f59e0b;
+    border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.stat-pill-complete {
+    background: rgba(16, 185, 129, 0.2);
+    color: #10b981;
+    border: 1px solid #10b981;
+}
+
 @keyframes fadeIn {
     from { opacity: 0; transform: translateY(-4px); }
     to { opacity: 1; transform: translateY(0); }

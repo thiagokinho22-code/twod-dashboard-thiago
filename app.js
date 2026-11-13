@@ -1588,10 +1588,14 @@ async function onMetaCampaignSelected() {
 
     const campaignId = selectCamp.value;
     metaState.selectedCampaignId = campaignId;
+    metaState.adsets = [];
+    metaState.checkedCountries = {};
 
     selectAdSet.innerHTML = '<option value="">Carregando conjuntos base...</option>';
     selectAdSet.disabled = true;
     hideBaseAdSetPreview();
+    renderBlockNav();
+    renderCountriesGrid();
 
     if (!campaignId) {
         selectAdSet.innerHTML = '<option value="">Selecione uma campanha primeiro...</option>';
@@ -1623,14 +1627,24 @@ async function onMetaCampaignSelected() {
 
             selectAdSet.value = data.data[0].id;
             onMetaAdSetSelected();
+            renderBlockNav();
+            renderCountriesGrid();
         } else {
+            metaState.adsets = [];
+            metaState.checkedCountries = {};
             selectAdSet.innerHTML = '<option value="">Nenhum conjunto nesta campanha</option>';
             if (labelAdSet) labelAdSet.innerText = '(0 conjuntos)';
+            renderBlockNav();
+            renderCountriesGrid();
         }
     } catch (e) {
         console.error('Erro ao buscar conjuntos:', e);
+        metaState.adsets = [];
+        metaState.checkedCountries = {};
         selectAdSet.innerHTML = '<option value="">Erro ao carregar conjuntos</option>';
         if (labelAdSet) labelAdSet.innerText = '(Erro)';
+        renderBlockNav();
+        renderCountriesGrid();
     }
 }
 
@@ -1697,7 +1711,97 @@ function hideBaseAdSetPreview() {
     if (box) box.classList.add('twod-hidden');
 }
 
-// Renderiza a barra de navegação dos blocos
+// ========================================================
+// RECONHECIMENTO INTELIGENTE DE PAÍSES JÁ CRIADOS NA CAMPANHA
+// ========================================================
+
+// Normaliza texto para comparação segura (sem acentos, minúsculo, sem pontuação)
+function normalizeText(text) {
+    if (!text) return '';
+    return text
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+// Mapeia os conjuntos de anúncios existentes na campanha para busca rápida por país
+function getCampaignExistingCountriesList() {
+    if (!metaState.adsets || !Array.isArray(metaState.adsets)) return [];
+
+    return metaState.adsets.map(adset => {
+        const countryCodes = (adset.targeting && adset.targeting.geo_locations && Array.isArray(adset.targeting.geo_locations.countries))
+            ? adset.targeting.geo_locations.countries.map(c => c.toUpperCase())
+            : [];
+        return {
+            adset,
+            countryCodes,
+            normalizedName: normalizeText(adset.name)
+        };
+    });
+}
+
+// Identifica se um país do bloco já existe nesta campanha
+function findExistingAdSetForCountry(country) {
+    const list = getCampaignExistingCountriesList();
+    if (list.length === 0) return null;
+
+    const targetCode = (country.code || '').toUpperCase();
+    const targetNameNorm = normalizeText(country.adSetName);
+
+    // 1º Prioridade: O nome do adset contém o nome exato do país E o código ISO bate
+    const exactNameAndCode = list.find(item => {
+        const nameMatches = item.normalizedName.includes(targetNameNorm) || targetNameNorm.includes(item.normalizedName);
+        const codeMatches = targetCode && item.countryCodes.includes(targetCode);
+        return nameMatches && (codeMatches || item.countryCodes.length === 0);
+    });
+    if (exactNameAndCode) return exactNameAndCode.adset;
+
+    // 2º Prioridade: O conjunto tem segmentação única para o código ISO deste país
+    if (targetCode) {
+        const matchSingleCountry = list.find(item =>
+            item.countryCodes.length === 1 && item.countryCodes[0] === targetCode
+        );
+        if (matchSingleCountry) {
+            const isSpecialVariation = targetNameNorm.includes('frances') || targetNameNorm.includes('arabe') || targetNameNorm.includes('alemao') || targetNameNorm.includes('ingles') || targetNameNorm.includes('holandes');
+            if (!isSpecialVariation || matchSingleCountry.normalizedName.includes(targetNameNorm)) {
+                return matchSingleCountry.adset;
+            }
+        }
+    }
+
+    // 3º Prioridade: Fallback por nome exato do país no nome do conjunto
+    const matchByNameOnly = list.find(item => item.normalizedName.includes(targetNameNorm));
+    if (matchByNameOnly) return matchByNameOnly.adset;
+
+    return null;
+}
+
+// Calcula estatísticas do bloco: total, já existentes, faltantes, status de conclusão
+function getBlockStats(blockId) {
+    const block = META_COUNTRY_BLOCKS[blockId];
+    if (!block) return { total: 0, existing: 0, missing: 0, isComplete: false };
+
+    let existingCount = 0;
+    block.countries.forEach(country => {
+        if (findExistingAdSetForCountry(country)) {
+            existingCount++;
+        }
+    });
+
+    const total = block.countries.length;
+    const missing = total - existingCount;
+    return {
+        total,
+        existing: existingCount,
+        missing,
+        isComplete: total > 0 && existingCount >= total
+    };
+}
+
+// Renderiza a barra de navegação dos blocos com badges de progresso
 function renderBlockNav() {
     const nav = document.getElementById('blocks-tab-nav');
     if (!nav) return;
@@ -1705,11 +1809,23 @@ function renderBlockNav() {
     nav.innerHTML = '';
     Object.keys(META_COUNTRY_BLOCKS).forEach(blockId => {
         const block = META_COUNTRY_BLOCKS[blockId];
+        const stats = getBlockStats(blockId);
+
         const btn = document.createElement('button');
         btn.type = 'button';
-        btn.className = `block-tab-btn ${blockId === metaState.activeBlockId ? 'active' : ''}`;
+        btn.className = `block-tab-btn ${blockId === metaState.activeBlockId ? 'active' : ''} ${stats.isComplete ? 'is-complete' : ''}`;
         btn.setAttribute('data-block', blockId);
-        btn.innerText = `${block.title} (${block.countries.length})`;
+
+        let badgeHtml = '';
+        if (stats.isComplete) {
+            badgeHtml = `<span class="block-tab-badge badge-complete">✅ ${stats.existing}/${stats.total}</span>`;
+        } else if (stats.existing > 0) {
+            badgeHtml = `<span class="block-tab-badge badge-partial">📊 ${stats.existing}/${stats.total}</span>`;
+        } else {
+            badgeHtml = `<span class="block-tab-badge badge-empty">⏳ 0/${stats.total}</span>`;
+        }
+
+        btn.innerHTML = `<span>${block.title}</span> ${badgeHtml}`;
         btn.onclick = () => selectCountryBlock(blockId);
         nav.appendChild(btn);
     });
@@ -1734,18 +1850,20 @@ function selectCountryBlock(blockId) {
     const titleEl = document.getElementById('current-block-title');
     if (titleEl) titleEl.innerText = block.title;
 
-    // Inicializa seleção padrão (todos marcados por padrão)
+    // Inicializa seleção padrão inteligente:
+    // Apenas países faltantes vêm marcados por padrão; países já criados ficam desmarcados!
     if (!metaState.checkedCountries[blockId]) {
         metaState.checkedCountries[blockId] = {};
         block.countries.forEach(c => {
-            metaState.checkedCountries[blockId][c.adSetName] = true;
+            const alreadyExists = !!findExistingAdSetForCountry(c);
+            metaState.checkedCountries[blockId][c.adSetName] = !alreadyExists;
         });
     }
 
     renderCountriesGrid();
 }
 
-// Renderiza o grid de checkboxes dos países do bloco ativo
+// Renderiza o grid de checkboxes dos países do bloco ativo com badges visuais de presença
 function renderCountriesGrid() {
     const grid = document.getElementById('countries-grid-container');
     if (!grid) return;
@@ -1758,9 +1876,10 @@ function renderCountriesGrid() {
 
     block.countries.forEach(country => {
         const isChecked = !!currentChecks[country.adSetName];
+        const existingAdSet = findExistingAdSetForCountry(country);
 
         const card = document.createElement('label');
-        card.className = `country-card ${isChecked ? 'selected' : ''}`;
+        card.className = `country-card ${isChecked ? 'selected' : ''} ${existingAdSet ? 'country-already-exists' : ''}`;
 
         const chk = document.createElement('input');
         chk.type = 'checkbox';
@@ -1786,8 +1905,17 @@ function renderCountriesGrid() {
         subDiv.className = 'country-sub';
         subDiv.innerText = `${country.langName}${country.note ? ' • ' + country.note : ''}`;
 
+        const statusDiv = document.createElement('div');
+        if (existingAdSet) {
+            const statusLabel = existingAdSet.status === 'ACTIVE' ? 'Ativo 🟢' : 'Pausado ⏸️';
+            statusDiv.innerHTML = `<span class="country-status-pill pill-exists" title="Conjunto existente: ${existingAdSet.name} (ID: ${existingAdSet.id})">✅ Já na Campanha (${statusLabel})</span>`;
+        } else {
+            statusDiv.innerHTML = `<span class="country-status-pill pill-pending">⏳ Pendente</span>`;
+        }
+
         info.appendChild(nameDiv);
         info.appendChild(subDiv);
+        info.appendChild(statusDiv);
 
         card.appendChild(chk);
         card.appendChild(info);
@@ -1816,6 +1944,23 @@ function updateBlockCounter() {
     if (badge) {
         badge.innerText = `${count} de ${block.countries.length} selecionados`;
     }
+
+    const pillsContainer = document.getElementById('current-block-status-pills');
+    if (pillsContainer) {
+        const stats = getBlockStats(metaState.activeBlockId);
+        if (stats.isComplete) {
+            pillsContainer.innerHTML = `<span class="stat-pill stat-pill-complete">🎉 Bloco 100% Concluído (${stats.existing}/${stats.total})</span>`;
+        } else if (stats.existing > 0) {
+            pillsContainer.innerHTML = `
+                <span class="stat-pill stat-pill-created">✅ ${stats.existing} já na campanha</span>
+                <span class="stat-pill stat-pill-missing">⏳ ${stats.missing} faltam criar</span>
+            `;
+        } else {
+            pillsContainer.innerHTML = `
+                <span class="stat-pill stat-pill-missing">⏳ Nenhum país deste bloco na campanha (${stats.total} faltantes)</span>
+            `;
+        }
+    }
 }
 
 function toggleAllCountriesInBlock(checked) {
@@ -1843,6 +1988,23 @@ function selectPriorityCountriesOnly() {
 
     block.countries.forEach(c => {
         metaState.checkedCountries[metaState.activeBlockId][c.adSetName] = !!c.priority;
+    });
+
+    renderCountriesGrid();
+}
+
+// Ação rápida: Marca apenas os países que ainda NÃO existem na campanha selecionada
+function selectMissingCountriesOnly() {
+    const block = META_COUNTRY_BLOCKS[metaState.activeBlockId];
+    if (!block) return;
+
+    if (!metaState.checkedCountries[metaState.activeBlockId]) {
+        metaState.checkedCountries[metaState.activeBlockId] = {};
+    }
+
+    block.countries.forEach(c => {
+        const alreadyExists = !!findExistingAdSetForCountry(c);
+        metaState.checkedCountries[metaState.activeBlockId][c.adSetName] = !alreadyExists;
     });
 
     renderCountriesGrid();
@@ -2046,6 +2208,19 @@ async function startBatchDuplication() {
             const adsMsg = adsCreated > 0 ? `com ${adsCreated} anúncio(s)` : 'sem anúncios';
             logMetaTerminal(`✅ [${currentIdx}/${total}] Conjunto '${finalName}' criado ${adsMsg}! (ID: ${copiedAdSetId})`, 'success');
 
+            // Registra o novo conjunto no estado local e atualiza os cards/badges em tempo real
+            metaState.adsets.push({
+                id: copiedAdSetId,
+                name: finalName,
+                status: initialStatus,
+                targeting: targeting
+            });
+            if (metaState.checkedCountries[metaState.activeBlockId]) {
+                metaState.checkedCountries[metaState.activeBlockId][country.adSetName] = false;
+            }
+            renderBlockNav();
+            renderCountriesGrid();
+
         } catch (err) {
             failCount++;
             console.error(`Erro ao duplicar para ${country.adSetName}:`, err);
@@ -2197,6 +2372,7 @@ window.onMetaAdSetSelected = onMetaAdSetSelected;
 window.selectCountryBlock = selectCountryBlock;
 window.toggleAllCountriesInBlock = toggleAllCountriesInBlock;
 window.selectPriorityCountriesOnly = selectPriorityCountriesOnly;
+window.selectMissingCountriesOnly = selectMissingCountriesOnly;
 window.startBatchDuplication = startBatchDuplication;
 window.clearMetaLog = clearMetaLog;
 window.toggleTokenVisibility = toggleTokenVisibility;

@@ -492,8 +492,14 @@
                             <div class="block-info-label">
                                 <strong id="current-block-title">BLOCO 01 - Espanhol (es)</strong>
                                 <span class="badge-count" id="current-block-selected-count">15 selecionados</span>
+                                <div id="current-block-status-pills" class="block-status-pills">
+                                    <!-- Badges: ✅ X criados | ⏳ Y pendentes -->
+                                </div>
                             </div>
                             <div class="block-quick-actions">
+                                <button type="button" class="btn-chip btn-chip-primary" onclick="selectMissingCountriesOnly()" title="Marca apenas os países que ainda NÃO foram criados nesta campanha">
+                                    ⚡ Marcar Apenas Faltantes
+                                </button>
                                 <button type="button" class="btn-chip" onclick="toggleAllCountriesInBlock(true)">✓ Marcar Todos</button>
                                 <button type="button" class="btn-chip" onclick="toggleAllCountriesInBlock(false)">✕ Desmarcar Todos</button>
                                 <button type="button" class="btn-chip" onclick="selectPriorityCountriesOnly()">⭐ Apenas Prioritários</button>
@@ -847,7 +853,7 @@
         </div>
     </div>
 
-    <script src="app.js?v=5.3"></script>
+    <script src="app.js?v=5.4"></script>
 </body>
 </html>
 
