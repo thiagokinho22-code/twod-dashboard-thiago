@@ -1,7 +1,10 @@
 import os
+import re
 import json
 import time
 import uuid
+import shutil
+import tempfile
 import threading
 import mimetypes
 import urllib.request
@@ -401,7 +404,8 @@ def _apply_delta_item(item, root_kind):
         niche["audios"].append(entry)
 
     elif root_kind == "video" and is_file and name.lower().endswith(".mp4"):
-        num = int(name[0]) if name and name[0].isdigit() else 0
+        m_num = re.match(r"^(\d+)", name)
+        num = int(m_num.group(1)) if m_num else 0
         lang_folder = rel_parts[-1] if len(rel_parts) >= 2 else ""
         item_data = {
             "id": item_id,
@@ -414,11 +418,69 @@ def _apply_delta_item(item, root_kind):
         if 1 <= num <= 3:
             niche["videos"]["feed"] = [v for v in niche["videos"]["feed"] if v.get("id") != item_id]
             niche["videos"]["feed"].append(item_data)
-        elif 4 <= num <= 6:
+        elif 4 <= num <= 9:
             niche["videos"]["reels"] = [v for v in niche["videos"]["reels"] if v.get("id") != item_id]
             niche["videos"]["reels"].append(item_data)
 
     _recompute_niche_status(niche)
+
+
+def fetch_single_niche_videos_from_graph(niche_name):
+    """Busca diretamente no OneDrive Nuvem os vídeos de um nicho específico (mesmo com subpastas)."""
+    tok, err = get_graph_access_token()
+    if not tok:
+        return None, err or "OneDrive não autenticado"
+
+    _, _, videos_id = _find_work_folder_ids(tok)
+    if not videos_id:
+        return None, "Pasta Vídeos não encontrada no OneDrive"
+
+    encoded = urllib.parse.quote(niche_name.strip())
+    root_res = _graph_get(f"https://graph.microsoft.com/v1.0/me/drive/items/{videos_id}:/{encoded}", tok)
+    if "error" in root_res or "id" not in root_res:
+        return {"feed": [], "reels": [], "found_in_cloud": False}, None
+
+    feed = []
+    reels = []
+    queue = [(root_res["id"], "")]
+    while queue:
+        folder_id, parent_folder_name = queue.pop(0)
+        children = _graph_list_all_children(folder_id, tok)
+        for ch in children:
+            cname = ch.get("name", "")
+            if "folder" in ch:
+                queue.append((ch["id"], cname))
+            elif "file" in ch and cname.lower().endswith(".mp4"):
+                m_num = re.match(r"^(\d+)", cname)
+                num = int(m_num.group(1)) if m_num else 0
+                item_data = {
+                    "id": ch["id"],
+                    "name": cname,
+                    "num": num,
+                    "lang": parent_folder_name,
+                    "size": ch.get("size", 0),
+                    "url": f"/api/graph/file/{ch['id']}/{urllib.parse.quote(cname)}",
+                }
+                if 1 <= num <= 3:
+                    feed.append(item_data)
+                elif 4 <= num <= 9:
+                    reels.append(item_data)
+
+    with GRAPH_LOCK:
+        niches_map = GRAPH_SYNC_STATE["niches_map"]
+        if niche_name not in niches_map:
+            niches_map[niche_name] = {
+                "name": niche_name,
+                "audios": [],
+                "videos": {"feed": [], "reels": []},
+                "status": "pending",
+                "source": "graph",
+            }
+        niches_map[niche_name]["videos"]["feed"] = feed
+        niches_map[niche_name]["videos"]["reels"] = reels
+        _recompute_niche_status(niches_map[niche_name])
+
+    return {"feed": feed, "reels": reels, "found_in_cloud": True}, None
 
 
 def _sync_graph_delta_worker(force_full=False):
@@ -447,8 +509,8 @@ def _sync_graph_delta_worker(force_full=False):
                 GRAPH_SYNC_STATE["items_processed"] = 0
 
         for kind, folder_id, delta_key in [
-            ("audio", audios_id, "audio_delta_link"),
             ("video", videos_id, "video_delta_link"),
+            ("audio", audios_id, "audio_delta_link"),
         ]:
             if not folder_id:
                 continue
@@ -577,22 +639,26 @@ def scan_onedrive_folders(base_path=DEFAULT_WORK_DIR, force_reload=False):
         for entry in os.scandir(videos_dir):
             if entry.is_dir():
                 niche = get_or_create(entry.name)
-                for lang_dir in os.scandir(entry.path):
-                    if lang_dir.is_dir():
-                        for vf in os.scandir(lang_dir.path):
-                            if vf.is_file() and vf.name.lower().endswith(".mp4"):
-                                num = int(vf.name[0]) if vf.name[0].isdigit() else 0
-                                item_data = {
-                                    "name": vf.name,
-                                    "num": num,
-                                    "lang": lang_dir.name,
-                                    "size": vf.stat().st_size,
-                                    "url": f"/api/video/{entry.name}/{lang_dir.name}/{vf.name}",
-                                }
-                                if 1 <= num <= 3:
-                                    niche["videos"]["feed"].append(item_data)
-                                elif 4 <= num <= 6:
-                                    niche["videos"]["reels"].append(item_data)
+                for root_dir, _, files in os.walk(entry.path):
+                    rel_sub = os.path.relpath(root_dir, entry.path)
+                    lang_name = os.path.basename(root_dir) if rel_sub != "." else ""
+                    for fname in files:
+                        if fname.lower().endswith(".mp4"):
+                            m_num = re.match(r"^(\d+)", fname)
+                            num = int(m_num.group(1)) if m_num else 0
+                            rel_url_path = "/".join([urllib.parse.quote(p) for p in os.path.relpath(os.path.join(root_dir, fname), videos_dir).split(os.sep)])
+                            fpath = os.path.join(root_dir, fname)
+                            item_data = {
+                                "name": fname,
+                                "num": num,
+                                "lang": lang_name,
+                                "size": os.path.getsize(fpath),
+                                "url": f"/api/video/{rel_url_path}",
+                            }
+                            if 1 <= num <= 3:
+                                niche["videos"]["feed"].append(item_data)
+                            elif 4 <= num <= 9:
+                                niche["videos"]["reels"].append(item_data)
 
     for n in niches.values():
         total = len(n["videos"]["feed"]) + len(n["videos"]["reels"])
@@ -802,9 +868,9 @@ class APIHandler(BaseHTTPRequestHandler):
                 source_pref = qs.get("source", ["auto"])[0]
                 cfg = load_env_vars()
                 has_graph = bool(cfg.get("ONEDRIVE_REFRESH_TOKEN"))
-                has_local = os.path.exists(DEFAULT_WORK_DIR)
 
-                use_graph = (source_pref == "graph") or (has_graph and not has_local)
+                # Sempre prioriza OneDrive Nuvem (Graph API) quando conectado, inclusive localmente
+                use_graph = (source_pref == "graph") or (source_pref != "local" and has_graph)
 
                 if use_graph:
                     niches, sync_meta = get_graph_niches_snapshot(trigger_sync=reload_force, force_full=reload_force)
@@ -830,6 +896,17 @@ class APIHandler(BaseHTTPRequestHandler):
                     })
             except Exception as e:
                 self._send_json({"success": False, "error": str(e)}, 500)
+
+        elif path == "/api/onedrive/niche-videos":
+            niche_name = (qs.get("name", [""])[0] or "").strip()
+            if not niche_name:
+                self._send_json({"success": False, "error": "Parâmetro 'name' obrigatório"}, 400)
+                return
+            videos, err = fetch_single_niche_videos_from_graph(niche_name)
+            if err:
+                self._send_json({"success": False, "error": err}, 500)
+                return
+            self._send_json({"success": True, "niche": niche_name, "videos": videos})
 
         # --------------------------------------------------------
         # 4. STREAM / DOWNLOAD DIRETO VIA MICROSOFT GRAPH CDN
@@ -947,58 +1024,78 @@ class APIHandler(BaseHTTPRequestHandler):
                     self._send_json({"success": False, "error": "account_id e access_token obrigatórios"}, 400)
                     return
 
-                video_bytes = None
                 filename = os.path.basename(local_path_rel) if local_path_rel else (title if title.endswith(".mp4") else f"{title}.mp4")
+                tmp_path = None
+                cleanup_tmp = False
 
-                if local_path_rel.startswith("/api/video/"):
-                    parts = unquote(local_path_rel.replace("/api/video/", "")).split("/")
-                    if len(parts) >= 3:
-                        filepath = os.path.join(DEFAULT_WORK_DIR, "Vídeos", parts[0], parts[1], "/".join(parts[2:]))
-                        if os.path.isfile(filepath):
-                            with open(filepath, "rb") as vf:
-                                video_bytes = vf.read()
-                elif graph_item_id:
-                    tok, err = get_graph_access_token()
-                    if not tok:
-                        self._send_json({"success": False, "error": err or "OneDrive não autenticado"}, 401)
-                        return
-                    meta = _graph_get(f"https://graph.microsoft.com/v1.0/me/drive/items/{graph_item_id}", tok)
-                    dl_url = meta.get("@microsoft.graph.downloadUrl") or meta.get("@content.downloadUrl")
-                    if dl_url:
-                        with urllib.request.urlopen(dl_url, timeout=120) as vr:
-                            video_bytes = vr.read()
-
-                if not video_bytes:
-                    self._send_json({"success": False, "error": "Arquivo de vídeo não encontrado para upload"}, 404)
-                    return
-
-                boundary = "----TwoDHubBoundary" + uuid.uuid4().hex
-                parts_bin = []
-                for field_name, field_val in [("access_token", access_token), ("title", title)]:
-                    parts_bin.append(
-                        f"--{boundary}\r\nContent-Disposition: form-data; name=\"{field_name}\"\r\n\r\n{field_val}\r\n".encode("utf-8")
-                    )
-                parts_bin.append(
-                    f"--{boundary}\r\nContent-Disposition: form-data; name=\"source\"; filename=\"{filename}\"\r\nContent-Type: video/mp4\r\n\r\n".encode("utf-8")
-                )
-                parts_bin.append(video_bytes)
-                parts_bin.append(f"\r\n--{boundary}--\r\n".encode("utf-8"))
-                body = b"".join(parts_bin)
-
-                upload_url = f"https://graph-video.facebook.com/{graph_version}/{account_id}/advideos"
-                req = urllib.request.Request(
-                    upload_url,
-                    data=body,
-                    headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
-                    method="POST",
-                )
                 try:
-                    with urllib.request.urlopen(req, timeout=180) as resp:
-                        res_json = json.loads(resp.read().decode("utf-8"))
-                        self._send_json({"success": True, "result": res_json})
-                except urllib.error.HTTPError as he:
-                    err_txt = he.read().decode("utf-8", errors="ignore")
-                    self._send_json({"success": False, "error": err_txt}, he.code)
+                    if local_path_rel.startswith("/api/video/"):
+                        parts = unquote(local_path_rel.replace("/api/video/", "")).split("/")
+                        if len(parts) >= 2:
+                            filepath = os.path.join(DEFAULT_WORK_DIR, "Vídeos", *parts)
+                            if os.path.isfile(filepath):
+                                tmp_path = filepath
+                    elif graph_item_id:
+                        tok, err = get_graph_access_token()
+                        if not tok:
+                            self._send_json({"success": False, "error": err or "OneDrive não autenticado"}, 401)
+                            return
+                        meta = _graph_get(f"https://graph.microsoft.com/v1.0/me/drive/items/{graph_item_id}", tok)
+                        dl_url = meta.get("@microsoft.graph.downloadUrl") or meta.get("@content.downloadUrl")
+                        if dl_url:
+                            fd, tmp_path = tempfile.mkstemp(prefix="twod_vid_", suffix=".mp4")
+                            os.close(fd)
+                            cleanup_tmp = True
+                            with urllib.request.urlopen(dl_url, timeout=180) as vr, open(tmp_path, "wb") as tf:
+                                shutil.copyfileobj(vr, tf, length=1024 * 512)
+
+                    if not tmp_path or not os.path.isfile(tmp_path):
+                        self._send_json({"success": False, "error": "Arquivo de vídeo não encontrado para upload"}, 404)
+                        return
+
+                    import http.client
+                    boundary = "----TwoDHubBoundary" + uuid.uuid4().hex
+                    pre_fields = b"".join([
+                        f"--{boundary}\r\nContent-Disposition: form-data; name=\"{fn}\"\r\n\r\n{fv}\r\n".encode("utf-8")
+                        for fn, fv in [("access_token", access_token), ("title", title)]
+                    ])
+                    file_header = (
+                        f"--{boundary}\r\nContent-Disposition: form-data; name=\"source\"; filename=\"{filename}\"\r\n"
+                        f"Content-Type: video/mp4\r\n\r\n"
+                    ).encode("utf-8")
+                    footer = f"\r\n--{boundary}--\r\n".encode("utf-8")
+                    file_size = os.path.getsize(tmp_path)
+                    total_len = len(pre_fields) + len(file_header) + file_size + len(footer)
+
+                    conn = http.client.HTTPSConnection("graph-video.facebook.com", timeout=240)
+                    conn.putrequest("POST", f"/{graph_version}/{account_id}/advideos")
+                    conn.putheader("Content-Type", f"multipart/form-data; boundary={boundary}")
+                    conn.putheader("Content-Length", str(total_len))
+                    conn.endheaders()
+                    conn.send(pre_fields)
+                    conn.send(file_header)
+                    with open(tmp_path, "rb") as vf:
+                        while True:
+                            chunk = vf.read(1024 * 512)
+                            if not chunk:
+                                break
+                            conn.send(chunk)
+                    conn.send(footer)
+
+                    resp = conn.getresponse()
+                    raw_res = resp.read().decode("utf-8", errors="ignore")
+                    conn.close()
+
+                    if 200 <= resp.status < 300:
+                        self._send_json({"success": True, "result": json.loads(raw_res)})
+                    else:
+                        self._send_json({"success": False, "error": raw_res}, resp.status)
+                finally:
+                    if cleanup_tmp and tmp_path and os.path.exists(tmp_path):
+                        try:
+                            os.unlink(tmp_path)
+                        except OSError:
+                            pass
             except Exception as e:
                 self._send_json({"success": False, "error": str(e)}, 500)
 

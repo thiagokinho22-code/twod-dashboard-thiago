@@ -838,7 +838,11 @@ async function loadNichesFromAPI(forceReload = false, statusData = null) {
     }
 
     try {
-        const url = `${API_BASE_URL}/api/onedrive/niches${forceReload ? '?reload=true' : ''}`;
+        const params = new URLSearchParams();
+        if (forceReload) params.set('reload', 'true');
+        if (statusData?.graph_cloud) params.set('source', 'graph');
+        const qStr = params.toString();
+        const url = `${API_BASE_URL}/api/onedrive/niches${qStr ? `?${qStr}` : ''}`;
         const res = await fetch(url);
         const json = await res.json();
         if (json.success && json.niches) {
@@ -848,15 +852,16 @@ async function loadNichesFromAPI(forceReload = false, statusData = null) {
             oneDriveOverviewMeta.mode = json.source === 'graph' ? 'graph_cloud' : 'local_folder';
             oneDriveOverviewMeta.hydrating = Boolean(json.hydrating);
             renderOneDriveStatsAndTable();
+            const readyVideosCount = json.niches.filter(n => (n.videos?.feed?.length || 0) + (n.videos?.reels?.length || 0) > 0).length;
             if (badge && json.source === 'graph') {
                 badge.textContent = json.hydrating
-                    ? `⏳ Sincronizando Nuvem (${json.count} nichos)...`
-                    : `☁️ OneDrive Graph API (${json.count} nichos)`;
+                    ? `⏳ Sincronizando Nuvem (${readyVideosCount} c/ vídeo)...`
+                    : `☁️ OneDrive Nuvem (${json.count} nichos • ${readyVideosCount} c/ vídeo)`;
             }
             if (folderDesc) {
                 folderDesc.textContent = json.hydrating
-                    ? `Sincronização em segundo plano na nuvem... ${json.count} nichos carregados até agora.`
-                    : `Sincronizado via API (${json.source === 'graph' ? 'Microsoft Nuvem' : 'Pasta Local'})! ${json.count} nichos disponíveis.`;
+                    ? `Sincronização em segundo plano na nuvem... ${json.count} pastas (${readyVideosCount} com vídeos carregados).`
+                    : `Sincronizado via API (${json.source === 'graph' ? 'Microsoft OneDrive Nuvem' : 'Pasta Local'})! ${json.count} nichos (${readyVideosCount} com vídeos).`;
             }
             if (json.hydrating) {
                 setTimeout(() => loadNichesFromAPI(false, statusData), 4000);

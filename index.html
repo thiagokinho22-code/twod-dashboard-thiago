@@ -581,8 +581,11 @@
                                 <datalist id="cb-niche-datalist"></datalist>
                             </div>
                             <div class="form-group">
-                                <label for="cb-video-lang-select"><strong>Pasta de Idioma dos Vídeos:</strong></label>
-                                <select id="cb-video-lang-select" class="twod-select" onchange="renderBuilderCreativesGrid()">
+                                <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
+                                    <label for="cb-video-lang-select" style="margin-bottom: 0;"><strong>Pasta de Idioma dos Vídeos:</strong></label>
+                                    <button type="button" class="btn-chip" onclick="forceHydrateSelectedNicheFromCloud()" title="Buscar vídeos deste nicho direto no OneDrive Nuvem">☁️ Atualizar Nuvem</button>
+                                </div>
+                                <select id="cb-video-lang-select" class="twod-select" style="margin-top: 6px;" onchange="renderBuilderCreativesGrid()">
                                     <option value="AUTO">✨ Automático (pelo idioma do conjunto/bloco)</option>
                                 </select>
                                 <span class="help-text" id="cb-creatives-summary">Selecione um nicho do OneDrive para visualizar os vídeos 1–6.</span>
@@ -1250,8 +1253,8 @@
         </div>
     </div>
 
-    <script src="app.js?v=6.9"></script>
-    <script src="campaign_builder.js?v=1.2"></script>
+    <script src="app.js?v=7.0"></script>
+    <script src="campaign_builder.js?v=1.3"></script>
 </body>
 </html>
 

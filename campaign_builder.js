@@ -174,9 +174,19 @@ window.onCampaignBuilderNichesReady = function () {
     });
 
     if (countLabel) {
+        const hydrating = typeof oneDriveOverviewMeta !== 'undefined' && oneDriveOverviewMeta.hydrating;
         countLabel.innerText = niches.length > 0
-            ? `(${niches.length} nichos carregados)`
+            ? (hydrating ? `(${niches.length} nichos • sincronizando nuvem...)` : `(${niches.length} nichos via OneDrive Nuvem)`)
             : '(Aguardando conexão do OneDrive...)';
+    }
+
+    if (cbState.selectedNicheName) {
+        const refreshed = niches.find(n => n.name === cbState.selectedNicheName);
+        if (refreshed) {
+            cbState.selectedNicheObj = refreshed;
+            populateNicheVideoLangDropdown(refreshed);
+            renderBuilderCreativesGrid();
+        }
     }
 };
 
@@ -648,6 +658,67 @@ function onCampaignBuilderNicheInput() {
     if (match) onCampaignBuilderNicheSelected();
 }
 
+function populateNicheVideoLangDropdown(niche) {
+    const langSelect = document.getElementById('cb-video-lang-select');
+    if (!langSelect) return;
+    const prev = langSelect.value || 'AUTO';
+    langSelect.innerHTML = '<option value="AUTO">✨ Automático (pelo idioma do país/bloco)</option>';
+    if (niche && niche.videos) {
+        const allVids = [...(niche.videos.feed || []), ...(niche.videos.reels || [])];
+        const langs = Array.from(new Set(allVids.map(v => v.lang).filter(Boolean))).sort();
+        langs.forEach(l => {
+            const opt = document.createElement('option');
+            opt.value = l;
+            opt.innerText = `📁 ${l}`;
+            langSelect.appendChild(opt);
+        });
+        if (langs.includes(prev)) langSelect.value = prev;
+    }
+}
+
+async function hydrateNicheVideosOnDemand(nicheName) {
+    if (!nicheName) return null;
+    const grid = document.getElementById('cb-creatives-grid');
+    if (grid && getAllVideosForNiche(cbState.selectedNicheObj).length === 0) {
+        grid.innerHTML = '<div class="text-muted" style="font-size:13px;grid-column:1 / -1;">☁️ Buscando vídeos deste nicho direto no OneDrive Nuvem...</div>';
+    }
+    try {
+        const resp = await fetch(`${API_BASE_URL}/api/onedrive/niche-videos?name=${encodeURIComponent(nicheName)}`);
+        const data = await resp.json();
+        if (data.success && data.videos) {
+            let niche = (oneDriveData.niches || []).find(n => n.name === nicheName);
+            if (!niche) {
+                niche = { name: nicheName, audios: [], videos: { feed: [], reels: [] }, status: 'pending', source: 'graph' };
+                oneDriveData.niches.push(niche);
+            }
+            niche.videos = {
+                feed: data.videos.feed || [],
+                reels: data.videos.reels || []
+            };
+            niche.source = 'graph';
+            if (cbState.selectedNicheName === nicheName) {
+                cbState.selectedNicheObj = niche;
+                populateNicheVideoLangDropdown(niche);
+                renderBuilderCreativesGrid();
+            }
+            return niche;
+        }
+    } catch (e) {
+        console.warn('Falha ao buscar vídeos do nicho sob demanda:', e);
+    }
+    return null;
+}
+
+function forceHydrateSelectedNicheFromCloud() {
+    const nicheName = (document.getElementById('cb-niche-search')?.value || cbState.selectedNicheName || '').trim();
+    if (!nicheName) {
+        alert('Digite ou selecione o nome de um nicho no campo ao lado primeiro.');
+        return;
+    }
+    cbState.selectedNicheName = nicheName;
+    hydrateNicheVideosOnDemand(nicheName);
+}
+
 function onCampaignBuilderNicheSelected() {
     const nicheName = (document.getElementById('cb-niche-search')?.value || '').trim();
     const niche = (oneDriveData.niches || []).find(n => n.name === nicheName) || null;
@@ -660,22 +731,13 @@ function onCampaignBuilderNicheSelected() {
         updateCampaignNamePreview();
     }
 
-    const langSelect = document.getElementById('cb-video-lang-select');
-    if (langSelect) {
-        langSelect.innerHTML = '<option value="AUTO">✨ Automático (pelo idioma do país/bloco)</option>';
-        if (niche) {
-            const allVids = [...(niche.videos.feed || []), ...(niche.videos.reels || [])];
-            const langs = Array.from(new Set(allVids.map(v => v.lang).filter(Boolean))).sort();
-            langs.forEach(l => {
-                const opt = document.createElement('option');
-                opt.value = l;
-                opt.innerText = `📁 ${l}`;
-                langSelect.appendChild(opt);
-            });
-        }
-    }
-
+    populateNicheVideoLangDropdown(niche);
     renderBuilderCreativesGrid();
+
+    // Se o cache local/nuvem ainda estiver hidratando ou vazio para este nicho, busca direto no OneDrive Nuvem
+    if (nicheName && getAllVideosForNiche(niche).length === 0) {
+        hydrateNicheVideosOnDemand(nicheName);
+    }
 }
 
 function getAllVideosForNiche(niche) {
@@ -1459,6 +1521,7 @@ window.onSiteNativeLangChanged = onSiteNativeLangChanged;
 window.updateUrlPreview = updateUrlPreview;
 window.onCampaignBuilderNicheInput = onCampaignBuilderNicheInput;
 window.onCampaignBuilderNicheSelected = onCampaignBuilderNicheSelected;
+window.forceHydrateSelectedNicheFromCloud = forceHydrateSelectedNicheFromCloud;
 window.renderBuilderCreativesGrid = renderBuilderCreativesGrid;
 window.toggleBuilderCreativeSlot = toggleBuilderCreativeSlot;
 window.uppercasePrimaryText1 = uppercasePrimaryText1;
