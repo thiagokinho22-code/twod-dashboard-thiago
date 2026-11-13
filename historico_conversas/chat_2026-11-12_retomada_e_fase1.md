@@ -80,8 +80,11 @@ O projeto foi retomado a partir de `PROJETO_CONTEXTO.md`.
       - Commit `dd27081` enviado ao GitHub Pages.
   18. **Correção de Duplicação Profunda (Anúncios & Criativos Clonados):**
       - Identificado que a chamada `POST /{adset_id}/copies` na Meta API por padrão duplica apenas a estrutura do conjunto de anúncios sem os anúncios filhos (casca vazia).
-      - Adicionado o parâmetro oficial `deep_copy=true` e `status_option`, garantindo que todos os anúncios, vídeos, textos e criativos do conjunto base sejam integralmente clonados nos novos conjuntos de cada país.
-      - Commit `e6a4a8f` enviado ao GitHub Pages.
+      - Ao tentar `deep_copy=true`, a Meta bloqueava por o App estar em Development Mode (`Ads creative post was created by an app that is in development mode`).
+      - Solução definitiva implementada: O motor busca os anúncios do conjunto base e, após clonar o conjunto para o país de destino, cria automaticamente os anúncios vinculados aos mesmos IDs de criativo (`creative_id`).
+      - Novo token fornecido por Thiago atualizado no `backend/.env` e `app.js`.
+      - Testado e validado end-to-end com sucesso via script.
+      - Commit `b069ed8` enviado ao GitHub Pages.
 
 ---
 *(Este arquivo será atualizado continuamente conforme avançamos no desenvolvimento)*
