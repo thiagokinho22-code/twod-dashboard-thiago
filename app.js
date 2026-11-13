@@ -1526,11 +1526,13 @@ async function onMetaAccountSelected() {
         return;
     }
 
-    // Identifica moeda da conta
+    // Sempre operamos em Dólar ($ USD)
     const accObj = metaState.accounts.find(a => a.id === accountId);
-    if (accObj && currencyPrefix) {
+    if (accObj) {
         metaState.selectedAccount = accObj;
-        currencyPrefix.innerText = accObj.currency === 'BRL' ? 'R$ ' : (accObj.currency === 'EUR' ? '€ ' : '$ ');
+    }
+    if (currencyPrefix) {
+        currencyPrefix.innerText = '$';
     }
 
     if (labelCamp) labelCamp.innerText = '(Buscando...)';
@@ -1666,8 +1668,7 @@ function showBaseAdSetPreview(adset) {
     if (nameEl) nameEl.innerText = `Conjunto Origem: ${adset.name}`;
 
     const budgetVal = adset.daily_budget ? (parseInt(adset.daily_budget) / 100).toFixed(2) : '1.00';
-    const currencyStr = metaState.selectedAccount ? metaState.selectedAccount.currency : 'USD';
-    if (metaEl) metaEl.innerText = `Orçamento Base: ${currencyStr} ${budgetVal} | Status: ${adset.status}`;
+    if (metaEl) metaEl.innerText = `Orçamento Base: $${budgetVal} USD | Status: ${adset.status}`;
 
     if (tagsEl) {
         tagsEl.innerHTML = '';
@@ -1907,15 +1908,12 @@ async function startBatchDuplication() {
         return;
     }
 
-    const budgetInput = document.getElementById('input-daily-budget');
-    const budgetVal = parseFloat(budgetInput ? budgetInput.value : '1.00') || 1.0;
     const initialStatus = document.getElementById('select-initial-status').value || 'PAUSED';
     const nameFormat = document.getElementById('select-name-format').value || 'country_only';
-    const currencyStr = metaState.selectedAccount ? metaState.selectedAccount.currency : 'USD';
 
     const confirmMsg = `Confirmar duplicação de ${countriesToDuplicate.length} conjuntos no Meta Ads?\n\n` +
         `• Bloco: ${block.title}\n` +
-        `• Orçamento por conjunto: ${currencyStr} ${budgetVal.toFixed(2)}\n` +
+        `• Orçamento por conjunto: $1.00 USD (fixo)\n` +
         `• Status Inicial: ${initialStatus === 'PAUSED' ? 'Pausado (Seguro)' : 'Ativo (Imediato)'}\n` +
         `• Total de novos conjuntos: ${countriesToDuplicate.length}`;
 
@@ -1944,7 +1942,7 @@ async function startBatchDuplication() {
     logMetaTerminal(`📦 Conjunto base: '${metaState.selectedAdSet ? metaState.selectedAdSet.name : metaState.selectedAdSetId}' (ID: ${metaState.selectedAdSetId})`, 'info');
 
     const token = getMetaToken();
-    const budgetInCents = Math.round(budgetVal * 100);
+    const budgetInCents = 100; // Sempre 1 dólar ($1.00 USD = 100 centavos)
 
     let successCount = 0;
     let failCount = 0;
