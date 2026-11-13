@@ -630,10 +630,31 @@ function deleteUser(username) {
 // INTEGRAÇÃO ONEDRIVE & LEITOR DE ARQUIVOS NATIVO
 // ========================================================
 
-const API_BASE_URL = localStorage.getItem('twod_backend_url') ||
-    ((typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'))
+function getDefaultBackendUrl() {
+    return (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'))
         ? window.location.origin
-        : 'http://localhost:8000');
+        : 'http://localhost:8000';
+}
+
+let API_BASE_URL = (localStorage.getItem('twod_backend_url') || getDefaultBackendUrl()).replace(/\/+$/, '');
+
+async function saveBackendUrlFromUI() {
+    const input = document.getElementById('backend-url-input');
+    const url = (input ? input.value : '').trim().replace(/\/+$/, '');
+    if (url) {
+        localStorage.setItem('twod_backend_url', url);
+        API_BASE_URL = url;
+    } else {
+        localStorage.removeItem('twod_backend_url');
+        API_BASE_URL = getDefaultBackendUrl();
+    }
+    const ok = await checkBackendAPI();
+    if (ok) {
+        alert(`Conectado com sucesso à API: ${API_BASE_URL}`);
+    } else {
+        alert(`URL salva (${API_BASE_URL}), mas o servidor não respondeu no momento.`);
+    }
+}
 
 let oneDriveHandle = null;
 let oneDriveData = {
@@ -715,9 +736,18 @@ async function loadNichesFromAPI(forceReload = false, statusData = null) {
             oneDriveData.isApiMode = true;
             renderOneDriveStatsAndTable();
             if (badge && json.source === 'graph') {
-                badge.textContent = `☁️ OneDrive Graph API (${json.count} nichos)`;
+                badge.textContent = json.hydrating
+                    ? `⏳ Sincronizando Nuvem (${json.count} nichos)...`
+                    : `☁️ OneDrive Graph API (${json.count} nichos)`;
             }
-            if (folderDesc) folderDesc.textContent = `Sincronizado via API (${json.source === 'graph' ? 'Microsoft Nuvem' : 'Pasta Local'})! ${json.count} nichos disponíveis.`;
+            if (folderDesc) {
+                folderDesc.textContent = json.hydrating
+                    ? `Sincronização em segundo plano na nuvem... ${json.count} nichos carregados até agora.`
+                    : `Sincronizado via API (${json.source === 'graph' ? 'Microsoft Nuvem' : 'Pasta Local'})! ${json.count} nichos disponíveis.`;
+            }
+            if (json.hydrating) {
+                setTimeout(() => loadNichesFromAPI(false, statusData), 4000);
+            }
         }
     } catch (e) {
         console.error('Erro ao carregar nichos da API:', e);
@@ -1434,8 +1464,10 @@ function onDuplicatorTabOpened() {
 function onSettingsTabOpened() {
     const tokenInput = document.getElementById('meta-token-input');
     const accountInput = document.getElementById('meta-default-account-input');
+    const backendInput = document.getElementById('backend-url-input');
     if (tokenInput) tokenInput.value = metaState.token || '';
     if (accountInput) accountInput.value = metaState.defaultAccountId || '';
+    if (backendInput) backendInput.value = localStorage.getItem('twod_backend_url') || '';
 }
 
 // Testa e recarrega contas da Meta
@@ -2493,6 +2525,7 @@ window.openAddSiteModal = openAddSiteModal;
 window.closeModal = closeModal;
 window.openAddUserModal = openAddUserModal;
 window.connectOneDriveCloudAPI = connectOneDriveCloudAPI;
+window.saveBackendUrlFromUI = saveBackendUrlFromUI;
 window.connectOneDriveFolder = connectOneDriveFolder;
 window.scanOneDriveFiles = scanOneDriveFiles;
 window.playAudio = playAudio;

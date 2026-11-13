@@ -45,6 +45,12 @@
   1. Protegeu imediatamente as credenciais adicionando `TwoD Hub OneDrive.txt` e `backend/.graph_cache.json` ao `.gitignore` (garantindo que nunca vão para o repositório público do GitHub) e moveu `ONEDRIVE_CLIENT_ID` e `ONEDRIVE_CLIENT_SECRET` para `backend/.env`.
   2. Implementou a integração completa **Microsoft Graph API + OAuth2** em `backend/server.py` (`/api/onedrive/auth`, `/api/onedrive/callback`, `/api/onedrive/graph-status`, `/api/onedrive/niches`, `/api/graph/file/...`), utilizando `ThreadingHTTPServer`, cache local/memória e pronto para nuvem (`0.0.0.0` via `PORT`).
   3. Adicionou o botão **☁️ Autorizar OneDrive Nuvem** na aba **Gerador de Criativos** (`index.html` e `app.js?v=6.4`) e subiu o servidor local atualizado.
+- **Thiago:** Concluiu a autorização OAuth2 da conta Microsoft no navegador ("Fiz a conexão").
+- **Agente:**
+  1. Corrigiu `_find_work_folder_ids()` em `backend/server.py` para priorizar correspondência exata das pastas `Arquivos de Áudio` e `Vídeos` (evitando confundir com `Vídeos de IA`).
+  2. Substituiu a varredura recursiva síncrona de subpastas pelo motor não-bloqueante `/delta` em segundo plano (`_sync_graph_delta_worker` e `backend/.graph_cache.json`), concluindo a indexação de todos os **1.218 nichos** (987 nichos com **4.098 áudios** e 624 nichos com **19.598 vídeos**).
+  3. Corrigiu `/api/graph/file/{item_id}` (removendo `$select` para que o OneDrive pessoal retorne `@microsoft.graph.downloadUrl`) e validou redirecionamento HTTP `302` direto para a CDN oficial da Microsoft (`my.microsoftpersonalcontent.com`) tanto para áudio quanto para vídeo.
+  4. Adicionou configuração da **URL do Servidor Backend** na aba **Configurações** (`#backend-url-input` em `index.html` e `app.js?v=6.6`), validada sem erros de console no Chrome headless, além do arquivo `render.yaml` para deploy 24/7 no Render.
 
 ---
 *(Este arquivo será atualizado continuamente conforme avançamos no desenvolvimento)*

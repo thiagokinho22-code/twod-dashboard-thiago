@@ -793,6 +793,21 @@
                         </div>
 
                         <div class="settings-section">
+                            <h3>☁️ API Própria na Nuvem (OneDrive 24/7)</h3>
+                            <p class="text-muted" style="margin-bottom: 16px;">Configure o endereço do servidor backend na nuvem (Render/Railway) para acessar seu OneDrive mesmo quando o PC estiver desligado.</p>
+                            <div class="form-grid-2">
+                                <div class="form-group">
+                                    <label for="backend-url-input"><strong>URL do Servidor Backend:</strong></label>
+                                    <input type="url" id="backend-url-input" class="twod-input" placeholder="http://localhost:8000 ou https://twod-api.onrender.com">
+                                    <span class="help-text">Deixe em branco para usar automaticamente o servidor local (localhost:8000).</span>
+                                </div>
+                                <div class="form-group" style="align-self: flex-end; display: flex; gap: 10px;">
+                                    <button type="button" class="btn btn-primary" onclick="saveBackendUrlFromUI()">💾 Salvar & Reconectar</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="settings-section">
                             <h3>Segurança da Conta</h3>
                             <div class="form-grid-2">
                                 <div class="form-group">
@@ -874,7 +889,7 @@
         </div>
     </div>
 
-    <script src="app.js?v=6.4"></script>
+    <script src="app.js?v=6.6"></script>
 </body>
 </html>
 

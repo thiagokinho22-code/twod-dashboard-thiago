@@ -1,11 +1,11 @@
 import os
 import json
 import time
+import threading
 import mimetypes
 import urllib.request
 import urllib.parse
 import urllib.error
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, unquote, parse_qs
 
@@ -22,9 +22,20 @@ if not os.path.exists(DEFAULT_WORK_DIR):
 
 PORT = int(os.environ.get("PORT", 8000))
 
-# Caches em memória
+# Caches em memória e sincronização em segundo plano
 NICHES_CACHE = None
-GRAPH_NICHES_CACHE = None
+GRAPH_LOCK = threading.Lock()
+GRAPH_SYNC_STATE = {
+    "running": False,
+    "completed": False,
+    "pages_done": 0,
+    "items_processed": 0,
+    "last_sync": None,
+    "last_error": None,
+    "audio_delta_link": None,
+    "video_delta_link": None,
+    "niches_map": {},
+}
 GRAPH_TOKEN_CACHE = {
     "access_token": None,
     "expires_at": 0
@@ -112,7 +123,7 @@ def _http_form_post(url, form_data):
             return {"error": f"HTTP {e.code}", "error_description": err_body}
 
 
-def _graph_get(url, access_token, retries=3):
+def _graph_get(url, access_token, retries=4):
     for attempt in range(retries):
         req = urllib.request.Request(
             url,
@@ -123,18 +134,23 @@ def _graph_get(url, access_token, retries=3):
             method="GET",
         )
         try:
-            with urllib.request.urlopen(req, timeout=25) as resp:
+            with urllib.request.urlopen(req, timeout=30) as resp:
                 return json.loads(resp.read().decode("utf-8"))
         except urllib.error.HTTPError as e:
-            if e.code == 429 and attempt < retries - 1:
-                retry_after = int(e.headers.get("Retry-After", "2"))
-                time.sleep(min(retry_after, 10))
+            if e.code in (429, 500, 502, 503, 504) and attempt < retries - 1:
+                retry_after = int(e.headers.get("Retry-After", str(2 ** attempt)))
+                time.sleep(min(retry_after, 12))
                 continue
             err_body = e.read().decode("utf-8", errors="ignore")
             try:
                 return json.loads(err_body)
             except Exception:
                 return {"error": {"code": str(e.code), "message": err_body}}
+        except Exception as e:
+            if attempt < retries - 1:
+                time.sleep(1.5 * (attempt + 1))
+                continue
+            return {"error": {"code": "network", "message": str(e)}}
     return {"error": {"code": "timeout", "message": "Max retries exceeded"}}
 
 
@@ -260,154 +276,256 @@ def _find_work_folder_ids(access_token):
     for ch in children:
         if "folder" not in ch:
             continue
-        cname = ch["name"].lower()
-        if "áudio" in cname or "audio" in cname:
+        cname = ch["name"].strip().lower()
+        if cname in ("arquivos de áudio", "arquivos de audio"):
             audios_id = ch["id"]
-        elif "vídeo" in cname or "video" in cname:
+        elif cname in ("vídeos", "videos"):
             videos_id = ch["id"]
+
+    if not audios_id or not videos_id:
+        for ch in children:
+            if "folder" not in ch:
+                continue
+            cname = ch["name"].strip().lower()
+            if not audios_id and ("áudio" in cname or "audio" in cname):
+                audios_id = ch["id"]
+            elif not videos_id and ("vídeo" in cname or "video" in cname):
+                videos_id = ch["id"]
     return work_item["id"], audios_id, videos_id
 
 
-def scan_onedrive_via_graph(force_reload=False, deep=True):
-    """Escaneia pastas do OneDrive diretamente via Microsoft Graph API com cache em memória e disco."""
-    global GRAPH_NICHES_CACHE
-
-    if not force_reload and GRAPH_NICHES_CACHE is not None:
-        return GRAPH_NICHES_CACHE
-
-    if not force_reload and os.path.exists(GRAPH_CACHE_PATH):
-        try:
-            with open(GRAPH_CACHE_PATH, "r", encoding="utf-8") as f:
-                cached_data = json.load(f)
-                if isinstance(cached_data, list) and len(cached_data) > 0:
-                    GRAPH_NICHES_CACHE = cached_data
-                    return GRAPH_NICHES_CACHE
-        except Exception:
-            pass
-
-    access_token, err = get_graph_access_token()
-    if not access_token:
-        raise RuntimeError(err or "Token Graph indisponível")
-
-    work_id, audios_id, videos_id = _find_work_folder_ids(access_token)
-    if not work_id:
-        raise RuntimeError("Pasta 'Documentos/Trabalho' não encontrada no OneDrive.")
-
-    niches = {}
-
-    def get_or_create(name):
-        if name not in niches:
-            niches[name] = {
-                "name": name,
-                "audios": [],
-                "videos": {"feed": [], "reels": []},
-                "status": "pending",
-                "source": "graph",
-            }
-        return niches[name]
-
-    audio_folders = _graph_list_all_children(audios_id, access_token) if audios_id else []
-    video_folders = _graph_list_all_children(videos_id, access_token) if videos_id else []
-
-    audio_folder_tasks = []
-    for af in audio_folders:
-        if "folder" in af:
-            get_or_create(af["name"])
-            if af["folder"].get("childCount", 0) > 0:
-                audio_folder_tasks.append((af["name"], af["id"]))
-
-    video_folder_tasks = []
-    for vf in video_folders:
-        if "folder" in vf:
-            get_or_create(vf["name"])
-            if vf["folder"].get("childCount", 0) > 0:
-                video_folder_tasks.append((vf["name"], vf["id"]))
-
-    if deep:
-        def fetch_audio_files(niche_name, folder_id):
-            tok, _ = get_graph_access_token()
-            files = _graph_list_all_children(folder_id, tok)
-            out = []
-            for f in files:
-                fname = f.get("name", "")
-                if "file" in f and fname.lower().endswith((".mp3", ".wav", ".m4a", ".aac")):
-                    lang = "PT"
-                    parts = fname.split("_")
-                    if len(parts) > 1:
-                        lang = parts[-1].split(".")[0].upper()
-                    out.append({
-                        "id": f["id"],
-                        "name": fname,
-                        "lang": lang,
-                        "size": f.get("size", 0),
-                        "url": f"/api/graph/file/{f['id']}/{urllib.parse.quote(fname)}",
-                    })
-            return niche_name, out
-
-        def fetch_video_files(niche_name, folder_id):
-            tok, _ = get_graph_access_token()
-            lang_dirs = _graph_list_all_children(folder_id, tok)
-            feed_list = []
-            reels_list = []
-            for ld in lang_dirs:
-                if "folder" not in ld:
-                    continue
-                vfiles = _graph_list_all_children(ld["id"], tok)
-                for vf in vfiles:
-                    vname = vf.get("name", "")
-                    if "file" in vf and vname.lower().endswith(".mp4"):
-                        num = int(vname[0]) if vname and vname[0].isdigit() else 0
-                        item_data = {
-                            "id": vf["id"],
-                            "name": vname,
-                            "num": num,
-                            "lang": ld["name"],
-                            "size": vf.get("size", 0),
-                            "url": f"/api/graph/file/{vf['id']}/{urllib.parse.quote(vname)}",
-                        }
-                        if 1 <= num <= 3:
-                            feed_list.append(item_data)
-                        elif 4 <= num <= 6:
-                            reels_list.append(item_data)
-            return niche_name, feed_list, reels_list
-
-        with ThreadPoolExecutor(max_workers=16) as pool:
-            futs_a = [pool.submit(fetch_audio_files, n, fid) for n, fid in audio_folder_tasks]
-            for fut in as_completed(futs_a):
-                try:
-                    nname, alist = fut.result()
-                    niches[nname]["audios"] = alist
-                except Exception as ex:
-                    print(f"⚠️ Erro audio Graph: {ex}")
-
-            futs_v = [pool.submit(fetch_video_files, n, fid) for n, fid in video_folder_tasks]
-            for fut in as_completed(futs_v):
-                try:
-                    nname, flist, rlist = fut.result()
-                    niches[nname]["videos"]["feed"] = flist
-                    niches[nname]["videos"]["reels"] = rlist
-                except Exception as ex:
-                    print(f"⚠️ Erro video Graph: {ex}")
-
-    for n in niches.values():
-        total = len(n["videos"]["feed"]) + len(n["videos"]["reels"])
-        if total >= 6:
-            n["status"] = "completed"
-        elif total > 0:
-            n["status"] = "partial"
-        else:
-            n["status"] = "pending"
-
-    sorted_niches = sorted(list(niches.values()), key=lambda x: x["name"])
-    GRAPH_NICHES_CACHE = sorted_niches
-
+def load_graph_cache_from_disk():
+    """Carrega cache persistido do Graph API para resposta instantânea na inicialização."""
+    if not os.path.exists(GRAPH_CACHE_PATH):
+        return False
     try:
+        with open(GRAPH_CACHE_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict) and "niches_map" in data:
+            with GRAPH_LOCK:
+                GRAPH_SYNC_STATE["niches_map"] = data.get("niches_map", {})
+                GRAPH_SYNC_STATE["audio_delta_link"] = data.get("audio_delta_link")
+                GRAPH_SYNC_STATE["video_delta_link"] = data.get("video_delta_link")
+                GRAPH_SYNC_STATE["last_sync"] = data.get("last_sync")
+                GRAPH_SYNC_STATE["completed"] = bool(GRAPH_SYNC_STATE["niches_map"])
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _save_graph_cache_to_disk():
+    try:
+        with GRAPH_LOCK:
+            payload = {
+                "niches_map": GRAPH_SYNC_STATE["niches_map"],
+                "audio_delta_link": GRAPH_SYNC_STATE["audio_delta_link"],
+                "video_delta_link": GRAPH_SYNC_STATE["video_delta_link"],
+                "last_sync": GRAPH_SYNC_STATE["last_sync"],
+            }
         with open(GRAPH_CACHE_PATH, "w", encoding="utf-8") as f:
-            json.dump(sorted_niches, f, ensure_ascii=False)
+            json.dump(payload, f, ensure_ascii=False)
     except Exception:
         pass
 
-    return GRAPH_NICHES_CACHE
+
+def _recompute_niche_status(niche_obj):
+    total = len(niche_obj["videos"]["feed"]) + len(niche_obj["videos"]["reels"])
+    if total >= 6:
+        niche_obj["status"] = "completed"
+    elif total > 0:
+        niche_obj["status"] = "partial"
+    else:
+        niche_obj["status"] = "pending"
+
+
+def _apply_delta_item(item, root_kind):
+    """Interpreta cada item retornado pelo endpoint /delta da Microsoft Graph API."""
+    if "deleted" in item:
+        return
+
+    parent_path = urllib.parse.unquote(item.get("parentReference", {}).get("path", "") or "")
+    name = item.get("name", "")
+    item_id = item.get("id", "")
+    is_folder = "folder" in item
+    is_file = "file" in item
+
+    marker = "/Arquivos de Áudio" if root_kind == "audio" else "/Vídeos"
+    idx = parent_path.find(marker)
+    if idx == -1:
+        return
+
+    after = parent_path[idx + len(marker):].strip("/")
+    rel_parts = [p for p in after.split("/") if p]
+
+    # Pasta raiz (Arquivos de Áudio ou Vídeos) -> ignora
+    if len(rel_parts) == 0 and name in ("Arquivos de Áudio", "Vídeos"):
+        return
+
+    # Pasta de nicho diretamente na raiz (ex: rel_parts == [], is_folder == True)
+    if len(rel_parts) == 0 and is_folder:
+        niche_name = name
+    elif len(rel_parts) >= 1:
+        niche_name = rel_parts[0]
+    else:
+        return
+
+    niches_map = GRAPH_SYNC_STATE["niches_map"]
+    if niche_name not in niches_map:
+        niches_map[niche_name] = {
+            "name": niche_name,
+            "audios": [],
+            "videos": {"feed": [], "reels": []},
+            "status": "pending",
+            "source": "graph",
+        }
+
+    niche = niches_map[niche_name]
+
+    if root_kind == "audio" and is_file and name.lower().endswith((".mp3", ".wav", ".m4a", ".aac")):
+        lang = "PT"
+        parts = name.split("_")
+        if len(parts) > 1:
+            lang = parts[-1].split(".")[0].upper()
+
+        entry = {
+            "id": item_id,
+            "name": name,
+            "lang": lang,
+            "size": item.get("size", 0),
+            "url": f"/api/graph/file/{item_id}/{urllib.parse.quote(name)}",
+        }
+        # Atualiza ou adiciona evitando duplicados
+        niche["audios"] = [a for a in niche["audios"] if a.get("id") != item_id]
+        niche["audios"].append(entry)
+
+    elif root_kind == "video" and is_file and name.lower().endswith(".mp4"):
+        num = int(name[0]) if name and name[0].isdigit() else 0
+        lang_folder = rel_parts[-1] if len(rel_parts) >= 2 else ""
+        item_data = {
+            "id": item_id,
+            "name": name,
+            "num": num,
+            "lang": lang_folder,
+            "size": item.get("size", 0),
+            "url": f"/api/graph/file/{item_id}/{urllib.parse.quote(name)}",
+        }
+        if 1 <= num <= 3:
+            niche["videos"]["feed"] = [v for v in niche["videos"]["feed"] if v.get("id") != item_id]
+            niche["videos"]["feed"].append(item_data)
+        elif 4 <= num <= 6:
+            niche["videos"]["reels"] = [v for v in niche["videos"]["reels"] if v.get("id") != item_id]
+            niche["videos"]["reels"].append(item_data)
+
+    _recompute_niche_status(niche)
+
+
+def _sync_graph_delta_worker(force_full=False):
+    """Sincroniza áudios e vídeos usando /delta em lote em segundo plano (sem timeout)."""
+    try:
+        tok, err = get_graph_access_token()
+        if not tok:
+            with GRAPH_LOCK:
+                GRAPH_SYNC_STATE["last_error"] = err
+                GRAPH_SYNC_STATE["running"] = False
+            return
+
+        work_id, audios_id, videos_id = _find_work_folder_ids(tok)
+        if not work_id:
+            with GRAPH_LOCK:
+                GRAPH_SYNC_STATE["last_error"] = "Pasta Trabalho não encontrada no OneDrive"
+                GRAPH_SYNC_STATE["running"] = False
+            return
+
+        if force_full:
+            with GRAPH_LOCK:
+                GRAPH_SYNC_STATE["niches_map"] = {}
+                GRAPH_SYNC_STATE["audio_delta_link"] = None
+                GRAPH_SYNC_STATE["video_delta_link"] = None
+                GRAPH_SYNC_STATE["pages_done"] = 0
+                GRAPH_SYNC_STATE["items_processed"] = 0
+
+        for kind, folder_id, delta_key in [
+            ("audio", audios_id, "audio_delta_link"),
+            ("video", videos_id, "video_delta_link"),
+        ]:
+            if not folder_id:
+                continue
+
+            with GRAPH_LOCK:
+                url = GRAPH_SYNC_STATE.get(delta_key) or f"https://graph.microsoft.com/v1.0/me/drive/items/{folder_id}/delta"
+
+            while url:
+                tok, _ = get_graph_access_token()
+                data = _graph_get(url, tok)
+                if "error" in data:
+                    with GRAPH_LOCK:
+                        GRAPH_SYNC_STATE["last_error"] = data["error"].get("message", str(data["error"]))
+                    break
+
+                vals = data.get("value", [])
+                with GRAPH_LOCK:
+                    for item in vals:
+                        _apply_delta_item(item, kind)
+                    GRAPH_SYNC_STATE["pages_done"] += 1
+                    GRAPH_SYNC_STATE["items_processed"] += len(vals)
+                    pages = GRAPH_SYNC_STATE["pages_done"]
+
+                if pages % 10 == 0:
+                    _save_graph_cache_to_disk()
+
+                next_link = data.get("@odata.nextLink")
+                delta_link = data.get("@odata.deltaLink")
+                if next_link:
+                    url = next_link
+                else:
+                    if delta_link:
+                        with GRAPH_LOCK:
+                            GRAPH_SYNC_STATE[delta_key] = delta_link
+                    url = None
+
+        with GRAPH_LOCK:
+            GRAPH_SYNC_STATE["completed"] = True
+            GRAPH_SYNC_STATE["last_sync"] = int(time.time())
+            GRAPH_SYNC_STATE["last_error"] = None
+        _save_graph_cache_to_disk()
+    except Exception as ex:
+        with GRAPH_LOCK:
+            GRAPH_SYNC_STATE["last_error"] = str(ex)
+    finally:
+        with GRAPH_LOCK:
+            GRAPH_SYNC_STATE["running"] = False
+
+
+def start_graph_sync_background(force_full=False):
+    with GRAPH_LOCK:
+        if GRAPH_SYNC_STATE["running"]:
+            return False
+        GRAPH_SYNC_STATE["running"] = True
+        GRAPH_SYNC_STATE["last_error"] = None
+    t = threading.Thread(target=_sync_graph_delta_worker, args=(force_full,), daemon=True)
+    t.start()
+    return True
+
+
+def get_graph_niches_snapshot(trigger_sync=False, force_full=False):
+    """Retorna imediatamente os nichos sincronizados até agora sem bloquear HTTP."""
+    with GRAPH_LOCK:
+        is_empty = len(GRAPH_SYNC_STATE["niches_map"]) == 0
+        running = GRAPH_SYNC_STATE["running"]
+
+    if (trigger_sync or is_empty) and not running:
+        start_graph_sync_background(force_full=force_full)
+
+    with GRAPH_LOCK:
+        sorted_niches = sorted(list(GRAPH_SYNC_STATE["niches_map"].values()), key=lambda x: x["name"])
+        return sorted_niches, {
+            "hydrating": GRAPH_SYNC_STATE["running"],
+            "completed": GRAPH_SYNC_STATE["completed"],
+            "pages_done": GRAPH_SYNC_STATE["pages_done"],
+            "items_processed": GRAPH_SYNC_STATE["items_processed"],
+            "last_error": GRAPH_SYNC_STATE["last_error"],
+        }
 
 
 # ============================================================
@@ -558,6 +676,11 @@ class APIHandler(BaseHTTPRequestHandler):
             graph_configured = bool(cfg.get("ONEDRIVE_CLIENT_ID") and cfg.get("ONEDRIVE_CLIENT_SECRET"))
             graph_connected = bool(cfg.get("ONEDRIVE_REFRESH_TOKEN"))
 
+            with GRAPH_LOCK:
+                graph_count = len(GRAPH_SYNC_STATE["niches_map"])
+                hydrating = GRAPH_SYNC_STATE["running"]
+                graph_completed = GRAPH_SYNC_STATE["completed"]
+
             self._send_json({
                 "status": "online",
                 "backend": "Python 3.11 (Cloud & Local Ready)",
@@ -568,7 +691,10 @@ class APIHandler(BaseHTTPRequestHandler):
                 "onedrive_accessible": local_exists or graph_connected,
                 "mode": "graph_cloud" if graph_connected else ("local_folder" if local_exists else "disconnected"),
                 "cached_local": NICHES_CACHE is not None,
-                "cached_graph": GRAPH_NICHES_CACHE is not None or os.path.exists(GRAPH_CACHE_PATH),
+                "cached_graph": graph_count > 0,
+                "graph_count": graph_count,
+                "hydrating": hydrating,
+                "graph_completed": graph_completed,
             })
 
         # --------------------------------------------------------
@@ -621,6 +747,7 @@ class APIHandler(BaseHTTPRequestHandler):
             user_name = me.get("displayName", "Conta Microsoft")
             user_email = me.get("userPrincipalName") or me.get("mail") or ""
             refresh_tok = token_res.get("refresh_token", "")
+            start_graph_sync_background(force_full=False)
 
             self._send_html(f"""
             <html>
@@ -679,19 +806,27 @@ class APIHandler(BaseHTTPRequestHandler):
                 use_graph = (source_pref == "graph") or (has_graph and not has_local)
 
                 if use_graph:
-                    niches = scan_onedrive_via_graph(force_reload=reload_force, deep=True)
-                    used_source = "graph"
+                    niches, sync_meta = get_graph_niches_snapshot(trigger_sync=reload_force, force_full=reload_force)
+                    self._send_json({
+                        "success": True,
+                        "source": "graph",
+                        "count": len(niches),
+                        "hydrating": sync_meta["hydrating"],
+                        "completed": sync_meta["completed"],
+                        "pages_done": sync_meta["pages_done"],
+                        "last_error": sync_meta["last_error"],
+                        "niches": niches,
+                    })
                 else:
                     niches = scan_onedrive_folders(DEFAULT_WORK_DIR, force_reload=reload_force)
-                    used_source = "local"
-
-                self._send_json({
-                    "success": True,
-                    "source": used_source,
-                    "count": len(niches),
-                    "cached": not reload_force,
-                    "niches": niches,
-                })
+                    self._send_json({
+                        "success": True,
+                        "source": "local",
+                        "count": len(niches),
+                        "hydrating": False,
+                        "completed": True,
+                        "niches": niches,
+                    })
             except Exception as e:
                 self._send_json({"success": False, "error": str(e)}, 500)
 
@@ -710,8 +845,8 @@ class APIHandler(BaseHTTPRequestHandler):
                 self._send_json({"error": err or "Não autenticado"}, 401)
                 return
 
-            meta = _graph_get(f"https://graph.microsoft.com/v1.0/me/drive/items/{item_id}?$select=id,name,@microsoft.graph.downloadUrl", tok)
-            dl_url = meta.get("@microsoft.graph.downloadUrl")
+            meta = _graph_get(f"https://graph.microsoft.com/v1.0/me/drive/items/{item_id}", tok)
+            dl_url = meta.get("@microsoft.graph.downloadUrl") or meta.get("@content.downloadUrl")
             if not dl_url:
                 self._send_json({"error": "URL de download indisponível", "detail": meta}, 404)
                 return
@@ -789,6 +924,11 @@ class APIHandler(BaseHTTPRequestHandler):
 
 
 def run():
+    load_graph_cache_from_disk()
+    cfg = load_env_vars()
+    if cfg.get("ONEDRIVE_REFRESH_TOKEN"):
+        start_graph_sync_background(force_full=False)
+
     host = "0.0.0.0" if (os.environ.get("RENDER") or os.environ.get("RAILWAY_ENVIRONMENT") or os.environ.get("PORT")) else "127.0.0.1"
     server_address = (host, PORT)
     httpd = ThreadingHTTPServer(server_address, APIHandler)
