@@ -70,6 +70,10 @@ O projeto foi retomado a partir de `PROJETO_CONTEXTO.md`.
       - **Aba Configurações:** Seção para visualização, teste e renovação do Token de Acesso da Meta e definição de conta padrão.
       - **Visão Geral:** Card da Meta atualizado para status verde conectado com indicador dinâmico do usuário e atalho direto para o duplicador.
       - **Deploy:** Versão commitada (`ba746fb`) e publicada no GitHub Pages (`https://thiagokinho22-code.github.io/twod-dashboard-thiago/`).
+  16. **Padronização Exclusiva para Dólar ($1.00 USD):**
+      - Conforme alinhado com Thiago ("a gente só trabalha com dólar"), removeu-se qualquer conversão ou exibição de reais/outras moedas.
+      - O campo de orçamento diário foi travado e padronizado visualmente e programmaticamente como **fixo em $1.00 USD** (`100` centavos na Meta API), impedindo qualquer erro operacional de digitação.
+      - Commit `feb2106` enviado ao GitHub Pages.
 
 ---
 *(Este arquivo será atualizado continuamente conforme avançamos no desenvolvimento)*
