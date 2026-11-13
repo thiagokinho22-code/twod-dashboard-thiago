@@ -85,6 +85,9 @@ O projeto foi retomado a partir de `PROJETO_CONTEXTO.md`.
       - Novo token fornecido por Thiago atualizado no `backend/.env` e `app.js`.
       - Testado e validado end-to-end com sucesso via script.
       - Commit `b069ed8` enviado ao GitHub Pages.
+  19. **Validação Operacional pelo Usuário (Marco Concluído):**
+      - Thiago testou a duplicação diretamente na prática pelo TwoD Hub e confirmou que os conjuntos e anúncios foram gerados com sucesso ("Fiz um teste aqui e ficou bem legal").
+      - O Duplicador Meta Ads passa a ser a ferramenta oficial para duplicações de países da TwoD Company, aposentando a extensão pesada do Chrome.
 
 ---
 *(Este arquivo será atualizado continuamente conforme avançamos no desenvolvimento)*
