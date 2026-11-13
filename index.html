@@ -406,10 +406,28 @@
                             <button type="button" class="btn btn-outline btn-sm" onclick="reloadMetaAccounts(true)">
                                 🔄 Recarregar Contas
                             </button>
-                            <button type="button" class="btn btn-secondary btn-sm" onclick="switchTab('configuracoes')">
-                                ⚙️ Credenciais Meta
+                            <button type="button" class="btn btn-secondary btn-sm" onclick="toggleDuplicatorTokenBox()">
+                                🔑 Conectar / Token
                             </button>
                         </div>
+                    </div>
+
+                    <!-- CONEXÃO RÁPIDA DA API META (DENTRO DO DUPLICADOR) -->
+                    <div id="duplicador-token-box" class="panel-card twod-hidden" style="margin-bottom: 24px; border: 1px solid rgba(59, 130, 246, 0.35);">
+                        <div class="panel-card-header" style="margin-bottom: 14px;">
+                            <div>
+                                <h2 style="font-size: 16px;">🔑 Conectar API do Facebook (Meta Ads)</h2>
+                                <p>Cole seu Access Token abaixo para conectar suas contas e campanhas direto por aqui (salvo com segurança apenas no seu navegador).</p>
+                            </div>
+                            <button type="button" class="btn btn-outline btn-sm" onclick="toggleDuplicatorTokenBox(false)">✕ Fechar</button>
+                        </div>
+                        <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
+                            <input type="password" id="duplicador-token-input" class="twod-input" placeholder="Cole seu Access Token da Meta aqui (EAA...)" style="flex: 1; min-width: 240px; font-family: monospace; font-size: 12px;">
+                            <button type="button" class="btn btn-outline btn-sm" id="btn-toggle-dup-token-vis" onclick="toggleTokenVisibility('duplicador-token-input', 'btn-toggle-dup-token-vis')">👁️ Ver</button>
+                            <button type="button" class="btn btn-primary btn-sm" onclick="saveMetaSettingsFromUI('duplicador')">💾 Conectar & Salvar</button>
+                            <button type="button" class="btn btn-outline btn-sm" onclick="testMetaTokenFromUI('duplicador-token-input', 'duplicador-token-test-result')">🔍 Testar</button>
+                        </div>
+                        <div id="duplicador-token-test-result" class="twod-hidden" style="margin-top: 12px; padding: 12px 16px; border-radius: 8px; font-size: 13px; line-height: 1.5;"></div>
                     </div>
 
                     <!-- ETAPA 1: SELEÇÃO DE CONTA, CAMPANHA E CONJUNTO BASE -->
@@ -853,7 +871,7 @@
         </div>
     </div>
 
-    <script src="app.js?v=6.1"></script>
+    <script src="app.js?v=6.2"></script>
 </body>
 </html>
 

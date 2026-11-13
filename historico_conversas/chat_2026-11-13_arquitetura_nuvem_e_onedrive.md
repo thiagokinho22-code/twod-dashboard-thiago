@@ -31,6 +31,11 @@
   1. Diagnosticou via console do Chrome headless a causa raiz exata: o commit `40c45be` havia declarado `const token = getMetaToken();` duas vezes dentro da função `startBatchDuplication()` (`app.js`), causando `Uncaught SyntaxError: Identifier 'token' has already been declared` que impedia o navegador de carregar todo o `app.js` (travando tanto o login anterior quanto todos os cliques e abas).
   2. Removeu a declaração duplicada de `const token`, adicionou proteção contra cliques duplicados e persistência da aba ativa em `initTabs()`/`switchTab()`, e atualizou para `app.js?v=6.1`.
   3. Validou todas as 8 abas, alternância de tema, modais, listagem de 1.218 nichos e fluxo de logout/login no Chrome headless via CDP sem nenhum erro no console.
+- **Thiago:** Pediu para colocar a conexão da API do Facebook também dentro da aba Duplicador para facilitar; informou que os serviços da Microsoft voltaram hoje para tentar a conexão com o OneDrive 24/7 via API própria (sem PC ligado); e disse que vai enviar o padrão de subida de campanhas para automatizar a postagem no Facebook.
+- **Agente:**
+  1. Adicionou o painel rápido **🔑 Conectar API do Facebook (Meta Ads)** diretamente no topo da aba **Duplicador Meta Ads** (`index.html` e `app.js?v=6.2`), sincronizado com Configurações e abrindo automaticamente se não houver token salvo.
+  2. Validou no Chrome headless (`app.js?v=6.2`) com zero erros no console.
+  3. Preparou orientações objetivas para obter `Client ID` / `Client Secret` no Azure/Entra ID para a API própria do OneDrive na nuvem (Render/Railway) e aguarda o padrão das campanhas do Facebook.
 
 ---
 *(Este arquivo será atualizado continuamente conforme avançamos no desenvolvimento)*

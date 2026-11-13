@@ -1372,8 +1372,30 @@ async function initMetaApi() {
     await testAndReloadMetaApi(false);
 }
 
+// Abre/fecha o painel rápido de conexão de Token dentro do Duplicador
+function toggleDuplicatorTokenBox(forceState) {
+    const box = document.getElementById('duplicador-token-box');
+    const dupInput = document.getElementById('duplicador-token-input');
+    if (!box) return;
+
+    const shouldShow = (typeof forceState === 'boolean')
+        ? forceState
+        : box.classList.contains('twod-hidden');
+
+    if (shouldShow) {
+        box.classList.remove('twod-hidden');
+        if (dupInput) dupInput.value = metaState.token || '';
+    } else {
+        box.classList.add('twod-hidden');
+    }
+}
+
 // Quando a aba de duplicador for aberta
 function onDuplicatorTabOpened() {
+    const token = getMetaToken();
+    if (!token) {
+        toggleDuplicatorTokenBox(true);
+    }
     if (!metaState.initialized) {
         testAndReloadMetaApi(false);
     }
@@ -1394,7 +1416,7 @@ async function testAndReloadMetaApi(forceReload = false) {
         updateMetaStatusUI(false, 'Nenhum token configurado.');
         const selectAcc = document.getElementById('select-meta-account');
         const countLabel = document.getElementById('label-account-count');
-        if (selectAcc) selectAcc.innerHTML = '<option value="">Cole seu Token na aba Configurações primeiro...</option>';
+        if (selectAcc) selectAcc.innerHTML = '<option value="">Cole seu Token acima para carregar as contas...</option>';
         if (countLabel) countLabel.innerText = '(Sem token)';
         return;
     }
@@ -1452,13 +1474,14 @@ function updateMetaStatusUI(isSuccess, errorMessage = null, userData = null) {
             dupBadge.innerText = `🟢 Meta API ${META_GRAPH_VERSION} Online`;
         }
         if (dupSub) dupSub.innerText = `ID: ${userData.id} • Permissões ativas: ads_management, ads_read, business_management`;
+        toggleDuplicatorTokenBox(false);
     } else {
         if (badgeOverview) {
             badgeOverview.className = 'badge-status status-pending';
             badgeOverview.innerText = '🔴 Desconectado';
         }
         if (userHeading) userHeading.innerText = 'Meta Marketing API (Desconectado)';
-        if (statusDesc) statusDesc.innerText = errorMessage ? `Status: ${errorMessage}` : 'Token não configurado ou expirado. Configure na aba Configurações.';
+        if (statusDesc) statusDesc.innerText = errorMessage ? `Status: ${errorMessage}` : 'Token não configurado ou expirado. Configure no Duplicador ou em Configurações.';
         if (cardSubinfo) cardSubinfo.innerText = 'Nenhum token ativo no navegador';
 
         if (dupName) dupName.innerText = 'Duplicador Meta Ads';
@@ -1467,7 +1490,7 @@ function updateMetaStatusUI(isSuccess, errorMessage = null, userData = null) {
             dupBadge.innerText = '🔴 Sem Token Ativo';
         }
         if (dupSub) {
-            dupSub.innerHTML = `⚠️ ${errorMessage || 'Nenhum token configurado.'} <a href="javascript:void(0)" onclick="switchTab('configuracoes')" style="color: var(--accent-primary); text-decoration: underline; font-weight: 600; margin-left: 6px;">Preencher Token nas Configurações →</a>`;
+            dupSub.innerHTML = `⚠️ ${errorMessage || 'Nenhum token configurado.'} <a href="javascript:void(0)" onclick="toggleDuplicatorTokenBox(true)" style="color: var(--accent-primary); text-decoration: underline; font-weight: 600; margin-left: 6px;">Conectar Token aqui →</a>`;
         }
     }
 }
@@ -2306,10 +2329,10 @@ async function startBatchDuplication() {
     logMetaTerminal(`🎉 Operação finalizada em ${elapsedSecs}s! Sucesso: ${successCount} | Falhas: ${failCount}`, successCount > 0 ? 'success' : 'warning');
 }
 
-// Helpers da aba Configurações
-function toggleTokenVisibility() {
-    const input = document.getElementById('meta-token-input');
-    const btn = document.getElementById('btn-toggle-token-vis');
+// Helpers compartilhados de Token Meta (Configurações e Duplicador)
+function toggleTokenVisibility(inputId = 'meta-token-input', btnId = 'btn-toggle-token-vis') {
+    const input = document.getElementById(inputId);
+    const btn = document.getElementById(btnId);
     if (!input || !btn) return;
 
     if (input.type === 'password') {
@@ -2321,9 +2344,9 @@ function toggleTokenVisibility() {
     }
 }
 
-async function testMetaTokenFromUI() {
-    const tokenInput = document.getElementById('meta-token-input');
-    const resultBox = document.getElementById('meta-token-test-result');
+async function testMetaTokenFromUI(inputId = 'meta-token-input', resultBoxId = 'meta-token-test-result') {
+    const tokenInput = document.getElementById(inputId);
+    const resultBox = document.getElementById(resultBoxId);
     const token = tokenInput ? tokenInput.value.trim() : '';
 
     if (!token) {
@@ -2372,12 +2395,20 @@ async function testMetaTokenFromUI() {
     }
 }
 
-async function saveMetaSettingsFromUI() {
-    const tokenInput = document.getElementById('meta-token-input');
+async function saveMetaSettingsFromUI(source = 'configuracoes') {
+    const cfgTokenInput = document.getElementById('meta-token-input');
+    const dupTokenInput = document.getElementById('duplicador-token-input');
     const accountInput = document.getElementById('meta-default-account-input');
 
-    const token = tokenInput ? tokenInput.value.trim() : '';
-    const accountId = accountInput ? accountInput.value.trim() : '';
+    const primaryTokenInput = (source === 'duplicador' && dupTokenInput) ? dupTokenInput : cfgTokenInput;
+    const token = primaryTokenInput ? primaryTokenInput.value.trim() : '';
+    const accountId = (source === 'configuracoes' && accountInput)
+        ? accountInput.value.trim()
+        : (metaState.defaultAccountId || '');
+
+    // Mantém os dois inputs sincronizados
+    if (cfgTokenInput) cfgTokenInput.value = token;
+    if (dupTokenInput) dupTokenInput.value = token;
 
     if (token) {
         metaState.token = token;
@@ -2387,12 +2418,14 @@ async function saveMetaSettingsFromUI() {
         localStorage.removeItem(STORAGE_KEYS.META_TOKEN);
     }
 
-    if (accountId) {
-        metaState.defaultAccountId = accountId;
-        localStorage.setItem(STORAGE_KEYS.META_ACCOUNT, accountId);
-    } else {
-        metaState.defaultAccountId = '';
-        localStorage.removeItem(STORAGE_KEYS.META_ACCOUNT);
+    if (source === 'configuracoes') {
+        if (accountId) {
+            metaState.defaultAccountId = accountId;
+            localStorage.setItem(STORAGE_KEYS.META_ACCOUNT, accountId);
+        } else {
+            metaState.defaultAccountId = '';
+            localStorage.removeItem(STORAGE_KEYS.META_ACCOUNT);
+        }
     }
 
     // Salva no backend local se estiver ativo
@@ -2451,6 +2484,7 @@ window.selectPriorityCountriesOnly = selectPriorityCountriesOnly;
 window.selectMissingCountriesOnly = selectMissingCountriesOnly;
 window.startBatchDuplication = startBatchDuplication;
 window.clearMetaLog = clearMetaLog;
+window.toggleDuplicatorTokenBox = toggleDuplicatorTokenBox;
 window.toggleTokenVisibility = toggleTokenVisibility;
 window.testMetaTokenFromUI = testMetaTokenFromUI;
 window.saveMetaSettingsFromUI = saveMetaSettingsFromUI;
