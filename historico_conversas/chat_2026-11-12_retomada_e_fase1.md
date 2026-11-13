@@ -88,6 +88,20 @@ O projeto foi retomado a partir de `PROJETO_CONTEXTO.md`.
   19. **Validação Operacional pelo Usuário (Marco Concluído):**
       - Thiago testou a duplicação diretamente na prática pelo TwoD Hub e confirmou que os conjuntos e anúncios foram gerados com sucesso ("Fiz um teste aqui e ficou bem legal").
       - O Duplicador Meta Ads passa a ser a ferramenta oficial para duplicações de países da TwoD Company, aposentando a extensão pesada do Chrome.
+  20. **Reconhecimento Inteligente de Países & Status de Blocos na Campanha:**
+      - Thiago solicitou uma funcionalidade que existia na extensão antiga: visualização imediata de quais países de um bloco já foram criados na campanha selecionada, quais ainda faltam, e se o bloco está 100% completo.
+      - **Algoritmo de Matching Híbrido:** Cruza os conjuntos da campanha selecionada via códigos ISO 2-letter (`targeting.geo_locations.countries`) e nomes normalizados de adsets (sem acentos, pontuação ou formatação).
+      - **Badges de Progresso nas Abas dos Blocos:** Cada aba de bloco agora exibe em tempo real o status:
+        - `✅ 15/15` com destaque verde se o bloco estiver 100% concluído;
+        - `📊 3/15` com destaque âmbar se estiver parcialmente concluído;
+        - `⏳ 0/15` se nenhum país daquele bloco foi criado ainda.
+      - **Cards de Países Diferenciados:**
+        - Países já criados ganham borda verde e badge `✅ Já na Campanha (Ativo/Pausado)` com tooltip do nome original do conjunto.
+        - Países pendentes ganham badge `⏳ Pendente`.
+      - **Seleção Inteligente por Padrão:** Ao abrir um bloco, apenas os países **faltantes** vêm marcados por padrão (países já existentes vêm desmarcados).
+      - **Botão de 1 Clique `⚡ Marcar Apenas Faltantes`:** Filtra e marca apenas os países pendentes no bloco com um único clique.
+      - **Atualização Dinâmica em Tempo Real:** Conforme a duplicação em massa acontece, cada país clonado tem seu card transformado em `✅ Já na Campanha`, seu checkbox desmarcado e o badge do bloco incrementado ao vivo sem precisar recarregar a página.
+      - Versão do script atualizada para `app.js?v=5.4`. Commit `f6da850` enviado para a branch `main` e publicado no GitHub Pages.
 
 ---
 *(Este arquivo será atualizado continuamente conforme avançamos no desenvolvimento)*
