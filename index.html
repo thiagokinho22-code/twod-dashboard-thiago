@@ -538,9 +538,17 @@
 
                         <div class="form-grid-2" style="gap: 14px; margin-top: 16px;">
                             <div class="form-group">
-                                <label for="cb-base-url"><strong>URL Base do Artigo (sem idioma ou já com URL do site):</strong></label>
-                                <input type="url" id="cb-base-url" class="twod-input" placeholder="https://twodcompany.com/25079/descarga-app-cocina..." oninput="updateUrlPreview()">
-                                <span class="help-text" id="cb-localized-url-preview">Português mantém URL limpa sem <code>/pt/</code>; outros idiomas inserem <code>/es/</code>, <code>/fr/</code>, <code>/de/</code> etc.</span>
+                                <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap;">
+                                    <label for="cb-base-url" style="margin-bottom: 0;"><strong>URL Base do Artigo (TranslateX):</strong></label>
+                                    <select id="cb-site-native-lang" class="twod-select" style="width: auto; padding: 4px 10px; font-size: 12px;" onchange="onSiteNativeLangChanged()">
+                                        <option value="pt">🇧🇷 Site Nativo: Português (sem /pt/)</option>
+                                        <option value="es">🇪🇸 Site Nativo: Espanhol — Twod/Kiuvix (sem /es/)</option>
+                                        <option value="en">🇺🇸 Site Nativo: Inglês (sem /en/)</option>
+                                        <option value="always">🌐 Sempre inserir tag (/pt/, /es/, /en/...)</option>
+                                    </select>
+                                </div>
+                                <input type="url" id="cb-base-url" class="twod-input" style="margin-top: 6px;" placeholder="https://twodcompany.com/25079/descarga-app-cocina..." oninput="updateUrlPreview(true)">
+                                <span class="help-text" id="cb-localized-url-preview">Todos os sites mantêm PT sem <code>/pt/</code>, exceto Twod e Kiuvix (ES) que mantêm ES limpo e inserem <code>/pt/</code> no Brasil.</span>
                             </div>
                             <div class="form-group">
                                 <label><strong>Parâmetro UTM (para campanhas UTM):</strong></label>
@@ -1243,7 +1251,7 @@
     </div>
 
     <script src="app.js?v=6.9"></script>
-    <script src="campaign_builder.js?v=1.1"></script>
+    <script src="campaign_builder.js?v=1.2"></script>
 </body>
 </html>
 

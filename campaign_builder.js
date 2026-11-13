@@ -61,7 +61,9 @@ let cbState = {
     calibratedModel: null,
     spanishLocaleIds: null,
     isLaunching: false,
-    translationCache: {}
+    translationCache: {},
+    siteNativeLang: 'pt',
+    siteNativeLangManual: false
 };
 
 // ========================================================
@@ -204,6 +206,9 @@ async function onCampaignBuilderAccountChanged() {
         accountCodeInput.value = cbState.selectedAccount.name.trim();
         updateCampaignNamePreview();
     }
+
+    cbState.siteNativeLangManual = false;
+    syncSiteNativeLangFromContext(cbState.selectedAccount?.name || document.getElementById('cb-base-url')?.value || '');
 
     const inspectorBox = document.getElementById('cb-model-inspector-box');
     if (inspectorBox) inspectorBox.classList.add('twod-hidden');
@@ -513,6 +518,37 @@ function onCampaignTypeChanged() {
     updateUrlPreview();
 }
 
+function detectSiteNativeLang(sourceText = '') {
+    const s = String(sourceText || '').toLowerCase();
+    // Todos os sites são em português por padrão, exceto Twod (twodcompany) e Kiuvix que são em espanhol
+    if (/twod|kiuvix/.test(s)) return 'es';
+    return 'pt';
+}
+
+function getSelectedSiteNativeLang() {
+    const sel = document.getElementById('cb-site-native-lang');
+    return (sel && sel.value) || cbState.siteNativeLang || 'pt';
+}
+
+function syncSiteNativeLangFromContext(sourceText = '') {
+    if (cbState.siteNativeLangManual) return;
+    const detected = detectSiteNativeLang(sourceText);
+    cbState.siteNativeLang = detected;
+    const sel = document.getElementById('cb-site-native-lang');
+    if (sel && sel.value !== detected) {
+        sel.value = detected;
+    }
+    updateUrlPreview(false);
+}
+
+function onSiteNativeLangChanged() {
+    const sel = document.getElementById('cb-site-native-lang');
+    if (!sel) return;
+    cbState.siteNativeLang = sel.value || 'pt';
+    cbState.siteNativeLangManual = true;
+    updateUrlPreview(false);
+}
+
 function stripTranslateXPrefix(pathname = '/') {
     const parts = pathname.split('/').filter(Boolean);
     if (parts.length > 0) {
@@ -527,16 +563,21 @@ function stripTranslateXPrefix(pathname = '/') {
     return '/' + parts.join('/') + (pathname.endsWith('/') && parts.length > 0 ? '/' : '');
 }
 
-function buildLocalizedAdUrl(rawUrl, langCode = 'pt') {
+function buildLocalizedAdUrl(rawUrl, langCode = 'pt', siteNativeLang = null) {
     const trimmed = (rawUrl || '').trim();
     if (!trimmed) return '';
     try {
         const u = new URL(trimmed);
         const cleanPath = stripTranslateXPrefix(u.pathname);
-        if (!langCode || langCode.toLowerCase() === 'pt') {
+        const target = (langCode || 'pt').trim();
+        const targetLower = target.toLowerCase();
+        const nativeLang = (siteNativeLang || detectSiteNativeLang(trimmed)).toLowerCase();
+
+        // Se o idioma do anúncio for o mesmo idioma nativo do site, usa a URL raiz sem tag (exceto modo 'always')
+        if (nativeLang !== 'always' && targetLower === nativeLang) {
             u.pathname = cleanPath;
         } else {
-            u.pathname = `/${langCode}${cleanPath.startsWith('/') ? '' : '/'}${cleanPath}`;
+            u.pathname = `/${target}${cleanPath.startsWith('/') ? '' : '/'}${cleanPath}`;
         }
         return u.toString();
     } catch (e) {
@@ -549,10 +590,20 @@ function extractPostIdFromUrl(rawUrl = '') {
     return m ? m[1] : '';
 }
 
-function updateUrlPreview() {
+function updateUrlPreview(fromUrlInput = false) {
     const rawUrl = (document.getElementById('cb-base-url')?.value || '').trim();
     const previewEl = document.getElementById('cb-localized-url-preview');
     const postIdInput = document.getElementById('cb-post-id');
+
+    if (fromUrlInput && rawUrl) {
+        if (!cbState.siteNativeLangManual) {
+            const accName = cbState.selectedAccount?.name || document.getElementById('cb-account-code')?.value || '';
+            const detected = detectSiteNativeLang(`${rawUrl} ${accName}`);
+            cbState.siteNativeLang = detected;
+            const sel = document.getElementById('cb-site-native-lang');
+            if (sel) sel.value = detected;
+        }
+    }
 
     if (rawUrl && postIdInput && !postIdInput.value.trim()) {
         const extracted = extractPostIdFromUrl(rawUrl);
@@ -562,15 +613,25 @@ function updateUrlPreview() {
         }
     }
 
+    const nativeLang = getSelectedSiteNativeLang();
     if (!previewEl) return;
     if (!rawUrl) {
-        previewEl.innerHTML = 'Português mantém URL limpa sem <code>/pt/</code>; outros idiomas inserem <code>/es/</code>, <code>/fr/</code>, <code>/de/</code> etc.';
+        if (nativeLang === 'es') {
+            previewEl.innerHTML = 'Site em <strong>Espanhol</strong>: ES mantém URL limpa sem <code>/es/</code>; Brasil insere <code>/pt/</code> e EUA inglês insere <code>/en/</code>.';
+        } else if (nativeLang === 'en') {
+            previewEl.innerHTML = 'Site em <strong>Inglês</strong>: EN mantém URL limpa sem <code>/en/</code>; demais idiomas inserem <code>/pt/</code>, <code>/es/</code> etc.';
+        } else if (nativeLang === 'always') {
+            previewEl.innerHTML = 'Modo explícito: todos os idiomas recebem tag (<code>/pt/</code>, <code>/es/</code>, <code>/en/</code>...).';
+        } else {
+            previewEl.innerHTML = 'Site em <strong>Português</strong>: BR/PT mantém URL limpa sem <code>/pt/</code>; demais idiomas inserem <code>/es/</code>, <code>/en/</code>, <code>/fr/</code> etc.';
+        }
         return;
     }
 
-    const ptExample = buildLocalizedAdUrl(rawUrl, 'pt');
-    const esExample = buildLocalizedAdUrl(rawUrl, 'es');
-    previewEl.innerHTML = `🇧🇷 PT: <code>${ptExample}</code> • 🇪🇸 ES: <code>${esExample}</code>`;
+    const ptExample = buildLocalizedAdUrl(rawUrl, 'pt', nativeLang);
+    const esExample = buildLocalizedAdUrl(rawUrl, 'es', nativeLang);
+    const enExample = buildLocalizedAdUrl(rawUrl, 'en', nativeLang);
+    previewEl.innerHTML = `🇧🇷 PT: <code>${ptExample}</code><br>🇪🇸 ES: <code>${esExample}</code> • 🇺🇸 EN: <code>${enExample}</code>`;
 }
 
 // ========================================================
@@ -1300,7 +1361,8 @@ async function launchStandardCampaign() {
                 tTexts = await translateTextsBatch(tTexts, country.langCode, 'pt');
             }
             const [tp1, tp2, th1, th2, th3, td2] = tTexts;
-            const localizedUrl = buildLocalizedAdUrl(baseUrl, country.langCode);
+            const siteNativeLang = getSelectedSiteNativeLang();
+            const localizedUrl = buildLocalizedAdUrl(baseUrl, country.langCode, siteNativeLang);
 
             // 5. Cria 1 Anúncio por criativo (01, 02... 06) alternando Página da BM
             let adsOk = 0;
@@ -1393,6 +1455,7 @@ window.inspectModelCampaign = inspectModelCampaign;
 window.updateCampaignNamePreview = updateCampaignNamePreview;
 window.setCampaignTypePreset = setCampaignTypePreset;
 window.onCampaignTypeChanged = onCampaignTypeChanged;
+window.onSiteNativeLangChanged = onSiteNativeLangChanged;
 window.updateUrlPreview = updateUrlPreview;
 window.onCampaignBuilderNicheInput = onCampaignBuilderNicheInput;
 window.onCampaignBuilderNicheSelected = onCampaignBuilderNicheSelected;

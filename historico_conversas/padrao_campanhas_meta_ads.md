@@ -54,8 +54,9 @@
     1. `⭐⭐⭐⭐⭐`
     2. `⬇️ BAIXE AGORA` *(traduzido quando em outro idioma)*
 - **URL de Destino + Tags de Idioma (`TranslateX Cache`):**
-  - Base em português sem prefixo `/pt/`: ex. `https://twodcompany.com/25079/slug/`
-  - Outros idiomas recebem `/{tag}/` antes do ID: ex. `https://twodcompany.com/es/25079/descarga-app-cocina-platos-tradicionales-deliciosos/`
+  - **Idioma nativo do site determina a URL raiz limpa (sem tag):**
+    - **Twod (`twodcompany.com`) e Kiuvix (`kiuvix.com`)** são nativamente em **Espanhol (`es`)**: para países em Espanhol a URL vai limpa sem `/es/`; para **Brasil (`pt`)** insere **`/pt/`** e para outros idiomas insere `/{tag}/`.
+    - **Todos os demais sites** (`simplificandocomcafe`, `blingalax`, `f4rol`, `kiocom`, `thehatsune`, etc.) são nativamente em **Português (`pt`)**: para **Brasil/Portugal (`pt`)** a URL vai limpa sem `/pt/`; para outros idiomas insere `/{tag}/` (ex.: `/es/`, `/en/`, `/fr/`).
   - Lista completa `TranslateX Cache` (Print 9, confirmada integralmente): `ro`, `ar`, `no`, `iw`, `vi`, `ko`, `bg`, `cs`, `hr`, `th`, `lt`, `uk`, `fi`, `hi`, `hu`, `bn`, `sk`, `sl`, `id`, `en`, `fr`, `es`, `de`, `it`, `nl`, `ru`, `pt`, `ja`, `tr`, `pl`, `sv`, `da`, `zh-CN`, `zh-TW`, `el`, `tl`, `ms`, `et`, `ca`, `lv`, `ur`, `sr`, `fa`, `sw`, `sq`, `hy`, `is`, `bs`, `lb`, `af`.
 - **Call to Action (CTA):** sempre **`Download`**.
 - **Extensões de Chamada / Mensagem (WhatsApp/Messenger/Ligações):** sempre **desativar**.
