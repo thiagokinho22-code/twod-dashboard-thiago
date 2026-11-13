@@ -97,13 +97,12 @@ try {
     sites = [...DEFAULT_SITES];
 }
 
-let currentUser = null;
+// Limpa qualquer sessão prévia para SEMPRE exigir login ao abrir o painel
 try {
-    const rawUser = localStorage.getItem(STORAGE_KEYS.CURRENT_USER);
-    if (rawUser) currentUser = JSON.parse(rawUser);
-} catch (e) {
-    currentUser = null;
-}
+    localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
+} catch (e) { }
+
+let currentUser = null;
 
 function saveUsers() {
     try { localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users)); } catch (e) { }
@@ -118,17 +117,14 @@ function saveSites() {
 // ========================================================
 
 function checkSession() {
-    if (currentUser && currentUser.username) {
-        // Encontra o usuário atualizado no banco
-        const updated = users.find(u => u && u.username && u.username.toLowerCase() === currentUser.username.toLowerCase());
-        if (updated) currentUser = updated;
-        showApp();
-    } else {
-        showLogin();
-    }
+    // Sempre exibe a tela de login ao abrir o TwoD Hub
+    showLogin();
 }
 
 function showLogin() {
+    currentUser = null;
+    try { localStorage.removeItem(STORAGE_KEYS.CURRENT_USER); } catch (e) { }
+
     const loginEl = document.getElementById('login-screen');
     const appEl = document.getElementById('app-container');
     const errBox = document.getElementById('login-error');
@@ -147,6 +143,11 @@ function showLogin() {
 }
 
 function showApp() {
+    if (!currentUser) {
+        showLogin();
+        return;
+    }
+
     const loginEl = document.getElementById('login-screen');
     const appEl = document.getElementById('app-container');
 
@@ -158,8 +159,6 @@ function showApp() {
         appEl.style.display = 'flex';
         appEl.classList.remove('twod-hidden');
     }
-
-    if (!currentUser) currentUser = { ...DEFAULT_USERS[0] };
 
     const nameEl = document.getElementById('current-user-name');
     const roleEl = document.getElementById('current-user-role');
@@ -220,7 +219,6 @@ function handleLogin(e) {
             user.lastLogin = 'Agora';
             saveUsers();
             currentUser = user;
-            try { localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(currentUser)); } catch (e) { }
             if (errBox) errBox.classList.add('twod-hidden');
             showApp();
         } else {
@@ -341,7 +339,6 @@ function saveUserPreferences() {
     if (idx !== -1) {
         users[idx] = currentUser;
         saveUsers();
-        localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(currentUser));
     }
 }
 
