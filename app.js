@@ -2785,6 +2785,159 @@ async function unlinkCampaignFromPack(campaignId) {
 }
 
 // Carrega as miniaturas em alta resolução dos anúncios do Facebook para o conjunto base
+function extractCreativeTemplateSpec(cr = {}, fallbackActorId = '') {
+    const oss = cr.object_story_spec || {};
+    const afs = cr.asset_feed_spec || {};
+    const vd = oss.video_data || {};
+    const ld = oss.link_data || {};
+
+    const afsCtaType = Array.isArray(afs.call_to_action_types) ? afs.call_to_action_types[0] : '';
+    const afsLinkObj = Array.isArray(afs.link_urls) ? afs.link_urls[0] : null;
+    const ctaObj = vd.call_to_action || ld.call_to_action || { type: afsCtaType || 'DOWNLOAD', value: { link: '' } };
+    const rawLink = ctaObj.value?.link || ld.link || afsLinkObj?.website_url || afsLinkObj?.display_url || '';
+
+    const rawBodies = (afs.bodies || []).map(b => b?.text || '').filter(Boolean);
+    const rawTitles = (afs.titles || []).map(t => t?.text || '').filter(Boolean);
+    const rawDescs = (afs.descriptions || []).map(d => d?.text || '').filter(Boolean);
+
+    return {
+        pageId: oss.page_id || cr.actor_id || fallbackActorId || '',
+        instagramUserId: oss.instagram_user_id || '',
+        ctaType: ctaObj.type || afsCtaType || 'DOWNLOAD',
+        rawLink,
+        rawBodies,
+        rawTitles,
+        rawDescs,
+        rawVdMsg: vd.message || ld.message || '',
+        rawVdTitle: vd.title || ld.name || '',
+        rawVdDesc: vd.link_description || ld.description || '',
+        hasAfs: rawBodies.length > 0 || rawTitles.length > 0 || rawDescs.length > 0,
+        optimizationType: afs.optimization_type || 'DEGREES_OF_FREEDOM',
+        afsVideos: Array.isArray(afs.videos) ? afs.videos : [],
+        afsImages: Array.isArray(afs.images) ? afs.images : []
+    };
+}
+
+async function resolveMetaVideoThumbUrl(videoId, initialThumb = '', cacheMap = null) {
+    if (!videoId) return initialThumb || '';
+    const cacheKey = `vthumb:${videoId}`;
+    if (cacheMap && cacheMap[cacheKey]) return cacheMap[cacheKey];
+    if (initialThumb && !initialThumb.includes('p64x64')) {
+        if (cacheMap) cacheMap[cacheKey] = initialThumb;
+        return initialThumb;
+    }
+    try {
+        const stData = await metaGraphGet(`/${META_GRAPH_VERSION}/${videoId}?fields=picture,thumbnails`);
+        const thumbUri = stData.thumbnails?.data?.[0]?.uri || stData.picture || initialThumb || '';
+        if (thumbUri && cacheMap) cacheMap[cacheKey] = thumbUri;
+        return thumbUri;
+    } catch (e) {
+        return initialThumb || '';
+    }
+}
+
+async function createSingleMediaAdCreative({ accountId, name, spec, mediaAsset, textsObj, linkUrl, logFn = null }) {
+    const postCreative = (pObj) => metaGraphPost(`/${META_GRAPH_VERSION}/${accountId}/adcreatives`, pObj);
+    const cleanLink = linkUrl || spec.rawLink || '';
+    const hasMultiAfs = Boolean(
+        textsObj.hasAfs
+        && ((textsObj.tBodies || []).length > 0 || (textsObj.tTitles || []).length > 0 || (textsObj.tDescs || []).length > 0)
+    );
+
+    const buildPayload = (useAfsMode) => {
+        const oss = { page_id: spec.pageId };
+        if (spec.instagramUserId) oss.instagram_user_id = spec.instagramUserId;
+
+        if (mediaAsset.kind === 'video') {
+            const videoData = {
+                video_id: mediaAsset.videoId,
+                call_to_action: {
+                    type: spec.ctaType || 'DOWNLOAD',
+                    value: { link: cleanLink }
+                }
+            };
+            if (mediaAsset.thumbnailUrl) {
+                videoData.image_url = mediaAsset.thumbnailUrl;
+            } else if (mediaAsset.thumbnailHash) {
+                videoData.image_hash = mediaAsset.thumbnailHash;
+            }
+            if (!useAfsMode) {
+                const msg = (textsObj.tBodies && textsObj.tBodies[0]) || textsObj.tVdMsg || '';
+                const ttl = (textsObj.tTitles && textsObj.tTitles[0]) || textsObj.tVdTitle || '';
+                const dsc = (textsObj.tDescs && textsObj.tDescs[0]) || textsObj.tVdDesc || '';
+                if (msg) videoData.message = msg;
+                if (ttl) videoData.title = ttl;
+                if (dsc) videoData.link_description = dsc;
+            }
+            oss.video_data = videoData;
+        } else {
+            const linkData = {
+                link: cleanLink,
+                call_to_action: {
+                    type: spec.ctaType || 'DOWNLOAD',
+                    value: { link: cleanLink }
+                }
+            };
+            if (mediaAsset.imageHash) linkData.image_hash = mediaAsset.imageHash;
+            else if (mediaAsset.imageUrl) linkData.picture = mediaAsset.imageUrl;
+            if (!useAfsMode) {
+                const msg = (textsObj.tBodies && textsObj.tBodies[0]) || textsObj.tVdMsg || '';
+                const ttl = (textsObj.tTitles && textsObj.tTitles[0]) || textsObj.tVdTitle || '';
+                const dsc = (textsObj.tDescs && textsObj.tDescs[0]) || textsObj.tVdDesc || '';
+                if (msg) linkData.message = msg;
+                if (ttl) linkData.name = ttl;
+                if (dsc) linkData.description = dsc;
+            }
+            oss.link_data = linkData;
+        }
+
+        const payload = {
+            name,
+            object_story_spec: oss
+        };
+        if (useAfsMode) {
+            const afsOut = {
+                optimization_type: spec.optimizationType || 'DEGREES_OF_FREEDOM'
+            };
+            if ((textsObj.tBodies || []).length > 0) afsOut.bodies = textsObj.tBodies.map(text => ({ text }));
+            if ((textsObj.tTitles || []).length > 0) afsOut.titles = textsObj.tTitles.map(text => ({ text }));
+            if ((textsObj.tDescs || []).length > 0) afsOut.descriptions = textsObj.tDescs.map(text => ({ text }));
+            payload.asset_feed_spec = afsOut;
+            payload.degrees_of_freedom_spec = {
+                creative_features_spec: {
+                    standard_enhancements: { enroll_status: 'OPT_OUT' }
+                }
+            };
+        }
+        return payload;
+    };
+
+    let creativePayload = buildPayload(hasMultiAfs);
+    let crRes = await postCreative(creativePayload);
+
+    if (crRes.error && /degrees_of_freedom_spec|standard_enhancements/i.test(crRes.error.message || '')) {
+        delete creativePayload.degrees_of_freedom_spec;
+        crRes = await postCreative(creativePayload);
+    }
+    if (crRes.error && /instagram_user_id/i.test(crRes.error.message || '')) {
+        delete creativePayload.object_story_spec.instagram_user_id;
+        crRes = await postCreative(creativePayload);
+    }
+    if (crRes.error && hasMultiAfs && crRes.error.error_subcode !== 1885183) {
+        if (typeof logFn === 'function') {
+            logFn(`ℹ️ Conta não aceitou asset_feed_spec múltiplo em '${name}', aplicando texto principal único como fallback...`, 'warn');
+        }
+        creativePayload = buildPayload(false);
+        crRes = await postCreative(creativePayload);
+        if (crRes.error && /instagram_user_id/i.test(crRes.error.message || '')) {
+            delete creativePayload.object_story_spec.instagram_user_id;
+            crRes = await postCreative(creativePayload);
+        }
+    }
+
+    return crRes;
+}
+
 async function loadBaseAdSetMetaThumbnails(adsetId) {
     const thumbsRow = document.getElementById('fb-ads-thumbs-row');
     const statusEl = document.getElementById('fb-ads-thumb-status');
@@ -2800,14 +2953,54 @@ async function loadBaseAdSetMetaThumbnails(adsetId) {
     metaBaseAdsCache = [];
 
     try {
-        const data = await metaGraphGet(`/${META_GRAPH_VERSION}/${adsetId}/ads?fields=id,name,status,url_tags,creative{id,name,thumbnail_url,image_url,video_id,object_story_spec,asset_feed_spec}&limit=50`);
+        const data = await metaGraphGet(`/${META_GRAPH_VERSION}/${adsetId}/ads?fields=id,name,status,url_tags,creative{id,name,actor_id,thumbnail_url,image_url,video_id,object_story_spec,asset_feed_spec}&limit=50`);
 
         if (currentSeq !== _metaThumbReqSeq) return;
 
         if (data.data && Array.isArray(data.data) && data.data.length > 0) {
-            // Upgrade paralelo de qualquer miniatura que veio em p64x64 para 320px/original
+            const previewItems = [];
+            let hasFlexibleExpansion = false;
+
             await Promise.all(data.data.map(async ad => {
                 const cr = ad.creative || {};
+                const afs = cr.asset_feed_spec || {};
+                const afsVideos = Array.isArray(afs.videos) ? afs.videos : [];
+                const afsImages = Array.isArray(afs.images) ? afs.images : [];
+                const isActive = ad.status === 'ACTIVE';
+
+                if (afsVideos.length > 1) {
+                    hasFlexibleExpansion = true;
+                    const resolvedList = await Promise.all(afsVideos.map(async (v, vIdx) => {
+                        const thumbUrl = await resolveMetaVideoThumbUrl(v.video_id, v.thumbnail_url || '');
+                        return {
+                            adId: ad.id,
+                            creativeId: cr.id || '-',
+                            title: `${String(vIdx + 1).padStart(2, '0')} (Flexível)`,
+                            thumbUrl,
+                            isActive
+                        };
+                    }));
+                    ad._resolvedThumb = resolvedList[0]?.thumbUrl || '';
+                    resolvedList.forEach(item => previewItems.push(item));
+                    return;
+                }
+
+                if (afsImages.length > 1) {
+                    hasFlexibleExpansion = true;
+                    afsImages.forEach((imgObj, iIdx) => {
+                        const thumbUrl = imgObj.url || cr.thumbnail_url || '';
+                        previewItems.push({
+                            adId: ad.id,
+                            creativeId: cr.id || '-',
+                            title: `${String(iIdx + 1).padStart(2, '0')} (Flexível)`,
+                            thumbUrl,
+                            isActive
+                        });
+                    });
+                    ad._resolvedThumb = afsImages[0]?.url || cr.thumbnail_url || '';
+                    return;
+                }
+
                 let bestThumb = cr.image_url || cr.object_story_spec?.video_data?.image_url || cr.thumbnail_url || '';
                 if ((!bestThumb || bestThumb.includes('p64x64')) && cr.id) {
                     try {
@@ -2816,28 +3009,31 @@ async function loadBaseAdSetMetaThumbnails(adsetId) {
                     } catch (e) {}
                 }
                 ad._resolvedThumb = bestThumb;
+                previewItems.push({
+                    adId: ad.id,
+                    creativeId: cr.id || '-',
+                    title: ad.name || `0${previewItems.length + 1}`,
+                    thumbUrl: bestThumb,
+                    isActive
+                });
             }));
 
             if (currentSeq !== _metaThumbReqSeq) return;
             metaBaseAdsCache = data.data;
             thumbsRow.innerHTML = '';
 
-            data.data.forEach((ad, idx) => {
-                const thumbUrl = ad._resolvedThumb || '';
-                const adName = ad.name || `0${idx + 1}`;
-                const isActive = ad.status === 'ACTIVE';
-
+            previewItems.forEach((item) => {
                 const card = document.createElement('div');
                 card.className = 'creative-thumb-card';
-                card.title = `Clique para ampliar • Anúncio: ${adName} (ID: ${ad.id})`;
+                card.title = `Clique para ampliar • Anúncio: ${item.title} (ID: ${item.adId})`;
 
-                if (thumbUrl) {
+                if (item.thumbUrl) {
                     const img = document.createElement('img');
-                    img.src = thumbUrl;
+                    img.src = item.thumbUrl;
                     img.className = 'creative-thumb-preview zoomable';
-                    img.alt = adName;
+                    img.alt = item.title;
                     img.loading = 'lazy';
-                    img.addEventListener('click', () => openThumbZoomModal(thumbUrl, `Facebook Ads: ${adName}`, `Creative ID: ${ad.creative?.id || '-'}`));
+                    img.addEventListener('click', () => openThumbZoomModal(item.thumbUrl, `Facebook Ads: ${item.title}`, `Creative ID: ${item.creativeId}`));
                     card.appendChild(img);
                 } else {
                     const placeholder = document.createElement('div');
@@ -2849,20 +3045,28 @@ async function loadBaseAdSetMetaThumbnails(adsetId) {
 
                 const titleDiv = document.createElement('div');
                 titleDiv.className = 'creative-thumb-title';
-                titleDiv.innerText = adName;
+                titleDiv.innerText = item.title;
                 card.appendChild(titleDiv);
 
                 const statusSpan = document.createElement('span');
                 statusSpan.className = 'creative-thumb-badge';
-                statusSpan.style.cssText = `background:${isActive ? '#10b98120' : '#f59e0b20'};color:${isActive ? '#34d399' : '#fbbf24'};border:1px solid ${isActive ? '#10b98140' : '#f59e0b40'};`;
-                statusSpan.innerText = isActive ? '🟢 Ativo' : '⏸️ Pausado';
+                statusSpan.style.cssText = `background:${item.isActive ? '#10b98120' : '#f59e0b20'};color:${item.isActive ? '#34d399' : '#fbbf24'};border:1px solid ${item.isActive ? '#10b98140' : '#f59e0b40'};`;
+                statusSpan.innerText = item.isActive ? '🟢 Ativo' : '⏸️ Pausado';
                 card.appendChild(statusSpan);
 
                 thumbsRow.appendChild(card);
             });
 
-            if (countBadge) countBadge.innerText = `${data.data.length} anúncio(s)`;
-            if (statusEl) statusEl.innerText = `Pronto: ${data.data.length} criativo(s) em alta resolução carregados`;
+            if (countBadge) {
+                countBadge.innerText = hasFlexibleExpansion
+                    ? `${data.data.length} anúncio (${previewItems.length} criativos)`
+                    : `${data.data.length} anúncio(s)`;
+            }
+            if (statusEl) {
+                statusEl.innerText = hasFlexibleExpansion
+                    ? `Pronto: ${previewItems.length} criativos no anúncio flexível (serão publicados ${previewItems.length} anúncios individuais)`
+                    : `Pronto: ${previewItems.length} criativo(s) em alta resolução carregados`;
+            }
         } else {
             thumbsRow.innerHTML = '<div class="text-muted" style="font-size:12px; padding:8px;">Nenhum anúncio encontrado neste conjunto base.</div>';
             if (countBadge) countBadge.innerText = '0 anúncios';
@@ -3992,7 +4196,7 @@ async function startBatchDuplication() {
     // Busca previamente todos os anúncios e criativos completos (incluindo asset_feed_spec, object_story_spec e url_tags)
     let baseAds = [];
     try {
-        const adsData = await metaGraphGet(`/${META_GRAPH_VERSION}/${adsetId}/ads?fields=id,name,status,url_tags,creative{id,name,object_story_spec,asset_feed_spec}&limit=50`);
+        const adsData = await metaGraphGet(`/${META_GRAPH_VERSION}/${adsetId}/ads?fields=id,name,status,url_tags,creative{id,name,actor_id,object_story_spec,asset_feed_spec}&limit=50`);
         if (adsData.data && Array.isArray(adsData.data)) {
             baseAds = adsData.data;
         }
@@ -4051,8 +4255,114 @@ async function startBatchDuplication() {
         return out;
     };
 
-    if (baseAds.length === 0 && readyDiffLangs.length > 0) {
-        logMetaTerminal(`⚠️ Nenhum anúncio encontrado no conjunto base para servir de modelo na tradução.`, 'warn');
+    if (baseAds.length === 0 && (readyDiffLangs.length > 0 || countriesToDuplicate.length > 0)) {
+        logMetaTerminal(`⚠️ Nenhum anúncio encontrado no conjunto base para servir de modelo.`, 'warn');
+    }
+
+    const preparedSameLangItems = [];
+    const hasSameLangTargets = countriesToDuplicate.some(c => {
+        const cLang = (c.langCode || (block.langCode && block.langCode !== 'multi' ? block.langCode : baseLang) || baseLang).toLowerCase();
+        return cLang === baseLang;
+    });
+    const baseHasFlexibleMulti = baseAds.some(ad => {
+        const afs = ad.creative?.asset_feed_spec || {};
+        return (Array.isArray(afs.videos) && afs.videos.length > 1) || (Array.isArray(afs.images) && afs.images.length > 1);
+    });
+
+    if (hasSameLangTargets && baseAds.length > 0 && baseHasFlexibleMulti) {
+        let sameLangErr = '';
+        let sameLangDevBlock = false;
+        const expandedItems = [];
+
+        try {
+            if (progressStatus) progressStatus.innerText = `🎬 Expandindo criativos do anúncio flexível (${baseLang.toUpperCase()})...`;
+            for (const baseAd of baseAds) {
+                const spec = extractCreativeTemplateSpec(baseAd.creative || {}, baseAd.creative?.actor_id || '');
+                const isFlexVideos = spec.afsVideos.length > 1;
+                const isFlexImages = !isFlexVideos && spec.afsImages.length > 1;
+
+                if (!isFlexVideos && !isFlexImages) {
+                    if (baseAd.creative?.id) {
+                        expandedItems.push({
+                            adName: baseAd.name || String(expandedItems.length + 1).padStart(2, '0'),
+                            creativeId: baseAd.creative.id,
+                            urlTags: baseAd.url_tags || ''
+                        });
+                    }
+                    continue;
+                }
+
+                if (!spec.pageId) {
+                    sameLangErr = `Anúncio base '${baseAd.name}' não possui page_id em object_story_spec.`;
+                    logMetaTerminal(`⚠️ ${sameLangErr}`, 'warn');
+                    continue;
+                }
+
+                const mediaEntries = isFlexVideos
+                    ? spec.afsVideos.map(v => ({ kind: 'video', videoId: v.video_id, thumbnailUrl: v.thumbnail_url || '', thumbnailHash: v.thumbnail_hash || '' }))
+                    : spec.afsImages.map(im => ({ kind: 'image', imageHash: im.hash || '', imageUrl: im.url || '' }));
+
+                logMetaTerminal(`🎬 Conjunto base '${baseAd.name}' é Flexível (${mediaEntries.length} criativos) — gerando ${mediaEntries.length} anúncios individuais (1 criativo por anúncio)...`, 'info');
+
+                const textsObj = {
+                    hasAfs: spec.hasAfs,
+                    tBodies: spec.rawBodies,
+                    tTitles: spec.rawTitles,
+                    tDescs: spec.rawDescs,
+                    tVdMsg: spec.rawVdMsg,
+                    tVdTitle: spec.rawVdTitle,
+                    tVdDesc: spec.rawVdDesc
+                };
+
+                for (let mIdx = 0; mIdx < mediaEntries.length; mIdx++) {
+                    const entry = mediaEntries[mIdx];
+                    const adCode = String(mIdx + 1).padStart(2, '0');
+                    if (entry.kind === 'video' && !entry.thumbnailUrl && !entry.thumbnailHash) {
+                        entry.thumbnailUrl = await resolveMetaVideoThumbUrl(entry.videoId, '', videoUploadCache);
+                    }
+
+                    const crRes = await createSingleMediaAdCreative({
+                        accountId: metaState.selectedAccountId,
+                        name: `${campNicheSlug || 'Ad'} - ${baseLang.toUpperCase()} - ${adCode}`,
+                        spec,
+                        mediaAsset: entry,
+                        textsObj,
+                        linkUrl: spec.rawLink,
+                        logFn: logMetaTerminal
+                    });
+
+                    if (crRes.id) {
+                        expandedItems.push({
+                            adName: adCode,
+                            creativeId: crRes.id,
+                            urlTags: baseAd.url_tags || ''
+                        });
+                    } else {
+                        sameLangErr = formatMetaApiError(crRes.error || crRes);
+                        logMetaTerminal(`⚠️ Falha ao expandir criativo ${adCode} (${baseLang.toUpperCase()}): ${sameLangErr}`, 'error');
+                        if (crRes.error?.error_subcode === 1885183) {
+                            sameLangDevBlock = true;
+                            break;
+                        }
+                    }
+                }
+                if (sameLangDevBlock) break;
+            }
+        } catch (expErr) {
+            sameLangErr = expErr.message || String(expErr);
+            logMetaTerminal(`❌ Erro ao expandir criativos de ${baseLang.toUpperCase()}: ${sameLangErr}`, 'error');
+        }
+
+        if (expandedItems.length > 0) {
+            preparedSameLangItems.push(...expandedItems);
+            logMetaTerminal(`✨ ${expandedItems.length} anúncio(s) individuais preparados para ${baseLang.toUpperCase()} (01 a ${String(expandedItems.length).padStart(2, '0')}).`, 'success');
+        } else {
+            creativePrepFailures.push({
+                lang: baseLang,
+                error: sameLangErr || 'Não foi possível expandir os criativos do anúncio flexível.',
+                isDevMode: sameLangDevBlock
+            });
+        }
     }
 
     if (baseAds.length > 0 && readyDiffLangs.length > 0) {
@@ -4076,8 +4386,6 @@ async function startBatchDuplication() {
                 if (progressStatus) progressStatus.innerText = `🎬 Preparando criativos e tradução para ${tLang.toUpperCase()}...`;
                 logMetaTerminal(`🌐 Preparando pacote de vídeos e tradução (${baseLang.toUpperCase()} ➔ ${tLang.toUpperCase()})...`, 'info');
 
-                const postCreative = (pObj) => metaGraphPost(`/${META_GRAPH_VERSION}/${metaState.selectedAccountId}/adcreatives`, pObj);
-
                 // Sobe 1 vídeo por vez e valida logo o primeiro AdCreative para abortar rápido em caso de bloqueio da Meta (ex: 1885183)
                 for (let uIdx = 0; uIdx < mediaItems.length; uIdx++) {
                     const mItem = mediaItems[uIdx];
@@ -4100,107 +4408,65 @@ async function startBatchDuplication() {
 
                     const templateAd = usePaired ? baseAds[uIdx] : baseAds[0];
                     const templateKey = templateAd.id || String(usePaired ? uIdx : 0);
-                    const cr = templateAd.creative || {};
-                    const oss = cr.object_story_spec || {};
-                    const afs = cr.asset_feed_spec || {};
-                    const vd = oss.video_data || {};
-                    const ld = oss.link_data || {};
+                    const spec = extractCreativeTemplateSpec(templateAd.creative || {}, templateAd.creative?.actor_id || '');
 
-                    const pageId = oss.page_id;
-                    if (!pageId) {
+                    if (!spec.pageId) {
                         lastLangError = `Anúncio base '${templateAd.name}' não possui page_id em object_story_spec.`;
                         logMetaTerminal(`⚠️ ${lastLangError}`, 'warn');
                         continue;
                     }
 
                     if (!translatedTemplateCache[templateKey]) {
-                        const ctaObj = vd.call_to_action || ld.call_to_action || { type: 'DOWNLOAD', value: { link: '' } };
-                        const rawLink = ctaObj.value?.link || ld.link || '';
-                        const localizedLink = buildDuplicatorLocalizedUrl(rawLink, tLang, baseLang);
-
-                        const rawBodies = (afs.bodies || []).map(b => b?.text || '');
-                        const rawTitles = (afs.titles || []).map(t => t?.text || '');
-                        const rawDescs = (afs.descriptions || []).map(d => d?.text || '');
-                        const rawVdMsg = vd.message || '';
-                        const rawVdTitle = vd.title || '';
-                        const rawVdDesc = vd.link_description || '';
-
-                        const batchIn = [...rawBodies, ...rawTitles, ...rawDescs, rawVdMsg, rawVdTitle, rawVdDesc];
+                        const localizedLink = buildDuplicatorLocalizedUrl(spec.rawLink, tLang, baseLang);
+                        const batchIn = [
+                            ...spec.rawBodies,
+                            ...spec.rawTitles,
+                            ...spec.rawDescs,
+                            spec.rawVdMsg,
+                            spec.rawVdTitle,
+                            spec.rawVdDesc
+                        ];
                         const batchOut = (typeof translateTextsBatch === 'function')
                             ? await translateTextsBatch(batchIn, tLang, baseLang)
                             : batchIn;
 
                         let cursor = 0;
-                        const tBodies = batchOut.slice(cursor, cursor + rawBodies.length); cursor += rawBodies.length;
-                        const tTitles = batchOut.slice(cursor, cursor + rawTitles.length); cursor += rawTitles.length;
-                        const tDescs = batchOut.slice(cursor, cursor + rawDescs.length); cursor += rawDescs.length;
+                        const tBodies = batchOut.slice(cursor, cursor + spec.rawBodies.length); cursor += spec.rawBodies.length;
+                        const tTitles = batchOut.slice(cursor, cursor + spec.rawTitles.length); cursor += spec.rawTitles.length;
+                        const tDescs = batchOut.slice(cursor, cursor + spec.rawDescs.length); cursor += spec.rawDescs.length;
                         const tVdMsg = batchOut[cursor++] || '';
                         const tVdTitle = batchOut[cursor++] || '';
                         const tVdDesc = batchOut[cursor++] || '';
 
                         translatedTemplateCache[templateKey] = {
-                            ctaType: ctaObj.type || 'DOWNLOAD',
+                            spec,
                             localizedLink,
-                            hasAfs: rawBodies.length > 0 || rawTitles.length > 0 || rawDescs.length > 0,
-                            tBodies,
-                            tTitles,
-                            tDescs,
-                            tVdMsg,
-                            tVdTitle,
-                            tVdDesc
-                        };
-                    }
-
-                    const trData = translatedTemplateCache[templateKey];
-                    const videoData = {
-                        video_id: uploaded.video_id,
-                        call_to_action: {
-                            type: trData.ctaType,
-                            value: { link: trData.localizedLink }
-                        }
-                    };
-                    if (uploaded.thumbnail_url) {
-                        videoData.image_url = uploaded.thumbnail_url;
-                    }
-                    if (!trData.hasAfs) {
-                        if (trData.tVdMsg) videoData.message = trData.tVdMsg;
-                        if (trData.tVdTitle) videoData.title = trData.tVdTitle;
-                        if (trData.tVdDesc) videoData.link_description = trData.tVdDesc;
-                    }
-
-                    const creativePayload = {
-                        name: `${campNicheSlug || 'Ad'} - ${tLang.toUpperCase()} - ${mItem.adName}`,
-                        object_story_spec: {
-                            page_id: pageId,
-                            video_data: videoData
-                        }
-                    };
-                    if (oss.instagram_user_id) {
-                        creativePayload.object_story_spec.instagram_user_id = oss.instagram_user_id;
-                    }
-                    if (trData.hasAfs) {
-                        creativePayload.asset_feed_spec = {
-                            bodies: trData.tBodies.map(text => ({ text })),
-                            titles: trData.tTitles.map(text => ({ text })),
-                            descriptions: trData.tDescs.map(text => ({ text })),
-                            optimization_type: afs.optimization_type || 'DEGREES_OF_FREEDOM'
-                        };
-                        creativePayload.degrees_of_freedom_spec = {
-                            creative_features_spec: {
-                                standard_enhancements: { enroll_status: 'OPT_OUT' }
+                            textsObj: {
+                                hasAfs: spec.hasAfs,
+                                tBodies,
+                                tTitles,
+                                tDescs,
+                                tVdMsg,
+                                tVdTitle,
+                                tVdDesc
                             }
                         };
                     }
 
-                    let crRes = await postCreative(creativePayload);
-                    if (crRes.error && /degrees_of_freedom_spec|standard_enhancements/i.test(crRes.error.message || '')) {
-                        delete creativePayload.degrees_of_freedom_spec;
-                        crRes = await postCreative(creativePayload);
-                    }
-                    if (crRes.error && /instagram_user_id/i.test(crRes.error.message || '')) {
-                        delete creativePayload.object_story_spec.instagram_user_id;
-                        crRes = await postCreative(creativePayload);
-                    }
+                    const trData = translatedTemplateCache[templateKey];
+                    const crRes = await createSingleMediaAdCreative({
+                        accountId: metaState.selectedAccountId,
+                        name: `${campNicheSlug || 'Ad'} - ${tLang.toUpperCase()} - ${mItem.adName}`,
+                        spec: trData.spec,
+                        mediaAsset: {
+                            kind: 'video',
+                            videoId: uploaded.video_id,
+                            thumbnailUrl: uploaded.thumbnail_url || ''
+                        },
+                        textsObj: trData.textsObj,
+                        linkUrl: trData.localizedLink,
+                        logFn: logMetaTerminal
+                    });
 
                     if (crRes.id) {
                         createdItems.push({
@@ -4400,17 +4666,29 @@ async function startBatchDuplication() {
             };
 
             if (countryLang === baseLang) {
-                for (const baseAd of baseAds) {
-                    if (baseAd.creative && baseAd.creative.id) {
-                        const adResult = await createAdInCopiedSet(baseAd.name || finalName, baseAd.creative.id, baseAd.url_tags);
+                if (preparedSameLangItems.length > 0) {
+                    for (const item of preparedSameLangItems) {
+                        const adResult = await createAdInCopiedSet(item.adName, item.creativeId, item.urlTags);
                         if (adResult.id) {
                             adsCreated++;
                         } else if (adResult.error) {
-                            logMetaTerminal(`⚠️ Anúncio '${baseAd.name}' em ${finalName} falhou: ${adResult.error.message}`, 'warn');
+                            logMetaTerminal(`⚠️ Anúncio '${item.adName}' em ${finalName} falhou: ${adResult.error.message}`, 'warn');
                         }
                     }
+                    countryModeMsg = adsCreated > 0 ? `com ${adsCreated} anúncio(s) individuais clonado(s)` : 'sem anúncios';
+                } else {
+                    for (const baseAd of baseAds) {
+                        if (baseAd.creative && baseAd.creative.id) {
+                            const adResult = await createAdInCopiedSet(baseAd.name || finalName, baseAd.creative.id, baseAd.url_tags);
+                            if (adResult.id) {
+                                adsCreated++;
+                            } else if (adResult.error) {
+                                logMetaTerminal(`⚠️ Anúncio '${baseAd.name}' em ${finalName} falhou: ${adResult.error.message}`, 'warn');
+                            }
+                        }
+                    }
+                    countryModeMsg = adsCreated > 0 ? `com ${adsCreated} anúncio(s) clonado(s)` : 'sem anúncios';
                 }
-                countryModeMsg = adsCreated > 0 ? `com ${adsCreated} anúncio(s) clonado(s)` : 'sem anúncios';
             } else if (Array.isArray(preparedCreativesByLang[countryLang]) && preparedCreativesByLang[countryLang].length > 0) {
                 for (const item of preparedCreativesByLang[countryLang]) {
                     const adResult = await createAdInCopiedSet(item.adName, item.creativeId, item.urlTags);
