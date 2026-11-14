@@ -2142,6 +2142,17 @@ function escHtml(str = '') {
         .replace(/'/g, '&#39;');
 }
 
+function formatMetaApiError(err) {
+    if (!err) return 'Erro desconhecido';
+    if (typeof err === 'string') return err;
+    const baseMsg = [err.error_user_title, err.error_user_msg].filter(Boolean).join(': ') || err.message || JSON.stringify(err);
+    const sub = err.error_subcode ? ` (subcode ${err.error_subcode})` : '';
+    if (err.error_subcode === 1885183) {
+        return `${baseMsg}${sub} — Ative o Modo "Ao Vivo" (Live) do app em developers.facebook.com/apps.`;
+    }
+    return `${baseMsg}${sub}`;
+}
+
 function openThumbZoomModal(imgUrl, title = 'Prévia do Criativo', subtitle = '') {
     const modal = document.getElementById('dup-thumb-zoom-modal');
     const imgEl = document.getElementById('dup-thumb-zoom-img');
@@ -3728,9 +3739,22 @@ async function startBatchDuplication() {
 
     // Pré-prepara vídeos + textos traduzidos + URLs TranslateX + AdCreatives por idioma destino pronto
     const preparedCreativesByLang = {};
-    const videoUploadCache = {};
+    const creativePrepFailures = [];
+    window._dupSessionVideoCache = window._dupSessionVideoCache || {};
+    const videoUploadCache = window._dupSessionVideoCache;
+
+    const finishDuplicationUi = () => {
+        metaState.isDuplicating = false;
+        if (startBtn) {
+            startBtn.disabled = false;
+            startBtn.innerText = '🚀 Iniciar Nova Duplicação';
+        }
+    };
 
     const uploadLocalBrowserFileToMeta = async (accountId, fileObj) => {
+        const cacheKey = `${accountId}:manual:${fileObj.name}:${fileObj.size}`;
+        if (videoUploadCache[cacheKey]?.video_id) return videoUploadCache[cacheKey];
+
         const form = new FormData();
         form.append('access_token', token);
         form.append('title', fileObj.name || 'video.mp4');
@@ -3741,7 +3765,7 @@ async function startBatchDuplication() {
         });
         const upRes = await upResp.json();
         if (!upRes.id) {
-            throw new Error(`Falha ao subir ${fileObj.name}: ${upRes.error?.message || JSON.stringify(upRes)}`);
+            throw new Error(`Falha ao subir ${fileObj.name}: ${formatMetaApiError(upRes.error || upRes)}`);
         }
         let thumbnailUrl = '';
         for (let attempt = 0; attempt < 20; attempt++) {
@@ -3752,45 +3776,75 @@ async function startBatchDuplication() {
             if (thumbUri) thumbnailUrl = thumbUri;
             if (stData.status?.video_status === 'ready') break;
         }
-        return { video_id: upRes.id, thumbnail_url: thumbnailUrl };
+        const out = { video_id: upRes.id, thumbnail_url: thumbnailUrl };
+        videoUploadCache[cacheKey] = out;
+        return out;
     };
+
+    if (baseAds.length === 0 && readyDiffLangs.length > 0) {
+        logMetaTerminal(`⚠️ Nenhum anúncio encontrado no conjunto base para servir de modelo na tradução.`, 'warn');
+    }
 
     if (baseAds.length > 0 && readyDiffLangs.length > 0) {
         for (const tLang of readyDiffLangs) {
             const mediaSrc = langMediaSources[tLang];
             if (!mediaSrc || mediaSrc.mode === 'missing') continue;
 
+            const mediaItems = mediaSrc.mode === 'onedrive'
+                ? mediaSrc.slots.map(s => ({ kind: 'onedrive', adName: s.adName, slot: s.slot, video: s.video }))
+                : mediaSrc.files.map((f, fIdx) => ({ kind: 'manual', adName: String(fIdx + 1).padStart(2, '0'), file: f }));
+
+            if (mediaItems.length === 0) continue;
+
+            const usePaired = (baseAds.length > 1 && baseAds.length === mediaItems.length);
+            const createdItems = [];
+            const translatedTemplateCache = {};
+            let lastLangError = '';
+            let hitDevModeBlock = false;
+
             try {
                 if (progressStatus) progressStatus.innerText = `🎬 Preparando criativos e tradução para ${tLang.toUpperCase()}...`;
                 logMetaTerminal(`🌐 Preparando pacote de vídeos e tradução (${baseLang.toUpperCase()} ➔ ${tLang.toUpperCase()})...`, 'info');
 
-                // 1. Upload dos vídeos de destino (OneDrive ou MP4 manual) para a conta de anúncios Meta
-                const uploadedList = [];
-                if (mediaSrc.mode === 'onedrive') {
-                    for (const slotObj of mediaSrc.slots) {
-                        logMetaTerminal(`☁️ Subindo criativo ${slotObj.adName} (${slotObj.video.lang} / ${slotObj.video.name}) para Meta Ads...`, 'info');
-                        const up = await uploadOneDriveVideoToMeta(metaState.selectedAccountId, slotObj.video, token, videoUploadCache);
-                        uploadedList.push({ adName: slotObj.adName, ...up });
+                const postCreative = async (pObj) => {
+                    if (typeof metaFormPost === 'function') {
+                        return metaFormPost(`/${metaState.selectedAccountId}/adcreatives`, pObj, token);
                     }
-                } else if (mediaSrc.mode === 'manual') {
-                    for (let fIdx = 0; fIdx < mediaSrc.files.length; fIdx++) {
-                        const fObj = mediaSrc.files[fIdx];
-                        const adName = String(fIdx + 1).padStart(2, '0');
-                        logMetaTerminal(`📤 Enviando MP4 manual ${adName} (${fObj.name}) para Meta Ads...`, 'info');
-                        const up = await uploadLocalBrowserFileToMeta(metaState.selectedAccountId, fObj);
-                        uploadedList.push({ adName, ...up });
+                    const form = new URLSearchParams();
+                    form.append('access_token', token);
+                    Object.entries(pObj).forEach(([k, v]) => {
+                        if (v !== undefined && v !== null) form.append(k, typeof v === 'object' ? JSON.stringify(v) : String(v));
+                    });
+                    const r = await fetch(`https://graph.facebook.com/${META_GRAPH_VERSION}/${metaState.selectedAccountId}/adcreatives`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                        body: form.toString()
+                    });
+                    return r.json();
+                };
+
+                // Sobe 1 vídeo por vez e valida logo o primeiro AdCreative para abortar rápido em caso de bloqueio da Meta (ex: 1885183)
+                for (let uIdx = 0; uIdx < mediaItems.length; uIdx++) {
+                    const mItem = mediaItems[uIdx];
+                    let uploaded;
+
+                    if (mItem.kind === 'onedrive') {
+                        const vKey = `${metaState.selectedAccountId}:${mItem.video.id || mItem.video.url || mItem.video.name}`;
+                        if (videoUploadCache[vKey]?.video_id) {
+                            logMetaTerminal(`⚡ Reutilizando vídeo ${mItem.adName} (${mItem.video.name}) já enviado nesta sessão (ID: ${videoUploadCache[vKey].video_id})`, 'info');
+                            uploaded = videoUploadCache[vKey];
+                        } else {
+                            logMetaTerminal(`☁️ Subindo criativo ${mItem.adName} (${mItem.video.lang} / ${mItem.video.name}) para Meta Ads...`, 'info');
+                            uploaded = await uploadOneDriveVideoToMeta(metaState.selectedAccountId, mItem.video, token, videoUploadCache);
+                            if (uploaded?.video_id) videoUploadCache[vKey] = uploaded;
+                        }
+                    } else {
+                        logMetaTerminal(`📤 Enviando MP4 manual ${mItem.adName} (${mItem.file.name}) para Meta Ads...`, 'info');
+                        uploaded = await uploadLocalBrowserFileToMeta(metaState.selectedAccountId, mItem.file);
                     }
-                }
 
-                if (uploadedList.length === 0) continue;
-
-                // 2. Mapeia cada ativo enviado a um template de baseAd (1..N ou replicando baseAds[0])
-                const usePaired = (baseAds.length > 1 && baseAds.length === uploadedList.length);
-                const createdItems = [];
-
-                for (let uIdx = 0; uIdx < uploadedList.length; uIdx++) {
-                    const asset = uploadedList[uIdx];
                     const templateAd = usePaired ? baseAds[uIdx] : baseAds[0];
+                    const templateKey = templateAd.id || String(usePaired ? uIdx : 0);
                     const cr = templateAd.creative || {};
                     const oss = cr.object_story_spec || {};
                     const afs = cr.asset_feed_spec || {};
@@ -3799,53 +3853,68 @@ async function startBatchDuplication() {
 
                     const pageId = oss.page_id;
                     if (!pageId) {
-                        logMetaTerminal(`⚠️ Anúncio base '${templateAd.name}' não possui page_id em object_story_spec.`, 'warn');
+                        lastLangError = `Anúncio base '${templateAd.name}' não possui page_id em object_story_spec.`;
+                        logMetaTerminal(`⚠️ ${lastLangError}`, 'warn');
                         continue;
                     }
 
-                    const ctaObj = vd.call_to_action || ld.call_to_action || { type: 'DOWNLOAD', value: { link: '' } };
-                    const rawLink = ctaObj.value?.link || ld.link || '';
-                    const localizedLink = buildDuplicatorLocalizedUrl(rawLink, tLang, baseLang);
+                    if (!translatedTemplateCache[templateKey]) {
+                        const ctaObj = vd.call_to_action || ld.call_to_action || { type: 'DOWNLOAD', value: { link: '' } };
+                        const rawLink = ctaObj.value?.link || ld.link || '';
+                        const localizedLink = buildDuplicatorLocalizedUrl(rawLink, tLang, baseLang);
 
-                    const rawBodies = (afs.bodies || []).map(b => b?.text || '');
-                    const rawTitles = (afs.titles || []).map(t => t?.text || '');
-                    const rawDescs = (afs.descriptions || []).map(d => d?.text || '');
-                    const rawVdMsg = vd.message || '';
-                    const rawVdTitle = vd.title || '';
-                    const rawVdDesc = vd.link_description || '';
+                        const rawBodies = (afs.bodies || []).map(b => b?.text || '');
+                        const rawTitles = (afs.titles || []).map(t => t?.text || '');
+                        const rawDescs = (afs.descriptions || []).map(d => d?.text || '');
+                        const rawVdMsg = vd.message || '';
+                        const rawVdTitle = vd.title || '';
+                        const rawVdDesc = vd.link_description || '';
 
-                    const batchIn = [...rawBodies, ...rawTitles, ...rawDescs, rawVdMsg, rawVdTitle, rawVdDesc];
-                    const batchOut = (typeof translateTextsBatch === 'function')
-                        ? await translateTextsBatch(batchIn, tLang, baseLang)
-                        : batchIn;
+                        const batchIn = [...rawBodies, ...rawTitles, ...rawDescs, rawVdMsg, rawVdTitle, rawVdDesc];
+                        const batchOut = (typeof translateTextsBatch === 'function')
+                            ? await translateTextsBatch(batchIn, tLang, baseLang)
+                            : batchIn;
 
-                    let cursor = 0;
-                    const tBodies = batchOut.slice(cursor, cursor + rawBodies.length); cursor += rawBodies.length;
-                    const tTitles = batchOut.slice(cursor, cursor + rawTitles.length); cursor += rawTitles.length;
-                    const tDescs = batchOut.slice(cursor, cursor + rawDescs.length); cursor += rawDescs.length;
-                    const tVdMsg = batchOut[cursor++] || '';
-                    const tVdTitle = batchOut[cursor++] || '';
-                    const tVdDesc = batchOut[cursor++] || '';
+                        let cursor = 0;
+                        const tBodies = batchOut.slice(cursor, cursor + rawBodies.length); cursor += rawBodies.length;
+                        const tTitles = batchOut.slice(cursor, cursor + rawTitles.length); cursor += rawTitles.length;
+                        const tDescs = batchOut.slice(cursor, cursor + rawDescs.length); cursor += rawDescs.length;
+                        const tVdMsg = batchOut[cursor++] || '';
+                        const tVdTitle = batchOut[cursor++] || '';
+                        const tVdDesc = batchOut[cursor++] || '';
 
+                        translatedTemplateCache[templateKey] = {
+                            ctaType: ctaObj.type || 'DOWNLOAD',
+                            localizedLink,
+                            hasAfs: rawBodies.length > 0 || rawTitles.length > 0 || rawDescs.length > 0,
+                            tBodies,
+                            tTitles,
+                            tDescs,
+                            tVdMsg,
+                            tVdTitle,
+                            tVdDesc
+                        };
+                    }
+
+                    const trData = translatedTemplateCache[templateKey];
                     const videoData = {
-                        video_id: asset.video_id,
+                        video_id: uploaded.video_id,
                         call_to_action: {
-                            type: ctaObj.type || 'DOWNLOAD',
-                            value: { link: localizedLink }
+                            type: trData.ctaType,
+                            value: { link: trData.localizedLink }
                         }
                     };
-                    if (asset.thumbnail_url) {
-                        videoData.image_url = asset.thumbnail_url;
+                    if (uploaded.thumbnail_url) {
+                        videoData.image_url = uploaded.thumbnail_url;
                     }
-                    const hasAfs = rawBodies.length > 0 || rawTitles.length > 0 || rawDescs.length > 0;
-                    if (!hasAfs) {
-                        if (tVdMsg) videoData.message = tVdMsg;
-                        if (tVdTitle) videoData.title = tVdTitle;
-                        if (tVdDesc) videoData.link_description = tVdDesc;
+                    if (!trData.hasAfs) {
+                        if (trData.tVdMsg) videoData.message = trData.tVdMsg;
+                        if (trData.tVdTitle) videoData.title = trData.tVdTitle;
+                        if (trData.tVdDesc) videoData.link_description = trData.tVdDesc;
                     }
 
                     const creativePayload = {
-                        name: `${campNicheSlug || 'Ad'} - ${tLang.toUpperCase()} - ${asset.adName}`,
+                        name: `${campNicheSlug || 'Ad'} - ${tLang.toUpperCase()} - ${mItem.adName}`,
                         object_story_spec: {
                             page_id: pageId,
                             video_data: videoData
@@ -3854,11 +3923,11 @@ async function startBatchDuplication() {
                     if (oss.instagram_user_id) {
                         creativePayload.object_story_spec.instagram_user_id = oss.instagram_user_id;
                     }
-                    if (hasAfs) {
+                    if (trData.hasAfs) {
                         creativePayload.asset_feed_spec = {
-                            bodies: tBodies.map(text => ({ text })),
-                            titles: tTitles.map(text => ({ text })),
-                            descriptions: tDescs.map(text => ({ text })),
+                            bodies: trData.tBodies.map(text => ({ text })),
+                            titles: trData.tTitles.map(text => ({ text })),
+                            descriptions: trData.tDescs.map(text => ({ text })),
                             optimization_type: afs.optimization_type || 'DEGREES_OF_FREEDOM'
                         };
                         creativePayload.degrees_of_freedom_spec = {
@@ -3867,23 +3936,6 @@ async function startBatchDuplication() {
                             }
                         };
                     }
-
-                    const postCreative = async (pObj) => {
-                        if (typeof metaFormPost === 'function') {
-                            return metaFormPost(`/${metaState.selectedAccountId}/adcreatives`, pObj, token);
-                        }
-                        const form = new URLSearchParams();
-                        form.append('access_token', token);
-                        Object.entries(pObj).forEach(([k, v]) => {
-                            if (v !== undefined && v !== null) form.append(k, typeof v === 'object' ? JSON.stringify(v) : String(v));
-                        });
-                        const r = await fetch(`https://graph.facebook.com/${META_GRAPH_VERSION}/${metaState.selectedAccountId}/adcreatives`, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                            body: form.toString()
-                        });
-                        return r.json();
-                    };
 
                     let crRes = await postCreative(creativePayload);
                     if (crRes.error && /degrees_of_freedom_spec|standard_enhancements/i.test(crRes.error.message || '')) {
@@ -3897,23 +3949,64 @@ async function startBatchDuplication() {
 
                     if (crRes.id) {
                         createdItems.push({
-                            adName: usePaired ? (templateAd.name || asset.adName) : asset.adName,
+                            adName: usePaired ? (templateAd.name || mItem.adName) : mItem.adName,
                             creativeId: crRes.id,
                             urlTags: templateAd.url_tags || ''
                         });
                     } else {
-                        logMetaTerminal(`⚠️ Falha ao criar AdCreative ${asset.adName} (${tLang.toUpperCase()}): ${crRes.error?.message || JSON.stringify(crRes)}`, 'warn');
+                        lastLangError = formatMetaApiError(crRes.error || crRes);
+                        logMetaTerminal(`⚠️ Falha ao criar AdCreative ${mItem.adName} (${tLang.toUpperCase()}): ${lastLangError}`, 'error');
+                        if (crRes.error?.error_subcode === 1885183) {
+                            hitDevModeBlock = true;
+                            break;
+                        }
                     }
                 }
 
                 if (createdItems.length > 0) {
                     preparedCreativesByLang[tLang] = createdItems;
                     logMetaTerminal(`✨ ${createdItems.length} AdCreative(s) prontos para ${tLang.toUpperCase()} (URL TranslateX: /${tLang}/)`, 'success');
+                } else {
+                    creativePrepFailures.push({
+                        lang: tLang,
+                        error: lastLangError || 'Nenhum AdCreative pôde ser criado.',
+                        isDevMode: hitDevModeBlock
+                    });
                 }
             } catch (prepErr) {
                 console.error(`Erro preparando idioma ${tLang}:`, prepErr);
-                logMetaTerminal(`❌ Erro ao preparar criativos em ${tLang.toUpperCase()}: ${prepErr.message}`, 'error');
+                const errMsg = prepErr.message || String(prepErr);
+                logMetaTerminal(`❌ Erro ao preparar criativos em ${tLang.toUpperCase()}: ${errMsg}`, 'error');
+                creativePrepFailures.push({ lang: tLang, error: errMsg, isDevMode: false });
             }
+        }
+    }
+
+    // BLOQUEIO DE SEGURANÇA: nunca cria conjuntos vazios silenciosamente se a criação de AdCreative falhou
+    if (creativePrepFailures.length > 0) {
+        const hasDevMode = creativePrepFailures.some(f => f.isDevMode);
+        const failLines = creativePrepFailures.map(f => `• ${f.lang.toUpperCase()}: ${f.error}`).join('\n');
+        const devHint = hasDevMode
+            ? `\n\n📌 COMO RESOLVER AGORA:\n` +
+              `Seu App da Meta ("twod-dashboard-thiago") está em Modo de Desenvolvimento (erro 1885183), por isso a Meta bloqueia a criação de novos anúncios via API.\n` +
+              `1. Acesse https://developers.facebook.com/apps/ e abra seu app.\n` +
+              `2. Em Configurações > Básico, preencha uma URL de Privacidade (ex: https://thiagokinho22-code.github.io/twod-dashboard-thiago/privacy.html).\n` +
+              `3. No topo da tela, mude a chave de "Desenvolvimento" para "Ao Vivo / Público" (Live) — ou use um Token de Usuário do Sistema no Business Manager.`
+            : '';
+
+        const proceedEmpty = confirm(
+            `❌ FALHA AO CRIAR OS ANÚNCIOS TRADUZIDOS NA META:\n\n${failLines}${devHint}\n\n` +
+            `Deseja MESMO ASSIM criar os conjuntos vazios (apenas estrutura em PAUSED, sem anúncio)?\n\n` +
+            `• Cancelar = ABORTAR AGORA (Recomendado — evita criar conjuntos sem anúncio)\n` +
+            `• OK = Continuar criando conjuntos sem anúncio`
+        );
+
+        if (!proceedEmpty) {
+            logMetaTerminal(`🛑 Operação cancelada antes de criar conjuntos vazios sem anúncio.`, 'warn');
+            if (termStatus) termStatus.innerText = hasDevMode ? 'Bloqueado (App Meta em Desenvolvimento)' : 'Cancelado';
+            if (progressStatus) progressStatus.innerText = 'Cancelado antes de criar conjuntos vazios';
+            finishDuplicationUi();
+            return;
         }
     }
 
@@ -4321,6 +4414,7 @@ window.loadNicheCandidatePacks = loadNicheCandidatePacks;
 window.updateDuplicatorLanguageNotice = updateDuplicatorLanguageNotice;
 window.openThumbZoomModal = openThumbZoomModal;
 window.closeThumbZoomModal = closeThumbZoomModal;
+window.formatMetaApiError = formatMetaApiError;
 window.refreshLinkedPackAndNotice = refreshLinkedPackAndNotice;
 window.handleManualDuplicatorVideos = handleManualDuplicatorVideos;
 

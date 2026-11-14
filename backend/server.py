@@ -1341,7 +1341,7 @@ class APIHandler(BaseHTTPRequestHandler):
         elif path == "/" or path == "/index.html":
             self._serve_file(os.path.join(DASHBOARD_DIR, "index.html"))
 
-        elif path in ["/styles.css", "/app.js", "/campaign_builder.js", "/README.md"]:
+        elif path in ["/styles.css", "/app.js", "/campaign_builder.js", "/privacy.html", "/README.md"]:
             self._serve_file(os.path.join(DASHBOARD_DIR, path.lstrip("/")))
 
         else:

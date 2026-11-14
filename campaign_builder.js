@@ -1567,7 +1567,13 @@ async function launchStandardCampaign() {
                 }
 
                 if (creativeRes.error || !creativeRes.id) {
-                    logBuilderTerminal(`⚠️ Anúncio ${asset.adName} (${country.adSetName}) falhou no AdCreative: ${creativeRes.error?.message || JSON.stringify(creativeRes)}`, 'warn');
+                    const errDetail = (typeof formatMetaApiError === 'function')
+                        ? formatMetaApiError(creativeRes.error || creativeRes)
+                        : (creativeRes.error?.error_user_msg || creativeRes.error?.message || JSON.stringify(creativeRes));
+                    logBuilderTerminal(`⚠️ Anúncio ${asset.adName} (${country.adSetName}) falhou no AdCreative: ${errDetail}`, 'error');
+                    if (creativeRes.error?.error_subcode === 1885183) {
+                        throw new Error(errDetail);
+                    }
                     continue;
                 }
 
