@@ -1900,7 +1900,16 @@ function renderMetaCampaignOptions(campaignsList, autoSelectFirst = false) {
     }
 }
 
+let _metaFilterDebounce = null;
+
 function filterMetaCampaigns() {
+    if (_metaFilterDebounce) clearTimeout(_metaFilterDebounce);
+    _metaFilterDebounce = setTimeout(() => {
+        _executeFilterMetaCampaigns();
+    }, 120);
+}
+
+function _executeFilterMetaCampaigns() {
     const rawQuery = (document.getElementById('search-meta-campaign')?.value || '').trim();
     const allCamps = metaState.campaigns || [];
     if (!rawQuery) {
@@ -1916,7 +1925,7 @@ function filterMetaCampaigns() {
         return rawLower.includes(qLower) || tokens.every(t => normName.includes(t));
     });
 
-    renderMetaCampaignOptions(filtered, filtered.length > 0);
+    renderMetaCampaignOptions(filtered, false);
 
     // Se não achou nas campanhas em memória e digitou 3+ caracteres (ex: PostID antigo), pesquisa na Meta API
     if (_metaCampRemoteTimer) clearTimeout(_metaCampRemoteTimer);
@@ -1944,13 +1953,15 @@ function filterMetaCampaigns() {
                         if (!existingIds.has(rc.id)) metaState.campaigns.push(rc);
                     });
                 }
-                renderMetaCampaignOptions(remoteList, remoteList.length > 0);
+                renderMetaCampaignOptions(remoteList, false);
             } catch (e) {
                 console.warn('Busca remota de campanha falhou:', e);
             }
         }, 320);
     }
 }
+
+let _metaCampaignReqSeq = 0;
 
 // Disparado ao trocar de campanha
 async function onMetaCampaignSelected() {
@@ -1961,7 +1972,11 @@ async function onMetaCampaignSelected() {
     if (!selectCamp || !selectAdSet) return;
 
     const campaignId = selectCamp.value;
+    const currentSeq = ++_metaCampaignReqSeq;
+
     metaState.selectedCampaignId = campaignId;
+    metaState.selectedAdSetId = '';
+    metaState.selectedAdSet = null;
     metaState.adsets = [];
     metaState.checkedCountries = {};
 
@@ -1984,6 +1999,11 @@ async function onMetaCampaignSelected() {
         const resp = await fetch(url);
         const data = await resp.json();
 
+        // Se uma busca mais nova já iniciou, descarta essa resposta defasada!
+        if (currentSeq !== _metaCampaignReqSeq || selectCamp.value !== campaignId) {
+            return;
+        }
+
         if (data.data && Array.isArray(data.data) && data.data.length > 0) {
             metaState.adsets = data.data;
             selectAdSet.innerHTML = '';
@@ -2004,17 +2024,23 @@ async function onMetaCampaignSelected() {
             renderBlockNav();
             renderCountriesGrid();
         } else {
+            if (currentSeq !== _metaCampaignReqSeq) return;
             metaState.adsets = [];
             metaState.checkedCountries = {};
+            metaState.selectedAdSetId = '';
+            metaState.selectedAdSet = null;
             selectAdSet.innerHTML = '<option value="">Nenhum conjunto nesta campanha</option>';
             if (labelAdSet) labelAdSet.innerText = '(0 conjuntos)';
             renderBlockNav();
             renderCountriesGrid();
         }
     } catch (e) {
+        if (currentSeq !== _metaCampaignReqSeq) return;
         console.error('Erro ao buscar conjuntos:', e);
         metaState.adsets = [];
         metaState.checkedCountries = {};
+        metaState.selectedAdSetId = '';
+        metaState.selectedAdSet = null;
         selectAdSet.innerHTML = '<option value="">Erro ao carregar conjuntos</option>';
         if (labelAdSet) labelAdSet.innerText = '(Erro)';
         renderBlockNav();
@@ -2432,18 +2458,44 @@ async function startBatchDuplication() {
         return;
     }
 
-    if (!metaState.selectedAccountId) {
+    const selectAcc = document.getElementById('select-meta-account');
+    const selectCamp = document.getElementById('select-meta-campaign');
+    const selectAdSet = document.getElementById('select-meta-adset');
+
+    const accountId = selectAcc?.value || metaState.selectedAccountId;
+    const campaignId = selectCamp?.value || metaState.selectedCampaignId;
+    const adsetId = selectAdSet?.value || metaState.selectedAdSetId;
+
+    if (!accountId) {
         alert('Por favor, selecione uma Conta de Anúncios.');
         return;
     }
-    if (!metaState.selectedCampaignId) {
+    if (!campaignId) {
         alert('Por favor, selecione uma Campanha ativa.');
         return;
     }
-    if (!metaState.selectedAdSetId) {
+    if (!adsetId) {
         alert('Por favor, selecione o Conjunto Base (Origem).');
         return;
     }
+
+    // Sincroniza estado imediatamente com os selects visíveis na tela
+    metaState.selectedAccountId = accountId;
+    metaState.selectedCampaignId = campaignId;
+    metaState.selectedAdSetId = adsetId;
+
+    const campObj = (metaState.campaigns || []).find(c => c.id === campaignId);
+    const adsetObj = (metaState.adsets || []).find(a => a.id === adsetId);
+
+    if (!campObj) {
+        alert('Erro: A campanha selecionada não foi encontrada na lista carregada.');
+        return;
+    }
+    if (!adsetObj) {
+        alert('Erro: O conjunto base selecionado não foi encontrado nesta campanha.');
+        return;
+    }
+    metaState.selectedAdSet = adsetObj;
 
     const block = META_COUNTRY_BLOCKS[metaState.activeBlockId];
     const checks = metaState.checkedCountries[metaState.activeBlockId] || {};
@@ -2458,10 +2510,17 @@ async function startBatchDuplication() {
     const nameFormat = document.getElementById('select-name-format').value || 'country_only';
 
     const confirmMsg = `Confirmar duplicação de ${countriesToDuplicate.length} conjuntos no Meta Ads?\n\n` +
+        `🎯 CAMPANHA DE DESTINO:\n` +
+        `   ${campObj.name}\n` +
+        `   (ID: ${campObj.id})\n\n` +
+        `📦 CONJUNTO BASE (ORIGEM):\n` +
+        `   ${adsetObj.name}\n` +
+        `   (ID: ${adsetObj.id})\n\n` +
         `• Bloco: ${block.title}\n` +
         `• Orçamento por conjunto: $1.00 USD (fixo)\n` +
         `• Status Inicial: ${initialStatus === 'PAUSED' ? 'Pausado (Seguro)' : 'Ativo (Imediato)'}\n` +
-        `• Total de novos conjuntos: ${countriesToDuplicate.length}`;
+        `• Total de novos conjuntos: ${countriesToDuplicate.length}\n\n` +
+        `Deseja iniciar a duplicação?`;
 
     if (!confirm(confirmMsg)) return;
 
@@ -2485,14 +2544,15 @@ async function startBatchDuplication() {
     if (termStatus) termStatus.innerText = 'Em execução...';
 
     logMetaTerminal(`🚀 Iniciando processo de duplicação para ${countriesToDuplicate.length} países no bloco ${block.title}...`, 'info');
-    logMetaTerminal(`📦 Conjunto base: '${metaState.selectedAdSet ? metaState.selectedAdSet.name : metaState.selectedAdSetId}' (ID: ${metaState.selectedAdSetId})`, 'info');
+    logMetaTerminal(`🎯 Campanha de Destino: '${campObj.name}' (ID: ${campObj.id})`, 'info');
+    logMetaTerminal(`📦 Conjunto base: '${adsetObj.name}' (ID: ${adsetObj.id})`, 'info');
 
     const budgetInCents = 100; // Sempre 1 dólar ($1.00 USD = 100 centavos)
 
     // Busca previamente todos os anúncios e criativos (incluindo url_tags/UTMs) do conjunto base
     let baseAds = [];
     try {
-        const adsUrl = `https://graph.facebook.com/${META_GRAPH_VERSION}/${metaState.selectedAdSetId}/ads?access_token=${encodeURIComponent(token)}&fields=id,name,status,url_tags,creative&limit=50`;
+        const adsUrl = `https://graph.facebook.com/${META_GRAPH_VERSION}/${adsetId}/ads?access_token=${encodeURIComponent(token)}&fields=id,name,status,url_tags,creative&limit=50`;
         const adsResp = await fetch(adsUrl);
         const adsData = await adsResp.json();
         if (adsData.data && Array.isArray(adsData.data)) {
@@ -2509,8 +2569,8 @@ async function startBatchDuplication() {
         'PL', 'PT', 'RO', 'SK', 'SI', 'ES', 'SE'
     ]);
     const siblingDsaAdset = (metaState.adsets || []).find(a => a.dsa_beneficiary);
-    const fallbackDsaName = metaState.selectedAdSet?.dsa_beneficiary || siblingDsaAdset?.dsa_beneficiary || 'Futuretech Dynamics LLC';
-    const baseRegId = metaState.selectedAdSet?.regional_regulation_identities || null;
+    const fallbackDsaName = adsetObj.dsa_beneficiary || siblingDsaAdset?.dsa_beneficiary || 'Futuretech Dynamics LLC';
+    const baseRegId = adsetObj.regional_regulation_identities || null;
 
     let successCount = 0;
     let failCount = 0;
@@ -2530,11 +2590,12 @@ async function startBatchDuplication() {
         logMetaTerminal(`[${currentIdx}/${total}] Duplicando conjunto para '${country.adSetName}' (${country.code})...`, 'info');
 
         try {
-            // PASSO 1: Clona a estrutura do conjunto base sempre em PAUSED primeiro para evitar gasto antes de ajustar o país
+            // PASSO 1: Clona a estrutura do conjunto base sempre em PAUSED primeiro e FORÇA explicitamente a campanha de destino
             const copyForm = new URLSearchParams();
             copyForm.append('access_token', token);
             copyForm.append('status_option', 'PAUSED');
-            const copyResp = await fetch(`https://graph.facebook.com/${META_GRAPH_VERSION}/${metaState.selectedAdSetId}/copies`, {
+            copyForm.append('campaign_id', campaignId);
+            const copyResp = await fetch(`https://graph.facebook.com/${META_GRAPH_VERSION}/${adsetId}/copies`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
                 body: copyForm.toString()
