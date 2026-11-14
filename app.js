@@ -2153,7 +2153,10 @@ function renderCountriesGrid() {
     if (!block) return;
 
     grid.innerHTML = '';
-    const currentChecks = metaState.checkedCountries[metaState.activeBlockId] || {};
+    if (!metaState.checkedCountries[metaState.activeBlockId]) {
+        metaState.checkedCountries[metaState.activeBlockId] = {};
+    }
+    const currentChecks = metaState.checkedCountries[metaState.activeBlockId];
 
     block.countries.forEach(country => {
         const isChecked = !!currentChecks[country.adSetName];
@@ -2166,7 +2169,10 @@ function renderCountriesGrid() {
         chk.type = 'checkbox';
         chk.checked = isChecked;
         chk.onchange = (e) => {
-            currentChecks[country.adSetName] = e.target.checked;
+            if (!metaState.checkedCountries[metaState.activeBlockId]) {
+                metaState.checkedCountries[metaState.activeBlockId] = {};
+            }
+            metaState.checkedCountries[metaState.activeBlockId][country.adSetName] = e.target.checked;
             if (e.target.checked) {
                 card.classList.add('selected');
             } else {
