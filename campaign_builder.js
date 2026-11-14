@@ -938,10 +938,63 @@ function uppercasePrimaryText1() {
     if (el && el.value) el.value = el.value.toUpperCase();
 }
 
+async function translateSingleBrowserFallback(txt, targetLang, sourceLang = 'pt') {
+    if (!txt || typeof txt !== 'string') return txt;
+    const stripped = txt.trim();
+    const tlMap = { iw: 'he', tl: 'fil' };
+    const tl = tlMap[targetLang] || targetLang;
+    const sl = sourceLang || 'pt';
+    if (tl.toLowerCase() === sl.toLowerCase() || !/[a-zA-Z\u00C0-\u024F]/.test(stripped)) {
+        return txt;
+    }
+
+    const preserveCaps = (res) => (stripped === stripped.toUpperCase() && /[A-Z\u00C0-\u00DD]/.test(stripped))
+        ? res.toUpperCase()
+        : res;
+
+    // 1. Google clients5 direto do navegador (CORS *, IP do usuário sem 429 de datacenter)
+    try {
+        const u1 = `https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl=${encodeURIComponent(sl)}&tl=${encodeURIComponent(tl)}&q=${encodeURIComponent(txt)}`;
+        const r1 = await fetch(u1);
+        if (r1.ok) {
+            const d1 = await r1.json();
+            const cand = Array.isArray(d1) ? (typeof d1[0] === 'string' ? d1[0] : d1[0]?.[0]) : '';
+            if (cand && cand.trim() !== stripped) return preserveCaps(cand);
+        }
+    } catch (e) {}
+
+    // 2. Google translate gtx direto do navegador
+    try {
+        const u2 = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${encodeURIComponent(sl)}&tl=${encodeURIComponent(tl)}&dt=t&q=${encodeURIComponent(txt)}`;
+        const r2 = await fetch(u2);
+        if (r2.ok) {
+            const d2 = await r2.json();
+            const cand = Array.isArray(d2?.[0]) ? d2[0].map(seg => seg?.[0] || '').join('') : '';
+            if (cand && cand.trim() !== stripped) return preserveCaps(cand);
+        }
+    } catch (e) {}
+
+    // 3. MyMemory direto do navegador
+    try {
+        const u3 = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(txt)}&langpair=${encodeURIComponent(sl + '|' + tl)}`;
+        const r3 = await fetch(u3);
+        if (r3.ok) {
+            const d3 = await r3.json();
+            const cand = d3?.responseData?.translatedText || '';
+            if (cand && !/MYMEMORY WARNING/i.test(cand) && cand.trim() !== stripped) {
+                return preserveCaps(cand);
+            }
+        }
+    } catch (e) {}
+
+    return txt;
+}
+
 async function translateTextsBatch(texts, targetLang, sourceLang = 'pt') {
     const cacheKey = `${sourceLang}->${targetLang}::${JSON.stringify(texts)}`;
     if (cbState.translationCache[cacheKey]) return cbState.translationCache[cacheKey];
 
+    let results = [...texts];
     try {
         const res = await fetch(`${API_BASE_URL}/api/translate`, {
             method: 'POST',
@@ -950,13 +1003,25 @@ async function translateTextsBatch(texts, targetLang, sourceLang = 'pt') {
         });
         const data = await res.json();
         if (data.success && Array.isArray(data.translations)) {
-            cbState.translationCache[cacheKey] = data.translations;
-            return data.translations;
+            results = data.translations;
         }
     } catch (e) {
-        console.warn('Tradutor indisponível, mantendo textos originais:', e);
+        console.warn('Tradutor backend indisponível, usando fallback direto no navegador:', e);
     }
-    return texts;
+
+    // Fallback automático no navegador caso o servidor datacenter tenha sofrido 429
+    if ((targetLang || '').toLowerCase() !== (sourceLang || '').toLowerCase()) {
+        results = await Promise.all(results.map((item, idx) => {
+            const orig = texts[idx];
+            if (orig && typeof orig === 'string' && /[a-zA-Z\u00C0-\u024F]/.test(orig) && item === orig) {
+                return translateSingleBrowserFallback(orig, targetLang, sourceLang);
+            }
+            return item;
+        }));
+    }
+
+    cbState.translationCache[cacheKey] = results;
+    return results;
 }
 
 async function translateBuilderTexts() {
