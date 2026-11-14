@@ -2793,26 +2793,191 @@ async function unlinkCampaignFromPack(campaignId) {
     updateDuplicatorLanguageNotice();
 }
 
+// Extrai todas as mídias únicas de um AdCreative (Asset Feed, Flexible Asset Groups ou Carrossel)
+function extractCreativeMediaEntries(cr = {}) {
+    const entries = [];
+    const seen = new Set();
+
+    const pushVideo = (v) => {
+        if (!v) return;
+        const vid = String(v.video_id || v.id || '').trim();
+        if (!vid || seen.has(`v:${vid}`)) return;
+        seen.add(`v:${vid}`);
+        entries.push({
+            kind: 'video',
+            videoId: vid,
+            thumbnailUrl: v.thumbnail_url || '',
+            thumbnailHash: v.thumbnail_hash || ''
+        });
+    };
+
+    const pushImage = (im) => {
+        if (!im) return;
+        const hash = String(im.hash || im.image_hash || '').trim();
+        const url = String(im.url || im.picture || '').trim();
+        const key = hash ? `ih:${hash}` : (url ? `iu:${url}` : '');
+        if (!key || seen.has(key)) return;
+        seen.add(key);
+        entries.push({
+            kind: 'image',
+            imageHash: hash,
+            imageUrl: url
+        });
+    };
+
+    const afs = cr.asset_feed_spec || {};
+    (Array.isArray(afs.videos) ? afs.videos : []).forEach(pushVideo);
+    (Array.isArray(afs.images) ? afs.images : []).forEach(pushImage);
+    (Array.isArray(afs.groups) ? afs.groups : []).forEach(grp => {
+        (Array.isArray(grp?.videos) ? grp.videos : []).forEach(pushVideo);
+        (Array.isArray(grp?.images) ? grp.images : []).forEach(pushImage);
+    });
+
+    const cags = cr.creative_asset_groups_spec || {};
+    (Array.isArray(cags.groups) ? cags.groups : []).forEach(grp => {
+        (Array.isArray(grp?.videos) ? grp.videos : []).forEach(pushVideo);
+        (Array.isArray(grp?.images) ? grp.images : []).forEach(pushImage);
+    });
+
+    const childAttachments = cr.object_story_spec?.link_data?.child_attachments;
+    if (entries.length <= 1 && Array.isArray(childAttachments) && childAttachments.length > 1) {
+        childAttachments.forEach(att => {
+            if (att?.video_id) {
+                pushVideo({ video_id: att.video_id, thumbnail_url: att.picture || '', thumbnail_hash: att.image_hash || '' });
+            } else if (att?.image_hash || att?.picture) {
+                pushImage({ hash: att.image_hash || '', url: att.picture || '' });
+            }
+        });
+    }
+
+    return entries;
+}
+
+async function fetchAdCreativeFullFields(creativeId) {
+    if (!creativeId) return null;
+    const baseFields = 'id,name,actor_id,object_type,effective_object_story_id,thumbnail_url,image_url,video_id,object_story_spec,asset_feed_spec';
+    try {
+        const res = await metaGraphGet(`/${META_GRAPH_VERSION}/${creativeId}?fields=${baseFields},creative_asset_groups_spec`);
+        if (res && !res.error) return res;
+    } catch (e) {
+        if (!/creative_asset_groups_spec|nonexisting field/i.test(e.message || '')) {
+            throw e;
+        }
+    }
+    return metaGraphGet(`/${META_GRAPH_VERSION}/${creativeId}?fields=${baseFields}`);
+}
+
+async function hydrateAdSetAdsWithCreatives(adsetId) {
+    const baseCrFields = 'id,name,actor_id,object_type,effective_object_story_id,thumbnail_url,image_url,video_id,object_story_spec,asset_feed_spec';
+    let adsData = null;
+    try {
+        adsData = await metaGraphGet(`/${META_GRAPH_VERSION}/${adsetId}/ads?fields=id,name,status,url_tags,creative{${baseCrFields},creative_asset_groups_spec}&limit=50`);
+    } catch (e) {
+        if (!/creative_asset_groups_spec|nonexisting field/i.test(e.message || '')) {
+            throw e;
+        }
+        adsData = await metaGraphGet(`/${META_GRAPH_VERSION}/${adsetId}/ads?fields=id,name,status,url_tags,creative{${baseCrFields}}&limit=50`);
+    }
+
+    const ads = Array.isArray(adsData?.data) ? adsData.data : [];
+    await Promise.all(ads.map(async ad => {
+        const cr = ad.creative || {};
+        if (!cr.id) return;
+        const alreadyMulti = extractCreativeMediaEntries(cr).length > 1;
+        if (alreadyMulti && cr.creative_asset_groups_spec) return;
+        try {
+            const fullCr = await fetchAdCreativeFullFields(cr.id);
+            if (fullCr && fullCr.id) {
+                ad.creative = { ...cr, ...fullCr };
+            }
+        } catch (e) {
+            console.warn(`Não foi possível hidratar creative ${cr.id}:`, e);
+        }
+    }));
+
+    return ads;
+}
+
+async function resolveMetaImageHashMap(accountId, hashes = [], cacheMap = null) {
+    const out = {};
+    const pending = [];
+    Array.from(new Set(hashes.filter(Boolean))).forEach(h => {
+        const ck = `img:${h}`;
+        if (cacheMap && cacheMap[ck]) {
+            out[h] = cacheMap[ck];
+        } else {
+            pending.push(h);
+        }
+    });
+    if (!accountId || pending.length === 0) return out;
+    try {
+        const q = encodeURIComponent(JSON.stringify(pending.slice(0, 50)));
+        const res = await metaGraphGet(`/${META_GRAPH_VERSION}/${accountId}/adimages?hashes=${q}&fields=hash,url,url_128,permalink_url`);
+        (Array.isArray(res?.data) ? res.data : []).forEach(item => {
+            const u = item.url || item.url_128 || item.permalink_url || '';
+            if (item.hash && u) {
+                out[item.hash] = u;
+                if (cacheMap) cacheMap[`img:${item.hash}`] = u;
+            }
+        });
+    } catch (e) {
+        console.warn('Não foi possível resolver adimages por hash:', e);
+    }
+    return out;
+}
+
 // Carrega as miniaturas em alta resolução dos anúncios do Facebook para o conjunto base
 function extractCreativeTemplateSpec(cr = {}, fallbackActorId = '') {
     const oss = cr.object_story_spec || {};
     const afs = cr.asset_feed_spec || {};
+    const cags = cr.creative_asset_groups_spec || {};
+    const cagGroups = [
+        ...(Array.isArray(cags.groups) ? cags.groups : []),
+        ...(Array.isArray(afs.groups) ? afs.groups : [])
+    ];
     const vd = oss.video_data || {};
     const ld = oss.link_data || {};
 
+    const firstGrpCta = cagGroups.map(g => g?.call_to_action).find(Boolean) || null;
+    const firstGrpCtaType = cagGroups.flatMap(g => g?.call_to_action_types || []).find(Boolean) || '';
+    const firstGrpLinkObj = cagGroups.flatMap(g => g?.link_urls || []).find(Boolean) || null;
+
     const afsCtaType = Array.isArray(afs.call_to_action_types) ? afs.call_to_action_types[0] : '';
     const afsLinkObj = Array.isArray(afs.link_urls) ? afs.link_urls[0] : null;
-    const ctaObj = vd.call_to_action || ld.call_to_action || { type: afsCtaType || 'DOWNLOAD', value: { link: '' } };
-    const rawLink = ctaObj.value?.link || ld.link || afsLinkObj?.website_url || afsLinkObj?.display_url || '';
+    const ctaObj = vd.call_to_action || ld.call_to_action || firstGrpCta || { type: afsCtaType || firstGrpCtaType || 'DOWNLOAD', value: { link: '' } };
+    const rawLink = ctaObj.value?.link || ld.link || afsLinkObj?.website_url || afsLinkObj?.display_url || firstGrpLinkObj?.website_url || firstGrpLinkObj?.display_url || '';
 
-    const rawBodies = (afs.bodies || []).map(b => b?.text || '').filter(Boolean);
-    const rawTitles = (afs.titles || []).map(t => t?.text || '').filter(Boolean);
-    const rawDescs = (afs.descriptions || []).map(d => d?.text || '').filter(Boolean);
+    const rawBodies = [];
+    const rawTitles = [];
+    const rawDescs = [];
+    const pushUnique = (arr, txt) => {
+        const t = String(txt || '').trim();
+        if (t && !arr.includes(t)) arr.push(t);
+    };
+
+    (afs.bodies || []).forEach(b => pushUnique(rawBodies, b?.text));
+    (afs.titles || []).forEach(t => pushUnique(rawTitles, t?.text));
+    (afs.descriptions || []).forEach(d => pushUnique(rawDescs, d?.text));
+
+    cagGroups.forEach(grp => {
+        (grp?.bodies || []).forEach(b => pushUnique(rawBodies, b?.text));
+        (grp?.titles || []).forEach(t => pushUnique(rawTitles, t?.text));
+        (grp?.descriptions || []).forEach(d => pushUnique(rawDescs, d?.text));
+        (grp?.texts || []).forEach(tx => {
+            const kind = String(tx?.text_type || tx?.type || '').toLowerCase();
+            if (kind.includes('head') || kind.includes('title')) pushUnique(rawTitles, tx?.text);
+            else if (kind.includes('desc')) pushUnique(rawDescs, tx?.text);
+            else pushUnique(rawBodies, tx?.text);
+        });
+    });
+
+    const storyPageId = cr.effective_object_story_id ? String(cr.effective_object_story_id).split('_')[0] : '';
+    const fallbackPageId = (typeof metaState !== 'undefined' && Array.isArray(metaState.pages) && metaState.pages[0]?.id) || '';
 
     return {
-        pageId: oss.page_id || cr.actor_id || fallbackActorId || '',
+        pageId: oss.page_id || cr.actor_id || fallbackActorId || storyPageId || fallbackPageId || '',
         instagramUserId: oss.instagram_user_id || '',
-        ctaType: ctaObj.type || afsCtaType || 'DOWNLOAD',
+        ctaType: ctaObj.type || afsCtaType || firstGrpCtaType || 'DOWNLOAD',
         rawLink,
         rawBodies,
         rawTitles,
@@ -2821,9 +2986,10 @@ function extractCreativeTemplateSpec(cr = {}, fallbackActorId = '') {
         rawVdTitle: vd.title || ld.name || '',
         rawVdDesc: vd.link_description || ld.description || '',
         hasAfs: rawBodies.length > 0 || rawTitles.length > 0 || rawDescs.length > 0,
-        optimizationType: afs.optimization_type || 'DEGREES_OF_FREEDOM',
+        optimizationType: 'DEGREES_OF_FREEDOM',
         afsVideos: Array.isArray(afs.videos) ? afs.videos : [],
-        afsImages: Array.isArray(afs.images) ? afs.images : []
+        afsImages: Array.isArray(afs.images) ? afs.images : [],
+        mediaEntries: extractCreativeMediaEntries(cr)
     };
 }
 
@@ -2853,6 +3019,12 @@ async function createSingleMediaAdCreative({ accountId, name, spec, mediaAsset, 
         && ((textsObj.tBodies || []).length > 0 || (textsObj.tTitles || []).length > 0 || (textsObj.tDescs || []).length > 0)
     );
 
+    const buildCtaObj = () => {
+        const cta = { type: spec.ctaType || 'DOWNLOAD' };
+        if (cleanLink) cta.value = { link: cleanLink };
+        return cta;
+    };
+
     const buildPayload = (useAfsMode) => {
         const oss = { page_id: spec.pageId };
         if (spec.instagramUserId) oss.instagram_user_id = spec.instagramUserId;
@@ -2860,10 +3032,7 @@ async function createSingleMediaAdCreative({ accountId, name, spec, mediaAsset, 
         if (mediaAsset.kind === 'video') {
             const videoData = {
                 video_id: mediaAsset.videoId,
-                call_to_action: {
-                    type: spec.ctaType || 'DOWNLOAD',
-                    value: { link: cleanLink }
-                }
+                call_to_action: buildCtaObj()
             };
             if (mediaAsset.thumbnailUrl) {
                 videoData.image_url = mediaAsset.thumbnailUrl;
@@ -2881,12 +3050,9 @@ async function createSingleMediaAdCreative({ accountId, name, spec, mediaAsset, 
             oss.video_data = videoData;
         } else {
             const linkData = {
-                link: cleanLink,
-                call_to_action: {
-                    type: spec.ctaType || 'DOWNLOAD',
-                    value: { link: cleanLink }
-                }
+                call_to_action: buildCtaObj()
             };
+            if (cleanLink) linkData.link = cleanLink;
             if (mediaAsset.imageHash) linkData.image_hash = mediaAsset.imageHash;
             else if (mediaAsset.imageUrl) linkData.picture = mediaAsset.imageUrl;
             if (!useAfsMode) {
@@ -2906,7 +3072,7 @@ async function createSingleMediaAdCreative({ accountId, name, spec, mediaAsset, 
         };
         if (useAfsMode) {
             const afsOut = {
-                optimization_type: spec.optimizationType || 'DEGREES_OF_FREEDOM'
+                optimization_type: 'DEGREES_OF_FREEDOM'
             };
             if ((textsObj.tBodies || []).length > 0) afsOut.bodies = textsObj.tBodies.map(text => ({ text }));
             if ((textsObj.tTitles || []).length > 0) afsOut.titles = textsObj.tTitles.map(text => ({ text }));
@@ -2921,27 +3087,32 @@ async function createSingleMediaAdCreative({ accountId, name, spec, mediaAsset, 
         return payload;
     };
 
-    let creativePayload = buildPayload(hasMultiAfs);
-    let crRes = await postCreative(creativePayload);
+    const postWithFieldFallbacks = async (payload) => {
+        let res = await postCreative(payload);
+        if (res.error && /degrees_of_freedom_spec|standard_enhancements/i.test(res.error.message || '')) {
+            delete payload.degrees_of_freedom_spec;
+            res = await postCreative(payload);
+        }
+        if (res.error && /instagram_user_id/i.test(res.error.message || '')) {
+            delete payload.object_story_spec.instagram_user_id;
+            res = await postCreative(payload);
+        }
+        if (res.error && payload.object_story_spec?.video_data?.image_url && /image_url|thumbnail|picture|download image/i.test(res.error.message || '')) {
+            delete payload.object_story_spec.video_data.image_url;
+            res = await postCreative(payload);
+        }
+        return res;
+    };
 
-    if (crRes.error && /degrees_of_freedom_spec|standard_enhancements/i.test(crRes.error.message || '')) {
-        delete creativePayload.degrees_of_freedom_spec;
-        crRes = await postCreative(creativePayload);
-    }
-    if (crRes.error && /instagram_user_id/i.test(crRes.error.message || '')) {
-        delete creativePayload.object_story_spec.instagram_user_id;
-        crRes = await postCreative(creativePayload);
-    }
+    let creativePayload = buildPayload(hasMultiAfs);
+    let crRes = await postWithFieldFallbacks(creativePayload);
+
     if (crRes.error && hasMultiAfs && crRes.error.error_subcode !== 1885183) {
         if (typeof logFn === 'function') {
             logFn(`ℹ️ Conta não aceitou asset_feed_spec múltiplo em '${name}', aplicando texto principal único como fallback...`, 'warn');
         }
         creativePayload = buildPayload(false);
-        crRes = await postCreative(creativePayload);
-        if (crRes.error && /instagram_user_id/i.test(crRes.error.message || '')) {
-            delete creativePayload.object_story_spec.instagram_user_id;
-            crRes = await postCreative(creativePayload);
-        }
+        crRes = await postWithFieldFallbacks(creativePayload);
     }
 
     return crRes;
@@ -2962,51 +3133,51 @@ async function loadBaseAdSetMetaThumbnails(adsetId) {
     metaBaseAdsCache = [];
 
     try {
-        const data = await metaGraphGet(`/${META_GRAPH_VERSION}/${adsetId}/ads?fields=id,name,status,url_tags,creative{id,name,actor_id,thumbnail_url,image_url,video_id,object_story_spec,asset_feed_spec}&limit=50`);
+        const hydratedAds = await hydrateAdSetAdsWithCreatives(adsetId);
 
         if (currentSeq !== _metaThumbReqSeq) return;
 
-        if (data.data && Array.isArray(data.data) && data.data.length > 0) {
+        if (hydratedAds.length > 0) {
             const previewItems = [];
             let hasFlexibleExpansion = false;
+            const thumbCache = {};
 
-            await Promise.all(data.data.map(async ad => {
+            // Pré-resolve hashes de imagens presentes em anúncios flexíveis
+            const allImageHashes = [];
+            hydratedAds.forEach(ad => {
+                extractCreativeMediaEntries(ad.creative || {}).forEach(m => {
+                    if (m.kind === 'image' && m.imageHash && !m.imageUrl) {
+                        allImageHashes.push(m.imageHash);
+                    }
+                });
+            });
+            const resolvedImgMap = await resolveMetaImageHashMap(metaState.selectedAccountId, allImageHashes, thumbCache);
+            if (currentSeq !== _metaThumbReqSeq) return;
+
+            await Promise.all(hydratedAds.map(async ad => {
                 const cr = ad.creative || {};
-                const afs = cr.asset_feed_spec || {};
-                const afsVideos = Array.isArray(afs.videos) ? afs.videos : [];
-                const afsImages = Array.isArray(afs.images) ? afs.images : [];
+                const mediaEntries = extractCreativeMediaEntries(cr);
                 const isActive = ad.status === 'ACTIVE';
 
-                if (afsVideos.length > 1) {
+                if (mediaEntries.length > 1) {
                     hasFlexibleExpansion = true;
-                    const resolvedList = await Promise.all(afsVideos.map(async (v, vIdx) => {
-                        const thumbUrl = await resolveMetaVideoThumbUrl(v.video_id, v.thumbnail_url || '');
+                    const resolvedList = await Promise.all(mediaEntries.map(async (m, mIdx) => {
+                        let thumbUrl = '';
+                        if (m.kind === 'video') {
+                            thumbUrl = await resolveMetaVideoThumbUrl(m.videoId, m.thumbnailUrl || '', thumbCache);
+                        } else {
+                            thumbUrl = m.imageUrl || (m.imageHash ? resolvedImgMap[m.imageHash] : '') || cr.thumbnail_url || '';
+                        }
                         return {
                             adId: ad.id,
                             creativeId: cr.id || '-',
-                            title: `${String(vIdx + 1).padStart(2, '0')} (Flexível)`,
+                            title: `${String(mIdx + 1).padStart(2, '0')} (Flexível)`,
                             thumbUrl,
                             isActive
                         };
                     }));
                     ad._resolvedThumb = resolvedList[0]?.thumbUrl || '';
                     resolvedList.forEach(item => previewItems.push(item));
-                    return;
-                }
-
-                if (afsImages.length > 1) {
-                    hasFlexibleExpansion = true;
-                    afsImages.forEach((imgObj, iIdx) => {
-                        const thumbUrl = imgObj.url || cr.thumbnail_url || '';
-                        previewItems.push({
-                            adId: ad.id,
-                            creativeId: cr.id || '-',
-                            title: `${String(iIdx + 1).padStart(2, '0')} (Flexível)`,
-                            thumbUrl,
-                            isActive
-                        });
-                    });
-                    ad._resolvedThumb = afsImages[0]?.url || cr.thumbnail_url || '';
                     return;
                 }
 
@@ -3028,7 +3199,7 @@ async function loadBaseAdSetMetaThumbnails(adsetId) {
             }));
 
             if (currentSeq !== _metaThumbReqSeq) return;
-            metaBaseAdsCache = data.data;
+            metaBaseAdsCache = hydratedAds;
             thumbsRow.innerHTML = '';
 
             previewItems.forEach((item) => {
@@ -3068,8 +3239,8 @@ async function loadBaseAdSetMetaThumbnails(adsetId) {
 
             if (countBadge) {
                 countBadge.innerText = hasFlexibleExpansion
-                    ? `${data.data.length} anúncio (${previewItems.length} criativos)`
-                    : `${data.data.length} anúncio(s)`;
+                    ? `${hydratedAds.length} anúncio (${previewItems.length} criativos)`
+                    : `${hydratedAds.length} anúncio(s)`;
             }
             if (statusEl) {
                 statusEl.innerText = hasFlexibleExpansion
@@ -4202,14 +4373,19 @@ async function startBatchDuplication() {
 
     const budgetInCents = 100; // Sempre 1 dólar ($1.00 USD = 100 centavos)
 
-    // Busca previamente todos os anúncios e criativos completos (incluindo asset_feed_spec, object_story_spec e url_tags)
+    // Busca previamente todos os anúncios e criativos completos (hidratando asset_feed_spec e creative_asset_groups_spec)
     let baseAds = [];
     try {
-        const adsData = await metaGraphGet(`/${META_GRAPH_VERSION}/${adsetId}/ads?fields=id,name,status,url_tags,creative{id,name,actor_id,object_story_spec,asset_feed_spec}&limit=50`);
-        if (adsData.data && Array.isArray(adsData.data)) {
-            baseAds = adsData.data;
-        }
+        baseAds = await hydrateAdSetAdsWithCreatives(adsetId);
         logMetaTerminal(`📋 Anúncios identificados no conjunto base: ${baseAds.length} anúncio(s)`, 'info');
+        baseAds.forEach((bAd, idx) => {
+            const cr = bAd.creative || {};
+            const mEntries = extractCreativeMediaEntries(cr);
+            const afsV = Array.isArray(cr.asset_feed_spec?.videos) ? cr.asset_feed_spec.videos.length : 0;
+            const afsI = Array.isArray(cr.asset_feed_spec?.images) ? cr.asset_feed_spec.images.length : 0;
+            const cagsG = Array.isArray(cr.creative_asset_groups_spec?.groups) ? cr.creative_asset_groups_spec.groups.length : 0;
+            logMetaTerminal(`🔎 Modelo #${idx + 1} '${bAd.name || bAd.id}': ${mEntries.length} mídia(s) detectada(s) [afs_v=${afsV}, afs_i=${afsI}, cags_g=${cagsG}]`, 'info');
+        });
     } catch (e) {
         console.warn('Não foi possível ler anúncios prévios do conjunto:', e);
     }
@@ -4273,25 +4449,23 @@ async function startBatchDuplication() {
         const cLang = (c.langCode || (block.langCode && block.langCode !== 'multi' ? block.langCode : baseLang) || baseLang).toLowerCase();
         return cLang === baseLang;
     });
-    const baseHasFlexibleMulti = baseAds.some(ad => {
-        const afs = ad.creative?.asset_feed_spec || {};
-        return (Array.isArray(afs.videos) && afs.videos.length > 1) || (Array.isArray(afs.images) && afs.images.length > 1);
-    });
+    const baseHasFlexibleMulti = baseAds.some(ad => extractCreativeMediaEntries(ad.creative || {}).length > 1);
 
     if (hasSameLangTargets && baseAds.length > 0 && baseHasFlexibleMulti) {
         let sameLangErr = '';
         let sameLangDevBlock = false;
+        let expectedExpandedCount = 0;
         const expandedItems = [];
 
         try {
             if (progressStatus) progressStatus.innerText = `🎬 Expandindo criativos do anúncio flexível (${baseLang.toUpperCase()})...`;
             for (const baseAd of baseAds) {
                 const spec = extractCreativeTemplateSpec(baseAd.creative || {}, baseAd.creative?.actor_id || '');
-                const isFlexVideos = spec.afsVideos.length > 1;
-                const isFlexImages = !isFlexVideos && spec.afsImages.length > 1;
+                const mediaEntries = spec.mediaEntries || [];
 
-                if (!isFlexVideos && !isFlexImages) {
+                if (mediaEntries.length <= 1) {
                     if (baseAd.creative?.id) {
+                        expectedExpandedCount++;
                         expandedItems.push({
                             adName: baseAd.name || String(expandedItems.length + 1).padStart(2, '0'),
                             creativeId: baseAd.creative.id,
@@ -4301,15 +4475,13 @@ async function startBatchDuplication() {
                     continue;
                 }
 
+                expectedExpandedCount += mediaEntries.length;
+
                 if (!spec.pageId) {
                     sameLangErr = `Anúncio base '${baseAd.name}' não possui page_id em object_story_spec.`;
                     logMetaTerminal(`⚠️ ${sameLangErr}`, 'warn');
                     continue;
                 }
-
-                const mediaEntries = isFlexVideos
-                    ? spec.afsVideos.map(v => ({ kind: 'video', videoId: v.video_id, thumbnailUrl: v.thumbnail_url || '', thumbnailHash: v.thumbnail_hash || '' }))
-                    : spec.afsImages.map(im => ({ kind: 'image', imageHash: im.hash || '', imageUrl: im.url || '' }));
 
                 logMetaTerminal(`🎬 Conjunto base '${baseAd.name}' é Flexível (${mediaEntries.length} criativos) — gerando ${mediaEntries.length} anúncios individuais (1 criativo por anúncio)...`, 'info');
 
@@ -4324,7 +4496,7 @@ async function startBatchDuplication() {
                 };
 
                 for (let mIdx = 0; mIdx < mediaEntries.length; mIdx++) {
-                    const entry = mediaEntries[mIdx];
+                    const entry = { ...mediaEntries[mIdx] };
                     const adCode = String(mIdx + 1).padStart(2, '0');
                     if (entry.kind === 'video' && !entry.thumbnailUrl && !entry.thumbnailHash) {
                         entry.thumbnailUrl = await resolveMetaVideoThumbUrl(entry.videoId, '', videoUploadCache);
@@ -4362,13 +4534,17 @@ async function startBatchDuplication() {
             logMetaTerminal(`❌ Erro ao expandir criativos de ${baseLang.toUpperCase()}: ${sameLangErr}`, 'error');
         }
 
-        if (expandedItems.length > 0) {
+        if (expandedItems.length > 0 && expandedItems.length === expectedExpandedCount) {
             preparedSameLangItems.push(...expandedItems);
             logMetaTerminal(`✨ ${expandedItems.length} anúncio(s) individuais preparados para ${baseLang.toUpperCase()} (01 a ${String(expandedItems.length).padStart(2, '0')}).`, 'success');
         } else {
+            if (expandedItems.length > 0) {
+                preparedSameLangItems.push(...expandedItems);
+                logMetaTerminal(`⚠️ Expansão parcial em ${baseLang.toUpperCase()}: ${expandedItems.length}/${expectedExpandedCount} criativo(s) preparado(s).`, 'warn');
+            }
             creativePrepFailures.push({
                 lang: baseLang,
-                error: sameLangErr || 'Não foi possível expandir os criativos do anúncio flexível.',
+                error: sameLangErr || `Expansão incompleta (${expandedItems.length}/${expectedExpandedCount} criativos do anúncio flexível).`,
                 isDevMode: sameLangDevBlock
             });
         }
