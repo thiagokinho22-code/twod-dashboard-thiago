@@ -18,6 +18,7 @@ DASHBOARD_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 BACKEND_DIR = os.path.dirname(__file__)
 ENV_PATH = os.path.join(BACKEND_DIR, ".env")
 GRAPH_CACHE_PATH = os.path.join(BACKEND_DIR, ".graph_cache.json")
+CAMPAIGN_CREATIVES_PATH = os.path.join(BACKEND_DIR, ".campaign_creatives.json")
 
 # Auto-detecta a pasta local do OneDrive de Trabalho (quando rodando no PC do Thiago)
 DEFAULT_WORK_DIR = os.path.join(os.path.expanduser("~"), "OneDrive", "Documentos", "Trabalho")
@@ -483,6 +484,84 @@ def fetch_single_niche_videos_from_graph(niche_name):
     return {"feed": feed, "reels": reels, "found_in_cloud": True}, None
 
 
+def load_campaign_creatives():
+    """Carrega as vinculações salvas entre Campanhas e Pacotes de Criativo do OneDrive."""
+    if not os.path.exists(CAMPAIGN_CREATIVES_PATH):
+        return {}
+    try:
+        with open(CAMPAIGN_CREATIVES_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"Erro ao ler .campaign_creatives.json: {e}")
+        return {}
+
+
+def save_campaign_creatives(data):
+    """Grava as vinculações de campanha em disco para toda a equipe."""
+    try:
+        with open(CAMPAIGN_CREATIVES_PATH, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+        return True
+    except Exception as e:
+        print(f"Erro ao salvar .campaign_creatives.json: {e}")
+        return False
+
+
+def find_niche_candidate_packs(niche_slug):
+    """Busca todas as pastas de nicho do OneDrive que contêm ou combinam com o slug (ex: RastrearOnibus 04.11.26)."""
+    import unicodedata
+    if not niche_slug:
+        return []
+
+    # Normalização sem acentos nem caracteres especiais
+    nfd = unicodedata.normalize('NFD', niche_slug)
+    clean_target = ''.join(c for c in nfd if unicodedata.category(c) != 'Mn')
+    target_norm = re.sub(r'[^a-zA-Z0-9]', '', clean_target).lower()
+
+    matched_packs = []
+    candidate_names = []
+    with GRAPH_LOCK:
+        niches_map = GRAPH_SYNC_STATE.get("niches_map", {})
+        for nname in niches_map.keys():
+            n_nfd = unicodedata.normalize('NFD', nname)
+            n_clean = ''.join(c for c in n_nfd if unicodedata.category(c) != 'Mn')
+            n_norm = re.sub(r'[^a-zA-Z0-9]', '', n_clean).lower()
+            if target_norm in n_norm or n_norm in target_norm:
+                candidate_names.append(nname)
+
+    # Para cada pasta candidata, garante que os vídeos estão carregados
+    for cname in candidate_names:
+        niche_obj = None
+        with GRAPH_LOCK:
+            niche_obj = GRAPH_SYNC_STATE.get("niches_map", {}).get(cname)
+
+        has_videos = niche_obj and (niche_obj["videos"]["feed"] or niche_obj["videos"]["reels"])
+        if not has_videos:
+            fetch_single_niche_videos_from_graph(cname)
+            with GRAPH_LOCK:
+                niche_obj = GRAPH_SYNC_STATE.get("niches_map", {}).get(cname)
+
+        if niche_obj:
+            all_vids = niche_obj["videos"]["feed"] + niche_obj["videos"]["reels"]
+            langs = list(set(v.get("lang") for v in all_vids if v.get("lang")))
+            lang_priority = {"PORTUGUES": 1, "ESPANHOL": 2, "INGLES": 3, "FRANCES": 4}
+            langs.sort(key=lambda l: lang_priority.get(re.sub(r'[^A-Z]', '', l.upper()), 99))
+
+            matched_packs.append({
+                "name": cname,
+                "status": niche_obj.get("status", "pending"),
+                "languages": langs,
+                "videos_count": len(all_vids),
+                "feed": niche_obj["videos"]["feed"][:6],
+                "reels": niche_obj["videos"]["reels"][:6],
+                "sample_thumbs": [v["url"] for v in all_vids[:6] if "url" in v]
+            })
+
+    # Ordena pelo nome descendente (as datas mais novas primeiro)
+    matched_packs.sort(key=lambda p: p["name"], reverse=True)
+    return matched_packs
+
+
 def _sync_graph_delta_worker(force_full=False):
     """Sincroniza áudios e vídeos usando /delta em lote em segundo plano (sem timeout)."""
     try:
@@ -908,6 +987,18 @@ class APIHandler(BaseHTTPRequestHandler):
                 return
             self._send_json({"success": True, "niche": niche_name, "videos": videos})
 
+        elif path == "/api/onedrive/niche-packs":
+            niche = (qs.get("niche", [""])[0] or qs.get("name", [""])[0] or "").strip()
+            if not niche:
+                self._send_json({"success": False, "error": "Parâmetro 'niche' obrigatório"}, 400)
+                return
+            packs = find_niche_candidate_packs(niche)
+            self._send_json({"success": True, "niche": niche, "packs": packs})
+
+        elif path == "/api/campaign-creatives":
+            data = load_campaign_creatives()
+            self._send_json({"success": True, "links": data})
+
         # --------------------------------------------------------
         # 4. STREAM / DOWNLOAD DIRETO VIA MICROSOFT GRAPH CDN
         # --------------------------------------------------------
@@ -1140,6 +1231,38 @@ class APIHandler(BaseHTTPRequestHandler):
                         translated.append(txt)
 
                 self._send_json({"success": True, "target_lang": target_lang, "translations": translated})
+            except Exception as e:
+                self._send_json({"success": False, "error": str(e)}, 500)
+
+        elif path == "/api/campaign-creatives":
+            try:
+                content_len = int(self.headers.get("Content-Length", 0))
+                post_body = self.rfile.read(content_len).decode("utf-8")
+                payload = json.loads(post_body) if post_body else {}
+                camp_id = str(payload.get("campaign_id", "")).strip()
+                if not camp_id:
+                    self._send_json({"success": False, "error": "campaign_id obrigatório"}, 400)
+                    return
+                current = load_campaign_creatives()
+                if payload.get("delete"):
+                    if camp_id in current:
+                        del current[camp_id]
+                        save_campaign_creatives(current)
+                    self._send_json({"success": True, "deleted": camp_id})
+                    return
+
+                current[camp_id] = {
+                    "campaign_id": camp_id,
+                    "campaign_name": payload.get("campaign_name", ""),
+                    "niche_pack": payload.get("niche_pack", ""),
+                    "niche_slug": payload.get("niche_slug", ""),
+                    "account_id": payload.get("account_id", ""),
+                    "thumbs": payload.get("thumbs", []),
+                    "languages": payload.get("languages", []),
+                    "linked_at": time.strftime("%Y-%m-%d %H:%M:%S")
+                }
+                save_campaign_creatives(current)
+                self._send_json({"success": True, "link": current[camp_id]})
             except Exception as e:
                 self._send_json({"success": False, "error": str(e)}, 500)
         else:

@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>TwoD Hub — Central de Automações</title>
-    <link rel="stylesheet" href="styles.css?v=2.0">
+    <link rel="stylesheet" href="styles.css?v=2.1">
 </head>
 <body>
 
@@ -860,13 +860,51 @@
                         <div id="base-adset-details-box" class="adset-preview-box twod-hidden">
                             <div class="adset-preview-header">
                                 <span class="adset-icon">📦</span>
-                                <div>
+                                <div style="flex: 1;">
                                     <strong id="preview-adset-name">Nome do Conjunto</strong>
                                     <div class="text-muted" id="preview-adset-meta">Orçamento: $1.00 | Segmentação detectada</div>
                                 </div>
                             </div>
                             <div class="adset-preview-tags" id="preview-adset-tags">
                                 <!-- Tags de segmentação -->
+                            </div>
+
+                            <!-- GALERIA DE MINIATURAS: ANÚNCIOS DO FACEBOOK ADS -->
+                            <div class="meta-creative-section" id="meta-creative-section">
+                                <div class="meta-creative-header">
+                                    <div style="display:flex; align-items:center; gap:8px;">
+                                        <span style="font-size:16px;">🎬</span>
+                                        <strong style="font-size:13px; color:#e2e8f0;">Criativos no Facebook (Conjunto Base)</strong>
+                                        <span class="badge-tag" id="badge-fb-ads-count" style="font-size:11px;">Buscando...</span>
+                                    </div>
+                                    <span class="text-muted" style="font-size:11px;" id="fb-ads-thumb-status">Consultando anúncios na Meta...</span>
+                                </div>
+                                <div class="creative-thumbs-row" id="fb-ads-thumbs-row">
+                                    <!-- Miniaturas dos anúncios puxadas da Meta API -->
+                                </div>
+                            </div>
+
+                            <!-- IDENTIFICAÇÃO E VÍNCULO COM O PACOTE DO ONEDRIVE -->
+                            <div class="campaign-creative-link-box" id="campaign-creative-link-box">
+                                <div class="creative-link-header" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+                                    <div style="display:flex; align-items:center; gap:8px;">
+                                        <span style="font-size:16px;">📁</span>
+                                        <strong style="font-size:13px; color:#e2e8f0;">Vínculo com Pacote do OneDrive</strong>
+                                        <span id="campaign-creative-badge" class="badge-tag" style="background:#3b82f620; color:#60a5fa; border:1px solid #3b82f640;">Não vinculado</span>
+                                    </div>
+                                    <div id="campaign-link-actions" style="display:flex; gap:8px;">
+                                        <button type="button" class="btn btn-secondary btn-sm" id="btn-search-niche-packs" onclick="loadNicheCandidatePacks()" style="padding:4px 10px; font-size:11px;">🔍 Buscar Pastas no OneDrive</button>
+                                        <button type="button" class="btn btn-secondary btn-sm twod-hidden" id="btn-change-niche-pack" onclick="openPackSelectorView()" style="padding:4px 10px; font-size:11px;">✏️ Trocar Pacote</button>
+                                    </div>
+                                </div>
+                                <div id="campaign-creative-summary" class="text-muted" style="font-size:12px; margin-top:4px;">
+                                    Vincule esta campanha a um pacote de criativos do OneDrive para identificar facilmente e duplicar para outros idiomas sem procurar.
+                                </div>
+
+                                <!-- SELETOR DE PACOTES CANDIDATOS DO ONEDRIVE COM PREVIEW -->
+                                <div id="onedrive-candidate-packs-container" class="candidate-packs-container twod-hidden" style="margin-top:12px;">
+                                    <!-- Cards de cada pasta do nicho no OneDrive com thumbs -->
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -879,6 +917,11 @@
                                 <p>Selecione o bloco de expansão internacional. Cada país marcado gerará um novo conjunto idêntico ao base.</p>
                             </div>
                             <span class="badge-tag">Passo 2 de 3</span>
+                        </div>
+
+                        <!-- BANNER DE AVISO DE IDIOMA E VÍDEOS -->
+                        <div id="duplicator-lang-notice" class="duplicator-lang-notice twod-hidden" style="margin-bottom:16px;">
+                            <!-- Preenchido dinamicamente quando o idioma do bloco diferir da base -->
                         </div>
 
                         <!-- SELETOR DE BLOCOS (TABS HORIZONTAIS) -->
@@ -1272,7 +1315,7 @@
         </div>
     </div>
 
-    <script src="app.js?v=7.5"></script>
+    <script src="app.js?v=7.6"></script>
     <script src="campaign_builder.js?v=1.4"></script>
 </body>
 </html>

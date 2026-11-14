@@ -1561,6 +1561,7 @@ async function initMetaApi() {
     // 2. Renderiza abas de blocos de países
     renderBlockNav();
     selectCountryBlock('BLOCO-01');
+    loadCampaignCreativeLinks();
 
     // 3. Valida token e carrega contas
     await testAndReloadMetaApi(false);
@@ -1980,6 +1981,9 @@ async function onMetaCampaignSelected() {
     metaState.adsets = [];
     metaState.checkedCountries = {};
 
+    renderCampaignCreativeLinkBadge();
+    updateDuplicatorLanguageNotice();
+
     selectAdSet.innerHTML = '<option value="">Carregando conjuntos base...</option>';
     selectAdSet.disabled = true;
     hideBaseAdSetPreview();
@@ -2063,6 +2067,9 @@ function onMetaAdSetSelected() {
 
     if (adset) {
         showBaseAdSetPreview(adset);
+        loadBaseAdSetMetaThumbnails(adset.id);
+        renderCampaignCreativeLinkBadge();
+        updateDuplicatorLanguageNotice();
     } else {
         hideBaseAdSetPreview();
     }
@@ -2099,7 +2106,7 @@ function showBaseAdSetPreview(adset) {
 
         const tag3 = document.createElement('span');
         tag3.className = 'adset-tag';
-        tag3.innerText = `✨ Criativos & Anúncios serão clonados automaticamente`;
+        tag3.innerText = `✨ Criativos & Anúncios verificados`;
         tagsEl.appendChild(tag3);
     }
 
@@ -2109,6 +2116,480 @@ function showBaseAdSetPreview(adset) {
 function hideBaseAdSetPreview() {
     const box = document.getElementById('base-adset-details-box');
     if (box) box.classList.add('twod-hidden');
+}
+
+// ========================================================
+// IDENTIFICAÇÃO DE CRIATIVOS: MINIATURAS META ADS & ONEDRIVE
+// ========================================================
+
+let metaBaseAdsCache = [];
+let campaignCreativesMap = {};
+let _metaThumbReqSeq = 0;
+
+// Extrai o nome/slug do nicho da campanha (ex: '24944,RastrearOnibus,MON-TWODCOMPANY-09...' -> 'RastrearOnibus')
+function extractNicheFromCampaign(campName = '') {
+    if (!campName) return '';
+    const parts = campName.split(',').map(s => s.trim()).filter(Boolean);
+    if (parts.length >= 2) {
+        if (/^\d+$/.test(parts[0])) {
+            return parts[1];
+        }
+        return parts[0];
+    }
+    const clean = campName.replace(/\d{2}\.\d{2}\.\d{2,4}/g, '').replace(/act_\d+/g, '').replace(/[^\w\s-]/g, ' ');
+    const tokens = clean.split(/\s+/).filter(t => t.length >= 3 && !/^\d+$/.test(t));
+    return tokens[0] || campName;
+}
+
+// Carrega os vínculos salvos entre Campanhas e Pacotes do OneDrive
+async function loadCampaignCreativeLinks() {
+    try {
+        const local = localStorage.getItem('twod_campaign_creatives_v1');
+        if (local) {
+            try { campaignCreativesMap = JSON.parse(local) || {}; } catch (e) {}
+        }
+        const resp = await fetch(`${API_BASE_URL}/api/campaign-creatives`);
+        const data = await resp.json();
+        if (data.success && data.links) {
+            campaignCreativesMap = { ...campaignCreativesMap, ...data.links };
+            localStorage.setItem('twod_campaign_creatives_v1', JSON.stringify(campaignCreativesMap));
+        }
+    } catch (e) {
+        console.warn('Fallback: usando links de criativos do localStorage:', e);
+    }
+    renderCampaignCreativeLinkBadge();
+}
+
+// Salva o vínculo de uma campanha com um pacote de criativo
+async function linkCampaignToPack(campaignId, pack) {
+    if (!campaignId || !pack) return;
+    const campObj = (metaState.campaigns || []).find(c => c.id === campaignId);
+    const campName = campObj ? campObj.name : campaignId;
+    const nicheSlug = extractNicheFromCampaign(campName);
+
+    const payload = {
+        campaign_id: campaignId,
+        campaign_name: campName,
+        niche_pack: pack.name,
+        niche_slug: nicheSlug,
+        account_id: metaState.selectedAccountId,
+        thumbs: pack.sample_thumbs || [],
+        languages: pack.languages || []
+    };
+
+    campaignCreativesMap[campaignId] = {
+        ...payload,
+        linked_at: new Date().toLocaleString()
+    };
+    localStorage.setItem('twod_campaign_creatives_v1', JSON.stringify(campaignCreativesMap));
+
+    try {
+        await fetch(`${API_BASE_URL}/api/campaign-creatives`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+    } catch (e) {
+        console.warn('Erro ao salvar vínculo no servidor (salvo em localStorage):', e);
+    }
+
+    renderCampaignCreativeLinkBadge();
+    updateDuplicatorLanguageNotice();
+}
+
+// Remove o vínculo da campanha
+async function unlinkCampaignFromPack(campaignId) {
+    if (!campaignId) return;
+    delete campaignCreativesMap[campaignId];
+    localStorage.setItem('twod_campaign_creatives_v1', JSON.stringify(campaignCreativesMap));
+
+    try {
+        await fetch(`${API_BASE_URL}/api/campaign-creatives`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ campaign_id: campaignId, delete: true })
+        });
+    } catch (e) {
+        console.warn('Erro ao deletar vínculo no servidor:', e);
+    }
+
+    renderCampaignCreativeLinkBadge();
+    updateDuplicatorLanguageNotice();
+}
+
+// Carrega as miniaturas dos anúncios do Facebook para o conjunto base
+async function loadBaseAdSetMetaThumbnails(adsetId) {
+    const thumbsRow = document.getElementById('fb-ads-thumbs-row');
+    const statusEl = document.getElementById('fb-ads-thumb-status');
+    const countBadge = document.getElementById('badge-fb-ads-count');
+
+    if (!thumbsRow) return;
+
+    thumbsRow.innerHTML = '<div class="text-muted" style="font-size:12px; padding:10px;">⏳ Buscando criativos no Facebook Ads...</div>';
+    if (statusEl) statusEl.innerText = 'Consultando Meta Marketing API...';
+    if (countBadge) countBadge.innerText = 'Carregando...';
+
+    const currentSeq = ++_metaThumbReqSeq;
+    const token = getMetaToken();
+    metaBaseAdsCache = [];
+
+    try {
+        const url = `https://graph.facebook.com/${META_GRAPH_VERSION}/${adsetId}/ads?access_token=${encodeURIComponent(token)}&fields=id,name,status,creative{id,name,thumbnail_url,image_url,video_id,object_story_spec}&limit=50`;
+        const resp = await fetch(url);
+        const data = await resp.json();
+
+        if (currentSeq !== _metaThumbReqSeq) return;
+
+        if (data.data && Array.isArray(data.data) && data.data.length > 0) {
+            metaBaseAdsCache = data.data;
+            thumbsRow.innerHTML = '';
+
+            data.data.forEach((ad, idx) => {
+                const cr = ad.creative || {};
+                const thumbUrl = cr.thumbnail_url || cr.image_url || cr.object_story_spec?.video_data?.image_url || '';
+                const adName = ad.name || `0${idx + 1}`;
+                const isActive = ad.status === 'ACTIVE';
+
+                const card = document.createElement('div');
+                card.className = 'creative-thumb-card';
+                card.title = `Anúncio: ${adName} (ID: ${ad.id})`;
+
+                let mediaHtml = '';
+                if (thumbUrl) {
+                    mediaHtml = `<img src="${thumbUrl}" class="creative-thumb-preview" alt="${adName}" loading="lazy" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=\\'http://www.w3.org/2000/svg\\' width=\\'100\\' height=\\'100\\' viewBox=\\'0 0 24 24\\' fill=\\'none\\' stroke=\\'%2364748b\\' stroke-width=\\'2\\'><rect width=\\'18\\' height=\\'18\\' x=\\'3\\' y=\\'3\\' rx=\\'2\\'/><circle cx=\\'9\\' cy=\\'9\\' r=\\'2\\'/><path d=\\'m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21\\'/></svg>';">`;
+                } else {
+                    mediaHtml = `<div class="creative-thumb-preview" style="display:flex;align-items:center;justify-content:center;color:#64748b;font-size:20px;">🎬</div>`;
+                }
+
+                card.innerHTML = `
+                    ${mediaHtml}
+                    <div class="creative-thumb-title">${adName}</div>
+                    <span class="creative-thumb-badge" style="background:${isActive ? '#10b98120' : '#f59e0b20'};color:${isActive ? '#34d399' : '#fbbf24'};border:1px solid ${isActive ? '#10b98140' : '#f59e0b40'};">
+                        ${isActive ? '🟢 Ativo' : '⏸️ Pausado'}
+                    </span>
+                `;
+                thumbsRow.appendChild(card);
+            });
+
+            if (countBadge) countBadge.innerText = `${data.data.length} anúncio(s)`;
+            if (statusEl) statusEl.innerText = `Pronto: ${data.data.length} anúncios ativos identificados no Facebook`;
+        } else {
+            thumbsRow.innerHTML = '<div class="text-muted" style="font-size:12px; padding:8px;">Nenhum anúncio encontrado neste conjunto base.</div>';
+            if (countBadge) countBadge.innerText = '0 anúncios';
+            if (statusEl) statusEl.innerText = 'Conjunto sem anúncios';
+        }
+    } catch (e) {
+        if (currentSeq !== _metaThumbReqSeq) return;
+        console.warn('Erro ao buscar miniaturas do Facebook:', e);
+        thumbsRow.innerHTML = `<div class="text-muted" style="font-size:12px; padding:8px;">⚠️ Não foi possível carregar miniaturas: ${e.message}</div>`;
+        if (countBadge) countBadge.innerText = 'Erro';
+        if (statusEl) statusEl.innerText = 'Falha ao consultar API';
+    }
+}
+
+// Renderiza o badge e status do vínculo com o pacote do OneDrive
+function renderCampaignCreativeLinkBadge() {
+    const badge = document.getElementById('campaign-creative-badge');
+    const summary = document.getElementById('campaign-creative-summary');
+    const actionsBox = document.getElementById('campaign-link-actions');
+    const candidateContainer = document.getElementById('onedrive-candidate-packs-container');
+
+    const campaignId = metaState.selectedCampaignId;
+    if (!badge) return;
+
+    if (!campaignId) {
+        badge.innerText = 'Nenhuma campanha';
+        badge.style.background = 'rgba(255,255,255,0.05)';
+        badge.style.color = '#94a3b8';
+        badge.style.borderColor = 'rgba(255,255,255,0.1)';
+        if (summary) summary.innerText = 'Selecione uma campanha acima para visualizar ou definir o vínculo de criativos.';
+        if (candidateContainer) candidateContainer.classList.add('twod-hidden');
+        return;
+    }
+
+    const link = campaignCreativesMap[campaignId];
+    if (link && link.niche_pack) {
+        badge.innerText = `✅ Vinculado: ${link.niche_pack}`;
+        badge.style.background = 'rgba(16, 185, 129, 0.15)';
+        badge.style.color = '#34d399';
+        badge.style.borderColor = 'rgba(16, 185, 129, 0.4)';
+
+        const langs = (link.languages || []).map(l => `<span class="lang-pill ready">🟢 ${l}</span>`).join(' ') || '<span class="text-muted">Idiomas detectados automaticamente</span>';
+        if (summary) {
+            summary.innerHTML = `
+                <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+                    <div>
+                        <strong>Pacote de Mídias Vinculado:</strong> <code>${link.niche_pack}</code>
+                        <div style="margin-top:4px;">Idiomas disponíveis no pacote: ${langs}</div>
+                    </div>
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="unlinkCampaignFromPack('${campaignId}')" style="padding:3px 8px; font-size:11px; color:#ef4444; border-color:#ef444440;">Desvincular ❌</button>
+                </div>
+            `;
+        }
+
+        if (actionsBox) {
+            actionsBox.innerHTML = `
+                <button type="button" class="btn btn-secondary btn-sm" onclick="loadNicheCandidatePacks(true)" style="padding:4px 10px; font-size:11px;">✏️ Trocar Pacote</button>
+            `;
+        }
+        if (candidateContainer) candidateContainer.classList.add('twod-hidden');
+    } else {
+        badge.innerText = '🟡 Não vinculado';
+        badge.style.background = 'rgba(245, 158, 11, 0.15)';
+        badge.style.color = '#fbbf24';
+        badge.style.borderColor = 'rgba(245, 158, 11, 0.4)';
+
+        const campObj = (metaState.campaigns || []).find(c => c.id === campaignId);
+        const nicheSlug = extractNicheFromCampaign(campObj ? campObj.name : '');
+
+        if (summary) {
+            summary.innerHTML = `
+                <span>Esta campanha ainda não está vinculada a um pacote de criativos do OneDrive. Nicho detectado: <strong>${nicheSlug}</strong>.</span>
+            `;
+        }
+
+        if (actionsBox) {
+            actionsBox.innerHTML = `
+                <button type="button" class="btn btn-secondary btn-sm" onclick="loadNicheCandidatePacks(true)" style="padding:4px 10px; font-size:11px;">🔍 Localizar no OneDrive</button>
+            `;
+        }
+
+        // Se houver conjunto base carregado, busca automaticamente os pacotes candidatos
+        if (metaState.selectedAdSetId) {
+            loadNicheCandidatePacks(false);
+        }
+    }
+}
+
+// Busca e exibe os pacotes candidatos do nicho no OneDrive com thumbnails
+async function loadNicheCandidatePacks(forceOpen = true) {
+    const container = document.getElementById('onedrive-candidate-packs-container');
+    if (!container) return;
+
+    const campaignId = metaState.selectedCampaignId;
+    if (!campaignId) {
+        alert('Selecione uma campanha primeiro.');
+        return;
+    }
+
+    const campObj = (metaState.campaigns || []).find(c => c.id === campaignId);
+    const campName = campObj ? campObj.name : '';
+    const nicheSlug = extractNicheFromCampaign(campName);
+
+    if (!nicheSlug) {
+        container.innerHTML = '<div class="text-muted" style="font-size:12px;">Não foi possível identificar o nicho no nome da campanha.</div>';
+        container.classList.remove('twod-hidden');
+        return;
+    }
+
+    container.classList.remove('twod-hidden');
+    container.innerHTML = `<div class="text-muted" style="font-size:12px; padding:8px;">⏳ Buscando pastas para o nicho "<strong>${nicheSlug}</strong>" no OneDrive Nuvem...</div>`;
+
+    let packs = [];
+    try {
+        const resp = await fetch(`${API_BASE_URL}/api/onedrive/niche-packs?niche=${encodeURIComponent(nicheSlug)}`);
+        const data = await resp.json();
+        if (data.success && data.packs) {
+            packs = data.packs;
+        }
+    } catch (e) {
+        console.warn('Erro ao consultar /api/onedrive/niche-packs:', e);
+    }
+
+    // Fallback: busca em oneDriveData.niches (se o usuário conectou via navegador)
+    if (packs.length === 0 && Array.isArray(oneDriveData.niches)) {
+        const normTarget = normalizeText(nicheSlug);
+        const localMatches = oneDriveData.niches.filter(n => {
+            const nNorm = normalizeText(n.name);
+            return nNorm.includes(normTarget) || normTarget.includes(nNorm);
+        });
+        localMatches.forEach(lm => {
+            const allV = [...(lm.videos?.feed || []), ...(lm.videos?.reels || [])];
+            const langs = Array.from(new Set(allV.map(v => v.lang).filter(Boolean)));
+            packs.push({
+                name: lm.name,
+                status: lm.status || 'completed',
+                languages: langs,
+                videos_count: allV.length,
+                feed: lm.videos?.feed || [],
+                reels: lm.videos?.reels || [],
+                sample_thumbs: allV.slice(0, 6).map(v => v.url || '')
+            });
+        });
+    }
+
+    if (packs.length === 0) {
+        container.innerHTML = `
+            <div style="font-size:12px; color:#cbd5e1; padding:10px; background:rgba(255,255,255,0.03); border-radius:6px;">
+                🔍 Nenhuma pasta encontrada no OneDrive para o nicho "<strong>${nicheSlug}</strong>".<br>
+                <span class="text-muted" style="font-size:11px;">Verifique se a pasta com o nome do nicho e data (ex: <code>${nicheSlug} 04.11.26</code>) está na pasta Vídeos do OneDrive.</span>
+            </div>
+        `;
+        return;
+    }
+
+    const currentLink = campaignCreativesMap[campaignId];
+    container.innerHTML = `
+        <div style="font-size:12px; margin-bottom:8px; color:#cbd5e1; display:flex; justify-content:space-between; align-items:center;">
+            <span><strong>${packs.length} pacote(s) encontrado(s)</strong> no OneDrive para o nicho "${nicheSlug}":</span>
+            <span class="text-muted" style="font-size:11px;">Compare as miniaturas com os anúncios do Facebook acima</span>
+        </div>
+    `;
+
+    packs.forEach(pack => {
+        const isCurrent = currentLink && currentLink.niche_pack === pack.name;
+        const card = document.createElement('div');
+        card.className = `candidate-pack-card ${isCurrent ? 'active-pack' : ''}`;
+
+        const langPills = (pack.languages || []).map(l => `<span class="lang-pill ready">🟢 ${l}</span>`).join(' ') || '<span class="text-muted" style="font-size:11px;">Sem subpastas de idioma</span>';
+
+        let thumbsHtml = '';
+        const allVideos = [...(pack.feed || []), ...(pack.reels || [])];
+        if (allVideos.length > 0) {
+            allVideos.slice(0, 6).forEach(v => {
+                const vUrl = v.url || '';
+                const fullUrl = vUrl.startsWith('http') ? vUrl : `${API_BASE_URL}${vUrl}`;
+                thumbsHtml += `
+                    <div style="display:flex; flex-direction:column; align-items:center; gap:2px;">
+                        <video src="${fullUrl}#t=0.5" preload="metadata" muted playsinline class="candidate-pack-thumb-item" title="${v.name || 'Vídeo'} (${v.lang || ''})"></video>
+                        <span style="font-size:10px; color:#94a3b8;">${v.num ? '0' + v.num : v.name}</span>
+                    </div>
+                `;
+            });
+        } else {
+            thumbsHtml = '<div class="text-muted" style="font-size:11px; padding:8px;">Nenhum arquivo .mp4 encontrado nesta pasta.</div>';
+        }
+
+        card.innerHTML = `
+            <div class="candidate-pack-head">
+                <div>
+                    <strong style="font-size:13px; color:#f8fafc;">📁 ${pack.name}</strong>
+                    <div style="margin-top:4px;" class="candidate-pack-langs">${langPills}</div>
+                </div>
+                <div>
+                    ${isCurrent 
+                        ? `<span class="badge-tag" style="background:#10b98125; color:#34d399; border:1px solid #10b98150; font-size:11px;">✅ Pacote Atual</span>`
+                        : `<button type="button" class="btn btn-primary btn-sm btn-link-pack" style="padding:5px 12px; font-size:12px;">📌 Vincular a esta Campanha</button>`
+                    }
+                </div>
+            </div>
+            <div class="candidate-pack-thumbs">
+                ${thumbsHtml}
+            </div>
+        `;
+
+        const btn = card.querySelector('.btn-link-pack');
+        if (btn) {
+            btn.onclick = () => linkCampaignToPack(campaignId, pack);
+        }
+
+        container.appendChild(card);
+    });
+}
+
+// Alerta dinâmico de diferença de idioma e status de criativos no Passo 2
+function updateDuplicatorLanguageNotice() {
+    const noticeEl = document.getElementById('duplicator-lang-notice');
+    if (!noticeEl) return;
+
+    const block = META_COUNTRY_BLOCKS[metaState.activeBlockId];
+    const adset = metaState.selectedAdSet;
+    const campaignId = metaState.selectedCampaignId;
+
+    if (!block || !adset || !campaignId) {
+        noticeEl.classList.add('twod-hidden');
+        return;
+    }
+
+    let baseLang = 'pt';
+    const normAdSetName = (adset.name || '').toLowerCase();
+    if (normAdSetName.includes('espanhol') || normAdSetName.includes('spanish')) {
+        baseLang = 'es';
+    } else if (normAdSetName.includes('inglês') || normAdSetName.includes('ingles') || normAdSetName.includes('english')) {
+        baseLang = 'en';
+    } else if (normAdSetName.includes('francês') || normAdSetName.includes('frances') || normAdSetName.includes('french')) {
+        baseLang = 'fr';
+    } else if (adset.targeting?.locales?.includes(6)) {
+        baseLang = 'es';
+    } else if (adset.targeting?.geo_locations?.countries?.includes('ES') || adset.targeting?.geo_locations?.countries?.includes('MX') || adset.targeting?.geo_locations?.countries?.includes('CO')) {
+        baseLang = 'es';
+    } else if (adset.targeting?.geo_locations?.countries?.includes('FR')) {
+        baseLang = 'fr';
+    }
+
+    const targetLang = (block.langCode || 'es').toLowerCase();
+    const isSameLang = baseLang === targetLang;
+
+    if (isSameLang) {
+        noticeEl.className = 'duplicator-lang-notice notice-success';
+        noticeEl.innerHTML = `
+            <div style="display:flex; align-items:center; gap:8px;">
+                <span>✅</span>
+                <strong>Mesmo Idioma da Origem (${block.title})</strong>
+            </div>
+            <div style="font-size:12px; color:#d1fae5;">
+                O conjunto base e o bloco selecionado compartilham o mesmo idioma (${baseLang.toUpperCase()}). Todos os anúncios, criativos e UTMs serão clonados com precisão instantânea.
+            </div>
+        `;
+        noticeEl.classList.remove('twod-hidden');
+        return;
+    }
+
+    const link = campaignCreativesMap[campaignId];
+    noticeEl.className = 'duplicator-lang-notice';
+
+    if (link && link.niche_pack) {
+        const hasTargetLang = (link.languages || []).some(l => {
+            const normL = normalizeText(l);
+            if (targetLang === 'fr') return normL.includes('franc') || normL.includes('french');
+            if (targetLang === 'es') return normL.includes('espanh') || normL.includes('spanish');
+            if (targetLang === 'en') return normL.includes('ingl') || normL.includes('english');
+            if (targetLang === 'ru') return normL.includes('russ') || normL.includes('russian');
+            if (targetLang === 'ar') return normL.includes('arab') || normL.includes('arabic');
+            return normL.includes(targetLang);
+        });
+
+        if (hasTargetLang) {
+            noticeEl.className = 'duplicator-lang-notice notice-success';
+            noticeEl.innerHTML = `
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <span>✨</span>
+                    <strong>Idioma Internacional Detectado: ${block.title}</strong>
+                </div>
+                <div style="font-size:12px;">
+                    O pacote vinculado <strong>"${link.niche_pack}"</strong> possui a pasta em <strong>${block.title}</strong> no OneDrive!
+                    Ao clicar em Duplicar, o TwoD Hub traduzirá os textos para ${block.langCode.toUpperCase()}, aplicará a tag de URL TranslateX (<code>/${block.langCode}/</code>) e carregará os criativos correspondentes.
+                </div>
+            `;
+        } else {
+            noticeEl.innerHTML = `
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <span style="font-size:16px;">⚠️</span>
+                    <strong>Criativo em ${block.title} Pendente no Pacote "${link.niche_pack}"</strong>
+                </div>
+                <div style="font-size:12px; line-height:1.5;">
+                    O conjunto base está em <strong>${baseLang.toUpperCase()}</strong>, mas o pacote vinculado <code>${link.niche_pack}</code> ainda <strong>NÃO</strong> possui a subpasta em <strong>${block.title}</strong> no OneDrive.<br>
+                    <div style="margin-top:6px; display:flex; gap:10px; flex-wrap:wrap;">
+                        <span>💡 <strong>Opção 1:</strong> Duplicar apenas a estrutura dos conjuntos ($1.00 USD/dia em PAUSED) para subir os anúncios depois no Gerenciador.</span>
+                        <span>💡 <strong>Opção 2:</strong> Subir os vídeos em ${block.title} no OneDrive e clicar em <em>"🔍 Buscar Pastas no OneDrive"</em> acima.</span>
+                    </div>
+                </div>
+            `;
+        }
+    } else {
+        noticeEl.innerHTML = `
+            <div style="display:flex; align-items:center; gap:8px;">
+                <span style="font-size:16px;">⚠️</span>
+                <strong>Atenção: Mudança de Idioma (${baseLang.toUpperCase()} ➔ ${targetLang.toUpperCase()})</strong>
+            </div>
+            <div style="font-size:12px; line-height:1.5;">
+                O conjunto base está em <strong>${baseLang.toUpperCase()}</strong>, mas o bloco selecionado é <strong>${block.title}</strong>.<br>
+                Para carregar automaticamente os vídeos e traduzir os anúncios, vincule a campanha a um pacote de criativos no <strong>Passo 1</strong> acima.
+            </div>
+        `;
+    }
+
+    noticeEl.classList.remove('twod-hidden');
 }
 
 // ========================================================
@@ -2261,6 +2742,7 @@ function selectCountryBlock(blockId) {
     }
 
     renderCountriesGrid();
+    updateDuplicatorLanguageNotice();
 }
 
 // Renderiza o grid de checkboxes dos países do bloco ativo com badges visuais de presença
@@ -2382,6 +2864,7 @@ function toggleAllCountriesInBlock(checked) {
     });
 
     renderCountriesGrid();
+    updateDuplicatorLanguageNotice();
 }
 
 function selectPriorityCountriesOnly() {
@@ -2397,6 +2880,7 @@ function selectPriorityCountriesOnly() {
     });
 
     renderCountriesGrid();
+    updateDuplicatorLanguageNotice();
 }
 
 // Ação rápida: Marca apenas os países que ainda NÃO existem na campanha selecionada
@@ -2414,6 +2898,7 @@ function selectMissingCountriesOnly() {
     });
 
     renderCountriesGrid();
+    updateDuplicatorLanguageNotice();
 }
 
 // Registra mensagens no Terminal em tempo real
@@ -2509,6 +2994,43 @@ async function startBatchDuplication() {
     const initialStatus = document.getElementById('select-initial-status').value || 'PAUSED';
     const nameFormat = document.getElementById('select-name-format').value || 'country_only';
 
+    // Detecta divergência de idioma entre o conjunto base e o bloco
+    let baseLang = 'pt';
+    const normAdSetName = (adsetObj.name || '').toLowerCase();
+    if (normAdSetName.includes('espanhol') || normAdSetName.includes('spanish')) baseLang = 'es';
+    else if (normAdSetName.includes('inglês') || normAdSetName.includes('ingles') || normAdSetName.includes('english')) baseLang = 'en';
+    else if (normAdSetName.includes('francês') || normAdSetName.includes('frances') || normAdSetName.includes('french')) baseLang = 'fr';
+    else if (adsetObj.targeting?.locales?.includes(6)) baseLang = 'es';
+    else if (adsetObj.targeting?.geo_locations?.countries?.includes('ES') || adsetObj.targeting?.geo_locations?.countries?.includes('MX') || adsetObj.targeting?.geo_locations?.countries?.includes('CO')) baseLang = 'es';
+    else if (adsetObj.targeting?.geo_locations?.countries?.includes('FR')) baseLang = 'fr';
+
+    const targetLang = (block.langCode || 'es').toLowerCase();
+    const isLangMismatch = baseLang !== targetLang;
+
+    const currentLink = campaignCreativesMap[campaignId];
+    const hasPackTargetLang = currentLink && (currentLink.languages || []).some(l => {
+        const nL = normalizeText(l);
+        if (targetLang === 'fr') return nL.includes('franc') || nL.includes('french');
+        if (targetLang === 'es') return nL.includes('espanh') || nL.includes('spanish');
+        if (targetLang === 'en') return nL.includes('ingl') || nL.includes('english');
+        return nL.includes(targetLang);
+    });
+
+    let duplicateStructureOnly = false;
+    if (isLangMismatch && !hasPackTargetLang) {
+        const langWarn = `⚠️ DIVERGÊNCIA DE IDIOMA & CRIATIVOS PENDENTES:\n\n` +
+            `• Idioma do Conjunto Base: ${baseLang.toUpperCase()}\n` +
+            `• Idioma do Bloco Selecionado: ${block.title} (${targetLang.toUpperCase()})\n` +
+            `• Pacote OneDrive Vinculado: ${currentLink ? currentLink.niche_pack : 'Nenhum'}\n\n` +
+            `Não foram encontrados criativos em ${block.title} para esta campanha.\n\n` +
+            `Deseja DUPLICAR APENAS A ESTRUTURA DOS CONJUNTOS?\n` +
+            `(Cria os ${countriesToDuplicate.length} conjuntos com orçamento de $1.00 USD, segmentação do país e DSA em status PAUSED, sem anúncios, para você anexar os criativos depois)\n\n` +
+            `• OK = Duplicar apenas a estrutura com segurança (sem anúncios errados)\n` +
+            `• Cancelar = Cancelar para vincular ou subir os criativos primeiro.`;
+        if (!confirm(langWarn)) return;
+        duplicateStructureOnly = true;
+    }
+
     const confirmMsg = `Confirmar duplicação de ${countriesToDuplicate.length} conjuntos no Meta Ads?\n\n` +
         `🎯 CAMPANHA DE DESTINO:\n` +
         `   ${campObj.name}\n` +
@@ -2517,6 +3039,7 @@ async function startBatchDuplication() {
         `   ${adsetObj.name}\n` +
         `   (ID: ${adsetObj.id})\n\n` +
         `• Bloco: ${block.title}\n` +
+        `• Modo de Anúncios: ${duplicateStructureOnly ? 'Apenas Estrutura (Sem Anúncios)' : 'Clonagem Completa de Anúncios'}\n` +
         `• Orçamento por conjunto: $1.00 USD (fixo)\n` +
         `• Status Inicial: ${initialStatus === 'PAUSED' ? 'Pausado (Seguro)' : 'Ativo (Imediato)'}\n` +
         `• Total de novos conjuntos: ${countriesToDuplicate.length}\n\n` +
@@ -2693,37 +3216,41 @@ async function startBatchDuplication() {
                 throw new Error(updateData.error.message || 'Erro ao configurar conjunto clonado');
             }
 
-            // PASSO 5: Clona todos os anúncios/criativos + UTMs (url_tags) do conjunto base para o novo conjunto
+            // PASSO 5: Clona anúncios apenas se NÃO for modo estrutura exclusiva
             let adsCreated = 0;
-            for (const baseAd of baseAds) {
-                if (baseAd.creative && baseAd.creative.id) {
-                    const createAdUrl = `https://graph.facebook.com/${META_GRAPH_VERSION}/${metaState.selectedAccountId}/ads`;
-                    const adData = new URLSearchParams();
-                    adData.append('access_token', token);
-                    adData.append('name', baseAd.name || finalName);
-                    adData.append('adset_id', copiedAdSetId);
-                    adData.append('creative', JSON.stringify({ creative_id: baseAd.creative.id }));
-                    adData.append('status', initialStatus);
-                    if (baseAd.url_tags) {
-                        adData.append('url_tags', baseAd.url_tags);
-                    }
+            if (!duplicateStructureOnly) {
+                for (const baseAd of baseAds) {
+                    if (baseAd.creative && baseAd.creative.id) {
+                        const createAdUrl = `https://graph.facebook.com/${META_GRAPH_VERSION}/${metaState.selectedAccountId}/ads`;
+                        const adData = new URLSearchParams();
+                        adData.append('access_token', token);
+                        adData.append('name', baseAd.name || finalName);
+                        adData.append('adset_id', copiedAdSetId);
+                        adData.append('creative', JSON.stringify({ creative_id: baseAd.creative.id }));
+                        adData.append('status', initialStatus);
+                        if (baseAd.url_tags) {
+                            adData.append('url_tags', baseAd.url_tags);
+                        }
 
-                    const adResp = await fetch(createAdUrl, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                        body: adData.toString()
-                    });
-                    const adResult = await adResp.json();
-                    if (adResult.id) {
-                        adsCreated++;
-                    } else if (adResult.error) {
-                        logMetaTerminal(`⚠️ Anúncio '${baseAd.name}' em ${finalName} falhou: ${adResult.error.message}`, 'warn');
+                        const adResp = await fetch(createAdUrl, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                            body: adData.toString()
+                        });
+                        const adResult = await adResp.json();
+                        if (adResult.id) {
+                            adsCreated++;
+                        } else if (adResult.error) {
+                            logMetaTerminal(`⚠️ Anúncio '${baseAd.name}' em ${finalName} falhou: ${adResult.error.message}`, 'warn');
+                        }
                     }
                 }
             }
 
             successCount++;
-            const adsMsg = adsCreated > 0 ? `com ${adsCreated} anúncio(s)` : 'sem anúncios';
+            const adsMsg = duplicateStructureOnly 
+                ? 'apenas estrutura (sem anúncios - aguardando criativos no idioma)'
+                : (adsCreated > 0 ? `com ${adsCreated} anúncio(s)` : 'sem anúncios');
             logMetaTerminal(`✅ [${currentIdx}/${total}] Conjunto '${finalName}' criado ${adsMsg}! (ID: ${copiedAdSetId})`, 'success');
 
             // Registra o novo conjunto no estado local e atualiza os cards/badges em tempo real
@@ -2931,6 +3458,11 @@ window.toggleDuplicatorTokenBox = toggleDuplicatorTokenBox;
 window.toggleTokenVisibility = toggleTokenVisibility;
 window.testMetaTokenFromUI = testMetaTokenFromUI;
 window.saveMetaSettingsFromUI = saveMetaSettingsFromUI;
+window.loadCampaignCreativeLinks = loadCampaignCreativeLinks;
+window.linkCampaignToPack = linkCampaignToPack;
+window.unlinkCampaignFromPack = unlinkCampaignFromPack;
+window.loadNicheCandidatePacks = loadNicheCandidatePacks;
+window.updateDuplicatorLanguageNotice = updateDuplicatorLanguageNotice;
 
 // ========================================================
 // INICIALIZAÇÃO INFALÍVEL (EXECUTA IMEDIATO SE DOM JÁ CARREGADO)
