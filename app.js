@@ -1754,7 +1754,8 @@ function populateAccountsSelect(accounts) {
     placeholder.innerText = 'Selecione uma conta de anúncios...';
     select.appendChild(placeholder);
 
-    let defaultToSelect = '';
+    let exactDefault = '';
+    let fallbackActive = '';
 
     accounts.forEach(acc => {
         const opt = document.createElement('option');
@@ -1763,15 +1764,14 @@ function populateAccountsSelect(accounts) {
         opt.innerText = `${statusLabel} ${acc.name || 'Sem nome'} (${acc.id}) [${acc.currency || 'USD'}]`;
         select.appendChild(opt);
 
-        if (!defaultToSelect) {
-            if (acc.id === metaState.defaultAccountId) {
-                defaultToSelect = acc.id;
-            } else if (acc.account_status === 1) {
-                defaultToSelect = acc.id;
-            }
+        if (!exactDefault && acc.id === metaState.defaultAccountId) {
+            exactDefault = acc.id;
+        } else if (!fallbackActive && acc.account_status === 1) {
+            fallbackActive = acc.id;
         }
     });
 
+    const defaultToSelect = exactDefault || fallbackActive;
     if (defaultToSelect) {
         select.value = defaultToSelect;
         onMetaAccountSelected();
@@ -1887,7 +1887,7 @@ async function onMetaCampaignSelected() {
 
     const token = getMetaToken();
     try {
-        const url = `https://graph.facebook.com/${META_GRAPH_VERSION}/${campaignId}/adsets?access_token=${encodeURIComponent(token)}&fields=id,name,daily_budget,targeting,status&limit=100`;
+        const url = `https://graph.facebook.com/${META_GRAPH_VERSION}/${campaignId}/adsets?access_token=${encodeURIComponent(token)}&fields=id,name,daily_budget,targeting,status,dsa_beneficiary,dsa_payor,regional_regulated_categories,regional_regulation_identities&limit=100`;
         const resp = await fetch(url);
         const data = await resp.json();
 
@@ -2390,10 +2390,10 @@ async function startBatchDuplication() {
 
     const budgetInCents = 100; // Sempre 1 dólar ($1.00 USD = 100 centavos)
 
-    // Busca previamente todos os anúncios e criativos do conjunto base
+    // Busca previamente todos os anúncios e criativos (incluindo url_tags/UTMs) do conjunto base
     let baseAds = [];
     try {
-        const adsUrl = `https://graph.facebook.com/${META_GRAPH_VERSION}/${metaState.selectedAdSetId}/ads?access_token=${encodeURIComponent(token)}&fields=id,name,status,creative&limit=50`;
+        const adsUrl = `https://graph.facebook.com/${META_GRAPH_VERSION}/${metaState.selectedAdSetId}/ads?access_token=${encodeURIComponent(token)}&fields=id,name,status,url_tags,creative&limit=50`;
         const adsResp = await fetch(adsUrl);
         const adsData = await adsResp.json();
         if (adsData.data && Array.isArray(adsData.data)) {
@@ -2403,6 +2403,15 @@ async function startBatchDuplication() {
     } catch (e) {
         console.warn('Não foi possível ler anúncios prévios do conjunto:', e);
     }
+
+    const EU_DSA_SET = new Set([
+        'AT', 'BE', 'BG', 'HR', 'CY', 'CZ', 'DK', 'EE', 'FI', 'FR',
+        'DE', 'GR', 'HU', 'IE', 'IT', 'LV', 'LT', 'LU', 'MT', 'NL',
+        'PL', 'PT', 'RO', 'SK', 'SI', 'ES', 'SE'
+    ]);
+    const siblingDsaAdset = (metaState.adsets || []).find(a => a.dsa_beneficiary);
+    const fallbackDsaName = metaState.selectedAdSet?.dsa_beneficiary || siblingDsaAdset?.dsa_beneficiary || 'Futuretech Dynamics LLC';
+    const baseRegId = metaState.selectedAdSet?.regional_regulation_identities || null;
 
     let successCount = 0;
     let failCount = 0;
@@ -2422,9 +2431,15 @@ async function startBatchDuplication() {
         logMetaTerminal(`[${currentIdx}/${total}] Duplicando conjunto para '${country.adSetName}' (${country.code})...`, 'info');
 
         try {
-            // PASSO 1: Clona a estrutura do conjunto base via POST /{adset_id}/copies
-            const copyUrl = `https://graph.facebook.com/${META_GRAPH_VERSION}/${metaState.selectedAdSetId}/copies?access_token=${encodeURIComponent(token)}`;
-            const copyResp = await fetch(copyUrl, { method: 'POST' });
+            // PASSO 1: Clona a estrutura do conjunto base sempre em PAUSED primeiro para evitar gasto antes de ajustar o país
+            const copyForm = new URLSearchParams();
+            copyForm.append('access_token', token);
+            copyForm.append('status_option', 'PAUSED');
+            const copyResp = await fetch(`https://graph.facebook.com/${META_GRAPH_VERSION}/${metaState.selectedAdSetId}/copies`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: copyForm.toString()
+            });
             const copyData = await copyResp.json();
 
             if (copyData.error) {
@@ -2441,35 +2456,84 @@ async function startBatchDuplication() {
                 finalName = `${block.id.replace('BLOCO-', 'B')} - ${country.adSetName}`;
             }
 
-            // PASSO 3: Configura segmentação de país exclusiva
+            // PASSO 3: Configura segmentação preservando idade/targeting_automation do conjunto base (sem locales herdados)
+            const baseT = metaState.selectedAdSet?.targeting ? JSON.parse(JSON.stringify(metaState.selectedAdSet.targeting)) : {};
+            delete baseT.locales;
+            if (country.code !== 'BR') delete baseT.brand_safety_content_filter_levels;
             const targeting = {
+                ...baseT,
                 geo_locations: {
                     countries: [country.code],
                     location_types: ['frequently_in', 'home', 'recent']
                 }
             };
 
-            // PASSO 4: Atualiza o conjunto clonado via POST /{copied_id}
-            const updateUrl = `https://graph.facebook.com/${META_GRAPH_VERSION}/${copiedAdSetId}`;
-            const formData = new URLSearchParams();
-            formData.append('access_token', token);
-            formData.append('name', finalName);
-            formData.append('daily_budget', budgetInCents.toString());
-            formData.append('status', initialStatus);
-            formData.append('targeting', JSON.stringify(targeting));
+            // PASSO 4: Atualiza o conjunto clonado via POST /{copied_id} com retries p/ DSA/regulação
+            const updatePayload = {
+                name: finalName,
+                daily_budget: budgetInCents.toString(),
+                status: initialStatus,
+                targeting
+            };
+            if (EU_DSA_SET.has(country.code)) {
+                updatePayload.dsa_beneficiary = fallbackDsaName;
+                updatePayload.dsa_payor = metaState.selectedAdSet?.dsa_payor || siblingDsaAdset?.dsa_payor || fallbackDsaName;
+            }
+            if (baseRegId?.universal_beneficiary) {
+                updatePayload.regional_regulation_identities = baseRegId;
+                if (country.code === 'ES') {
+                    updatePayload.regional_regulated_categories = ['SPAIN_FINSERV', 'VOLUNTARY_VERIFICATION'];
+                } else if (country.code === 'BR') {
+                    updatePayload.regional_regulated_categories = ['BRAZIL_REGULATION', 'VOLUNTARY_VERIFICATION'];
+                } else {
+                    updatePayload.regional_regulated_categories = ['VOLUNTARY_VERIFICATION'];
+                }
+            }
 
-            const updateResp = await fetch(updateUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                body: formData.toString()
-            });
-            const updateData = await updateResp.json();
+            const postAdSetUpdate = async (payloadObj) => {
+                const formData = new URLSearchParams();
+                formData.append('access_token', token);
+                Object.entries(payloadObj).forEach(([k, v]) => {
+                    if (v !== undefined && v !== null) {
+                        formData.append(k, typeof v === 'object' ? JSON.stringify(v) : String(v));
+                    }
+                });
+                const r = await fetch(`https://graph.facebook.com/${META_GRAPH_VERSION}/${copiedAdSetId}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: formData.toString()
+                });
+                return r.json();
+            };
+
+            let updateData = await postAdSetUpdate(updatePayload);
+            const retried = new Set();
+            for (let attempt = 0; attempt < 4 && updateData.error; attempt++) {
+                const errMsg = (updateData.error.message || '').toLowerCase();
+                if (!retried.has('reg') && (errMsg.includes('regional_regulat') || errMsg.includes('voluntary_verification') || errMsg.includes('brazil_regulation'))) {
+                    retried.add('reg');
+                    delete updatePayload.regional_regulated_categories;
+                    delete updatePayload.regional_regulation_identities;
+                } else if (!retried.has('dsa') && (errMsg.includes('dsa_beneficiary') || errMsg.includes('dsa_payor'))) {
+                    retried.add('dsa');
+                    delete updatePayload.dsa_beneficiary;
+                    delete updatePayload.dsa_payor;
+                } else if (!retried.has('targeting') && (errMsg.includes('targeting') || errMsg.includes('advantage_audience'))) {
+                    retried.add('targeting');
+                    updatePayload.targeting = {
+                        geo_locations: { countries: [country.code], location_types: ['frequently_in', 'home', 'recent'] }
+                    };
+                } else {
+                    break;
+                }
+                updateData = await postAdSetUpdate(updatePayload);
+            }
 
             if (updateData.error) {
                 throw new Error(updateData.error.message || 'Erro ao configurar conjunto clonado');
             }
 
-            // PASSO 5: Clona todos os anúncios/criativos do conjunto base para o novo conjunto
+            // PASSO 5: Clona todos os anúncios/criativos + UTMs (url_tags) do conjunto base para o novo conjunto
             let adsCreated = 0;
             for (const baseAd of baseAds) {
                 if (baseAd.creative && baseAd.creative.id) {
@@ -2480,6 +2544,9 @@ async function startBatchDuplication() {
                     adData.append('adset_id', copiedAdSetId);
                     adData.append('creative', JSON.stringify({ creative_id: baseAd.creative.id }));
                     adData.append('status', initialStatus);
+                    if (baseAd.url_tags) {
+                        adData.append('url_tags', baseAd.url_tags);
+                    }
 
                     const adResp = await fetch(createAdUrl, {
                         method: 'POST',
@@ -2487,7 +2554,11 @@ async function startBatchDuplication() {
                         body: adData.toString()
                     });
                     const adResult = await adResp.json();
-                    if (adResult.id) adsCreated++;
+                    if (adResult.id) {
+                        adsCreated++;
+                    } else if (adResult.error) {
+                        logMetaTerminal(`⚠️ Anúncio '${baseAd.name}' em ${finalName} falhou: ${adResult.error.message}`, 'warn');
+                    }
                 }
             }
 
