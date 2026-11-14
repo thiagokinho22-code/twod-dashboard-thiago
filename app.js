@@ -3,50 +3,31 @@
 // ========================================================
 
 const STORAGE_KEYS = {
-    USERS: 'twod_users_db',
-    CURRENT_USER: 'twod_logged_user',
     SITES: 'twod_fun_sites',
+    CURRENT_USER: 'twod_logged_user',
+    AUTH_TOKEN: 'twod_auth_token',
+    MEDIA_TOKEN: 'twod_media_token',
     ACTIVE_TAB: 'twod_active_tab',
     META_TOKEN: 'twod_meta_token',
     META_ACCOUNT: 'twod_meta_default_account'
 };
 
-// 1. DADOS INICIAIS (SEED) SE NÃO EXISTIREM
-const DEFAULT_USERS = [
-    {
-        id: 'usr_thiago',
-        username: 'thiago',
-        name: 'Thiago',
-        role: 'Administrador',
-        password: '123456',
-        themeMode: 'dark', // 'light', 'dark', 'auto'
-        scheduleStart: '06:00',
-        scheduleEnd: '18:00',
-        lastLogin: 'Agora'
-    },
-    {
-        id: 'usr_alexandre',
-        username: 'alexandre',
-        name: 'Alexandre',
-        role: 'Operador',
-        password: '123456',
-        themeMode: 'dark',
-        scheduleStart: '06:00',
-        scheduleEnd: '18:00',
-        lastLogin: 'Ontem'
-    },
-    {
-        id: 'usr_wesley',
-        username: 'wesley',
-        name: 'Wesley',
-        role: 'Operador',
-        password: '123456',
-        themeMode: 'auto',
-        scheduleStart: '07:00',
-        scheduleEnd: '19:00',
-        lastLogin: 'Há 2 dias'
+const CLOUD_BACKEND_URL = 'https://twod-dashboard-thiago.onrender.com';
+
+function getDefaultBackendUrl() {
+    if (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
+        return window.location.origin;
     }
-];
+    if (typeof window !== 'undefined' && window.location.hostname.endsWith('.onrender.com')) {
+        return window.location.origin;
+    }
+    return CLOUD_BACKEND_URL;
+}
+
+let API_BASE_URL = (localStorage.getItem('twod_backend_url') || getDefaultBackendUrl()).replace(/\/+$/, '');
+
+// Limpa cache legado inseguro que armazenava usuários com senha no navegador
+try { localStorage.removeItem('twod_users_db'); } catch (e) { }
 
 const DEFAULT_SITES = [
     { id: 1, name: 'Ai', lang: 'pt', index: 0, hidden: false },
@@ -60,32 +41,7 @@ const DEFAULT_SITES = [
     { id: 9, name: 'Twodcompany (Último)', lang: 'es', index: 9, hidden: false }
 ];
 
-// Estado da Aplicação Seguro com Tratamento de Exceção
-let users = [...DEFAULT_USERS];
-try {
-    const rawUsers = localStorage.getItem(STORAGE_KEYS.USERS);
-    if (rawUsers) {
-        const parsed = JSON.parse(rawUsers);
-        if (Array.isArray(parsed) && parsed.length > 0) users = parsed;
-    }
-} catch (e) {
-    console.warn('Recuperando usuários padrão devido a erro no localStorage:', e);
-    users = [...DEFAULT_USERS];
-}
-
-// Migração automática: atualiza 'auxiliar2' para 'wesley' se existir no localStorage anterior
-let migrated = false;
-users = users.map(u => {
-    if (u && u.username === 'auxiliar2') {
-        migrated = true;
-        return { ...u, id: 'usr_wesley', username: 'wesley', name: 'Wesley' };
-    }
-    return u;
-});
-if (migrated) {
-    try { localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users)); } catch (e) { }
-}
-
+let users = [];
 let sites = [...DEFAULT_SITES];
 try {
     const rawSites = localStorage.getItem(STORAGE_KEYS.SITES);
@@ -97,45 +53,163 @@ try {
     sites = [...DEFAULT_SITES];
 }
 
-// Sessão do usuário: restaura do localStorage se houver sessão salva
 let currentUser = null;
 try {
     const rawCur = localStorage.getItem(STORAGE_KEYS.CURRENT_USER);
     if (rawCur) {
         const parsed = JSON.parse(rawCur);
-        if (parsed && parsed.username) currentUser = parsed;
+        if (parsed && parsed.username) {
+            delete parsed.password;
+            currentUser = parsed;
+        }
     }
 } catch (e) { }
 
-function saveUsers() {
-    try { localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users)); } catch (e) { }
+let _servicesBootstrapped = false;
+
+function getAuthToken() {
+    try { return localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN) || ''; } catch (e) { return ''; }
 }
+
+function getMediaToken() {
+    try { return localStorage.getItem(STORAGE_KEYS.MEDIA_TOKEN) || ''; } catch (e) { return ''; }
+}
+
+function setAuthSession(data) {
+    if (!data) return;
+    if (data.token) {
+        try { localStorage.setItem(STORAGE_KEYS.AUTH_TOKEN, data.token); } catch (e) { }
+    }
+    if (data.media_token) {
+        try { localStorage.setItem(STORAGE_KEYS.MEDIA_TOKEN, data.media_token); } catch (e) { }
+    }
+    if (data.user) {
+        const safeU = { ...data.user };
+        delete safeU.password;
+        currentUser = safeU;
+        try { localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(safeU)); } catch (e) { }
+    }
+}
+
+function clearAuthSession() {
+    currentUser = null;
+    _servicesBootstrapped = false;
+    try {
+        localStorage.removeItem(STORAGE_KEYS.AUTH_TOKEN);
+        localStorage.removeItem(STORAGE_KEYS.MEDIA_TOKEN);
+        localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
+    } catch (e) { }
+}
+
+function withMediaAuth(url) {
+    if (!url || typeof url !== 'string') return url || '';
+    const mTok = getMediaToken();
+    if (!mTok) return url;
+    const hashIdx = url.indexOf('#');
+    const basePart = hashIdx >= 0 ? url.slice(0, hashIdx) : url;
+    const hashPart = hashIdx >= 0 ? url.slice(hashIdx) : '';
+    const isMediaPath = /\/api\/(graph\/thumb|graph\/file|audio|video)\//i.test(basePart);
+    if (!isMediaPath) return url;
+    const cleaned = basePart.replace(/([?&])t=[^&]*(&|$)/, (_, p1, p2) => (p1 === '?' && p2) ? '?' : (p2 ? p1 : '')).replace(/[?&]$/, '');
+    const sep = cleaned.includes('?') ? '&' : '?';
+    return `${cleaned}${sep}t=${encodeURIComponent(mTok)}${hashPart}`;
+}
+
+async function apiFetch(pathOrUrl, options = {}) {
+    const url = (typeof pathOrUrl === 'string' && (pathOrUrl.startsWith('http://') || pathOrUrl.startsWith('https://')))
+        ? pathOrUrl
+        : `${API_BASE_URL}${pathOrUrl.startsWith('/') ? '' : '/'}${pathOrUrl}`;
+
+    const headers = new Headers(options.headers || {});
+    const authTok = getAuthToken();
+    if (authTok && !headers.has('Authorization')) {
+        headers.set('Authorization', `Bearer ${authTok}`);
+    }
+
+    const resp = await fetch(url, { ...options, headers });
+    if (resp.status === 401 || resp.status === 403) {
+        try {
+            const errData = await resp.clone().json();
+            if (errData && errData.auth_error) {
+                if (errData.code === 'PASSWORD_CHANGE_REQUIRED') {
+                    showForcePasswordModal();
+                } else {
+                    clearAuthSession();
+                    showLogin(errData.error || 'Sessão expirada. Faça login novamente.');
+                }
+            }
+        } catch (e) { }
+    }
+    return resp;
+}
+
+window.apiFetch = apiFetch;
+window.withMediaAuth = withMediaAuth;
 
 function saveSites() {
     try { localStorage.setItem(STORAGE_KEYS.SITES, JSON.stringify(sites)); } catch (e) { }
 }
 
 // ========================================================
-// SISTEMA DE AUTENTICAÇÃO E SESSÃO
+// SISTEMA DE AUTENTICAÇÃO E SESSÃO (VALIDADO NO BACKEND)
 // ========================================================
 
-function checkSession() {
-    if (currentUser && currentUser.username) {
-        showApp();
-    } else {
+async function checkSession() {
+    const authTok = getAuthToken();
+    if (!authTok) {
         showLogin();
+        return;
+    }
+
+    const loginBtn = document.getElementById('btn-login-submit');
+    if (loginBtn) {
+        loginBtn.disabled = true;
+        loginBtn.innerText = '⏳ Verificando sessão segura...';
+    }
+
+    try {
+        const resp = await fetch(`${API_BASE_URL}/api/auth/me`, {
+            headers: { 'Authorization': `Bearer ${authTok}` }
+        });
+        const data = await resp.json();
+
+        if (!resp.ok || !data.success || !data.user) {
+            clearAuthSession();
+            showLogin();
+            return;
+        }
+
+        setAuthSession(data);
+        if (data.must_change_password) {
+            showForcePasswordModal();
+        } else {
+            showApp();
+            initAuthenticatedApp();
+        }
+    } catch (e) {
+        console.warn('Falha ao validar sessão com backend:', e);
+        showLogin('Não foi possível conectar ao servidor de autenticação.');
+    } finally {
+        if (loginBtn) {
+            loginBtn.disabled = false;
+            loginBtn.innerText = 'Acessar Painel';
+        }
     }
 }
 
-function showLogin() {
-    currentUser = null;
-    try { localStorage.removeItem(STORAGE_KEYS.CURRENT_USER); } catch (e) { }
+function showLogin(errorMsg = '') {
+    clearAuthSession();
 
     const loginEl = document.getElementById('login-screen');
+    const forceEl = document.getElementById('force-password-screen');
     const appEl = document.getElementById('app-container');
     const errBox = document.getElementById('login-error');
     const pwdInput = document.getElementById('login-password');
 
+    if (forceEl) {
+        forceEl.style.display = 'none';
+        forceEl.classList.add('twod-hidden');
+    }
     if (loginEl) {
         loginEl.style.display = 'flex';
         loginEl.classList.remove('twod-hidden');
@@ -144,22 +218,64 @@ function showLogin() {
         appEl.style.display = 'none';
         appEl.classList.add('twod-hidden');
     }
-    if (errBox) errBox.classList.add('twod-hidden');
+    if (errBox) {
+        if (errorMsg) {
+            errBox.innerText = errorMsg;
+            errBox.classList.remove('twod-hidden');
+        } else {
+            errBox.classList.add('twod-hidden');
+        }
+    }
     if (pwdInput) pwdInput.value = '';
 }
 
+function showForcePasswordModal() {
+    const loginEl = document.getElementById('login-screen');
+    const forceEl = document.getElementById('force-password-screen');
+    const appEl = document.getElementById('app-container');
+    const lbl = document.getElementById('force-pwd-user-label');
+    const errBox = document.getElementById('force-pwd-error');
+    const p1 = document.getElementById('force-new-pwd');
+    const p2 = document.getElementById('force-confirm-pwd');
+
+    if (loginEl) {
+        loginEl.style.display = 'none';
+        loginEl.classList.add('twod-hidden');
+    }
+    if (appEl) {
+        appEl.style.display = 'none';
+        appEl.classList.add('twod-hidden');
+    }
+    if (forceEl) {
+        forceEl.style.display = 'flex';
+        forceEl.classList.remove('twod-hidden');
+    }
+    if (lbl && currentUser) {
+        lbl.innerText = `Olá ${currentUser.name || currentUser.username} (@${currentUser.username}) — defina sua senha pessoal para liberar o painel.`;
+    }
+    if (errBox) errBox.classList.add('twod-hidden');
+    if (p1) p1.value = '';
+    if (p2) p2.value = '';
+    if (p1) setTimeout(() => p1.focus(), 60);
+}
+
 function showApp() {
-    if (!currentUser || !currentUser.username) {
+    if (!currentUser || !currentUser.username || !getAuthToken()) {
         showLogin();
         return;
     }
 
     const loginEl = document.getElementById('login-screen');
+    const forceEl = document.getElementById('force-password-screen');
     const appEl = document.getElementById('app-container');
 
     if (loginEl) {
         loginEl.style.display = 'none';
         loginEl.classList.add('twod-hidden');
+    }
+    if (forceEl) {
+        forceEl.style.display = 'none';
+        forceEl.classList.add('twod-hidden');
     }
     if (appEl) {
         appEl.style.display = 'flex';
@@ -173,7 +289,6 @@ function showApp() {
     if (roleEl) roleEl.innerText = currentUser.role || 'Operador';
     if (avatarEl) avatarEl.innerText = (currentUser.name || 'U').charAt(0).toUpperCase();
 
-    // Controle de permissão: esconde abas de admin para operadores
     const isAdmin = currentUser.role === 'Administrador';
     document.querySelectorAll('.admin-only').forEach(el => {
         if (isAdmin) {
@@ -186,55 +301,127 @@ function showApp() {
     try { applyUserTheme(); } catch (e) { }
     try { renderSitesTable(); } catch (e) { }
     if (isAdmin) {
-        try { renderUsersTable(); } catch (e) { }
+        try { loadUsersFromBackend(); } catch (e) { }
     }
     try { initTabs(); } catch (e) { }
 }
 
-function handleLogin(e) {
+function initAuthenticatedApp() {
+    if (_servicesBootstrapped) return;
+    _servicesBootstrapped = true;
+    checkSavedOneDriveHandle();
+    initMetaApi();
+}
+
+async function handleLogin(e) {
     if (e && e.preventDefault) {
         e.preventDefault();
         e.stopPropagation();
     }
-    try {
-        const uEl = document.getElementById('login-username');
-        const pEl = document.getElementById('login-password');
-        const usernameInput = (uEl ? uEl.value : '').trim().toLowerCase();
-        const passwordInput = (pEl ? pEl.value : '').trim();
+    const uEl = document.getElementById('login-username');
+    const pEl = document.getElementById('login-password');
+    const errBox = document.getElementById('login-error');
+    const loginBtn = document.getElementById('btn-login-submit');
+    const usernameInput = (uEl ? uEl.value : '').trim().toLowerCase();
+    const passwordInput = (pEl ? pEl.value : '').trim();
 
-        if (!usernameInput || !passwordInput) {
-            alert('Por favor, digite o usuário e a senha.');
+    if (!usernameInput || !passwordInput) {
+        alert('Por favor, digite o usuário e a senha.');
+        return false;
+    }
+
+    if (errBox) errBox.classList.add('twod-hidden');
+    if (loginBtn) {
+        loginBtn.disabled = true;
+        loginBtn.innerText = '⏳ Autenticando no servidor...';
+    }
+
+    try {
+        const resp = await fetch(`${API_BASE_URL}/api/auth/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: usernameInput, password: passwordInput })
+        });
+        const data = await resp.json();
+
+        if (!resp.ok || !data.success) {
+            if (errBox) {
+                errBox.innerText = data.error || 'Usuário ou senha incorretos.';
+                errBox.classList.remove('twod-hidden');
+            }
             return false;
         }
 
-        if (!Array.isArray(users)) users = [...DEFAULT_USERS];
-
-        let user = users.find(u => u && u.username && u.username.toLowerCase() === usernameInput && u.password === passwordInput);
-
-        if (!user) {
-            const defaultMatch = DEFAULT_USERS.find(u => u.username.toLowerCase() === usernameInput && u.password === passwordInput);
-            if (defaultMatch) {
-                user = { ...defaultMatch };
-                users.push(user);
-                saveUsers();
-            }
-        }
-
-        const errBox = document.getElementById('login-error');
-        if (user) {
-            user.lastLogin = 'Agora';
-            saveUsers();
-            currentUser = user;
-            try { localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(currentUser)); } catch (e) { }
-            if (errBox) errBox.classList.add('twod-hidden');
-            showApp();
+        setAuthSession(data);
+        if (data.must_change_password) {
+            showForcePasswordModal();
         } else {
-            if (errBox) errBox.classList.remove('twod-hidden');
+            showApp();
+            initAuthenticatedApp();
         }
     } catch (err) {
         console.error('Erro no handleLogin:', err);
+        if (errBox) {
+            errBox.innerText = 'Falha ao conectar no servidor Render. Aguarde alguns segundos e tente novamente.';
+            errBox.classList.remove('twod-hidden');
+        }
+    } finally {
+        if (loginBtn) {
+            loginBtn.disabled = false;
+            loginBtn.innerText = 'Acessar Painel';
+        }
     }
     return false;
+}
+
+async function submitForcedPasswordChange(e) {
+    if (e && e.preventDefault) e.preventDefault();
+    const p1 = (document.getElementById('force-new-pwd')?.value || '').trim();
+    const p2 = (document.getElementById('force-confirm-pwd')?.value || '').trim();
+    const errBox = document.getElementById('force-pwd-error');
+    const btn = document.getElementById('btn-force-pwd-submit');
+
+    const showErr = (msg) => {
+        if (errBox) {
+            errBox.innerText = msg;
+            errBox.classList.remove('twod-hidden');
+        } else {
+            alert(msg);
+        }
+    };
+
+    if (p1.length < 6) return showErr('A nova senha deve ter pelo menos 6 caracteres.');
+    if (p1 === '123456') return showErr('A nova senha não pode ser 123456. Escolha uma senha pessoal.');
+    if (p1 !== p2) return showErr('As duas senhas digitadas não coincidem.');
+
+    if (errBox) errBox.classList.add('twod-hidden');
+    if (btn) {
+        btn.disabled = true;
+        btn.innerText = '⏳ Salvando senha...';
+    }
+
+    try {
+        const resp = await apiFetch('/api/auth/change-password', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ new_password: p1 })
+        });
+        const data = await resp.json();
+        if (!resp.ok || !data.success) {
+            return showErr(data.error || 'Não foi possível atualizar a senha.');
+        }
+
+        setAuthSession(data);
+        showApp();
+        initAuthenticatedApp();
+    } catch (err) {
+        showErr('Erro de conexão ao salvar nova senha: ' + err.message);
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerText = '🔒 Salvar Senha e Entrar';
+        }
+    }
 }
 
 const loginForm = document.getElementById('login-form');
@@ -245,33 +432,10 @@ if (loginForm) {
     });
 }
 
-// Suporte para tecla Enter nos campos de login
-['login-username', 'login-password'].forEach(id => {
-    const el = document.getElementById(id);
-    if (el) {
-        el.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                handleLogin(e);
-            }
-        });
-    }
-});
-
-function quickLogin(username, password) {
-    const uInput = document.getElementById('login-username');
-    const pInput = document.getElementById('login-password');
-    if (uInput) uInput.value = username;
-    if (pInput) pInput.value = password;
-    handleLogin();
-}
-
 const btnLogout = document.getElementById('btn-logout');
 if (btnLogout) {
     btnLogout.addEventListener('click', (e) => {
         if (e && e.preventDefault) e.preventDefault();
-        currentUser = null;
-        try { localStorage.removeItem(STORAGE_KEYS.CURRENT_USER); } catch (e) { }
         showLogin();
     });
 }
@@ -357,12 +521,20 @@ function saveScheduleTimes() {
     evaluateTheme();
 }
 
-function saveUserPreferences() {
-    const idx = users.findIndex(u => u.username === currentUser.username);
-    if (idx !== -1) {
-        users[idx] = currentUser;
-        saveUsers();
-    }
+async function saveUserPreferences() {
+    if (!currentUser) return;
+    try { localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(currentUser)); } catch (e) { }
+    try {
+        await apiFetch('/api/users/preferences', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                themeMode: currentUser.themeMode,
+                scheduleStart: currentUser.scheduleStart,
+                scheduleEnd: currentUser.scheduleEnd
+            })
+        });
+    } catch (e) { }
 }
 
 // Relógio em Tempo Real e Checagem Periódica de Horário
@@ -547,8 +719,21 @@ function saveNewSite(e) {
 }
 
 // ========================================================
-// GESTÃO DE USUÁRIOS (ADMIN ONLY)
+// GESTÃO DE USUÁRIOS (ADMIN ONLY — VALIDADA NO BACKEND)
 // ========================================================
+
+async function loadUsersFromBackend() {
+    try {
+        const resp = await apiFetch('/api/users');
+        const data = await resp.json();
+        if (resp.ok && data.success && Array.isArray(data.users)) {
+            users = data.users;
+            renderUsersTable();
+        }
+    } catch (e) {
+        console.warn('Falha ao carregar usuários do servidor:', e);
+    }
+}
 
 function renderUsersTable() {
     const tbody = document.getElementById('users-table-body');
@@ -557,21 +742,22 @@ function renderUsersTable() {
 
     users.forEach(u => {
         const tr = document.createElement('tr');
-        const isSelf = u.username === currentUser.username;
+        const isSelf = currentUser && u.username === currentUser.username;
 
         tr.innerHTML = `
             <td>
-                <strong>${u.name}</strong> 
-                <span style="font-size: 11px; color: var(--text-muted);">(@${u.username})</span>
+                <strong>${escHtml(u.name)}</strong> 
+                <span style="font-size: 11px; color: var(--text-muted);">(@${escHtml(u.username)})</span>
                 ${isSelf ? '<span class="badge-status status-active" style="margin-left: 6px;">Você</span>' : ''}
+                ${u.must_change_password ? '<span class="badge-status status-pending" style="margin-left: 6px;">⏳ Troca no 1º acesso</span>' : ''}
             </td>
-            <td><span class="badge-tag">${u.role}</span></td>
+            <td><span class="badge-tag">${escHtml(u.role)}</span></td>
             <td>${u.themeMode === 'auto' ? '⏰ Automático' : (u.themeMode === 'light' ? '☀️ Claro' : '🌙 Escuro')}</td>
-            <td><span style="color: var(--text-muted); font-size: 12px;">${u.lastLogin || 'Nunca'}</span></td>
+            <td><span style="color: var(--text-muted); font-size: 12px;">${escHtml(u.lastLogin || 'Nunca')}</span></td>
             <td>
                 ${!isSelf ? `
-                    <button class="btn-icon-action" onclick="resetUserPassword('${u.username}')" title="Resetar Senha">🔑</button>
-                    <button class="btn-icon-action" onclick="deleteUser('${u.username}')" title="Excluir Usuário">🗑️</button>
+                    <button class="btn-icon-action" onclick="resetUserPassword('${escHtml(u.username)}')" title="Resetar Senha">🔑</button>
+                    <button class="btn-icon-action" onclick="deleteUser('${escHtml(u.username)}')" title="Excluir Usuário">🗑️</button>
                 ` : `<span style="font-size: 11px; color: var(--text-muted);">Conta ativa</span>`}
             </td>
         `;
@@ -583,76 +769,91 @@ function openAddUserModal() {
     document.getElementById('modal-user').classList.remove('twod-hidden');
 }
 
-function saveNewUser(e) {
+async function saveNewUser(e) {
     e.preventDefault();
     const name = document.getElementById('new-user-name').value.trim();
-    const pwd = document.getElementById('new-user-pwd').value;
+    const pwd = document.getElementById('new-user-pwd').value.trim();
     const role = document.getElementById('new-user-role').value;
 
     const username = name.toLowerCase().replace(/\s+/g, '');
-
-    if (users.find(u => u.username === username)) {
-        alert('Este nome de usuário já existe!');
+    if (!username || pwd.length < 6) {
+        alert('Informe nome e senha provisória com pelo menos 6 caracteres.');
         return;
     }
 
-    const newUser = {
-        id: 'usr_' + Date.now(),
-        username,
-        name,
-        role,
-        password: pwd,
-        themeMode: 'dark',
-        scheduleStart: '06:00',
-        scheduleEnd: '18:00',
-        lastLogin: 'Nunca'
-    };
-
-    users.push(newUser);
-    saveUsers();
-    renderUsersTable();
-    closeModal('modal-user');
-    document.getElementById('form-add-user').reset();
-    alert(`Usuário @${username} criado com sucesso!`);
-}
-
-function resetUserPassword(username) {
-    const target = users.find(u => u.username === username);
-    if (!target) return;
-    const nova = prompt(`Digite a nova senha para ${target.name}:`, '123456');
-    if (nova) {
-        target.password = nova;
-        saveUsers();
+    try {
+        const resp = await apiFetch('/api/users', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, username, password: pwd, role })
+        });
+        const data = await resp.json();
+        if (!resp.ok || !data.success) {
+            alert(data.error || 'Erro ao criar usuário.');
+            return;
+        }
+        users.push(data.user);
         renderUsersTable();
-        alert('Senha alterada com sucesso!');
+        closeModal('modal-user');
+        document.getElementById('form-add-user').reset();
+        alert(`Usuário @${username} criado com sucesso! Ele deverá trocar a senha no primeiro login.`);
+    } catch (err) {
+        alert('Erro de conexão ao criar usuário: ' + err.message);
     }
 }
 
-function deleteUser(username) {
+async function resetUserPassword(username) {
+    const target = users.find(u => u.username === username);
+    if (!target) return;
+    const nova = prompt(`Digite a nova senha provisória para ${target.name} (será trocada no próximo acesso):`, '123456');
+    if (nova && nova.trim().length >= 6) {
+        try {
+            const resp = await apiFetch('/api/users/reset-password', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, new_password: nova.trim() })
+            });
+            const data = await resp.json();
+            if (!resp.ok || !data.success) {
+                alert(data.error || 'Erro ao resetar senha.');
+                return;
+            }
+            const idx = users.findIndex(u => u.username === username);
+            if (idx !== -1 && data.user) users[idx] = data.user;
+            renderUsersTable();
+            alert('Senha provisória atualizada! O usuário será obrigado a definir uma nova no próximo login.');
+        } catch (err) {
+            alert('Erro ao resetar senha: ' + err.message);
+        }
+    } else if (nova !== null) {
+        alert('A senha provisória deve ter pelo menos 6 caracteres.');
+    }
+}
+
+async function deleteUser(username) {
     if (confirm(`Deseja realmente remover o usuário @${username}?`)) {
-        users = users.filter(u => u.username !== username);
-        saveUsers();
-        renderUsersTable();
+        try {
+            const resp = await apiFetch('/api/users/delete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username })
+            });
+            const data = await resp.json();
+            if (!resp.ok || !data.success) {
+                alert(data.error || 'Erro ao remover usuário.');
+                return;
+            }
+            users = users.filter(u => u.username !== username);
+            renderUsersTable();
+        } catch (err) {
+            alert('Erro ao remover usuário: ' + err.message);
+        }
     }
 }
 
 // ========================================================
 // INTEGRAÇÃO ONEDRIVE & LEITOR DE ARQUIVOS NATIVO
 // ========================================================
-
-const CLOUD_BACKEND_URL = 'https://twod-dashboard-thiago.onrender.com';
-
-function getDefaultBackendUrl() {
-    if (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
-        return window.location.origin;
-    }
-    if (typeof window !== 'undefined' && window.location.hostname.endsWith('.onrender.com')) {
-        return window.location.origin;
-    }
-    return CLOUD_BACKEND_URL;
-}
-
-let API_BASE_URL = (localStorage.getItem('twod_backend_url') || getDefaultBackendUrl()).replace(/\/+$/, '');
 
 async function saveBackendUrlFromUI() {
     const input = document.getElementById('backend-url-input');
@@ -761,7 +962,7 @@ function updateOneDriveOverviewCard(opts = {}) {
 
 async function connectOneDriveCloudAPI() {
     try {
-        const res = await fetch(`${API_BASE_URL}/api/onedrive/auth?mode=json`);
+        const res = await apiFetch('/api/onedrive/auth?mode=json');
         const data = await res.json();
         if (data.success && data.auth_url) {
             window.location.href = data.auth_url;
@@ -777,7 +978,7 @@ async function connectOneDriveCloudAPI() {
 async function checkBackendAPI() {
     updateOneDriveOverviewCard({ state: 'connecting' });
     try {
-        const res = await fetch(`${API_BASE_URL}/api/status`);
+        const res = await apiFetch('/api/status');
         if (!res.ok) return false;
         const data = await res.json();
 
@@ -842,8 +1043,8 @@ async function loadNichesFromAPI(forceReload = false, statusData = null) {
         if (forceReload) params.set('reload', 'true');
         if (statusData?.graph_cloud) params.set('source', 'graph');
         const qStr = params.toString();
-        const url = `${API_BASE_URL}/api/onedrive/niches${qStr ? `?${qStr}` : ''}`;
-        const res = await fetch(url);
+        const url = `/api/onedrive/niches${qStr ? `?${qStr}` : ''}`;
+        const res = await apiFetch(url);
         const json = await res.json();
         if (json.success && json.niches) {
             oneDriveData.niches = json.niches;
@@ -1278,7 +1479,7 @@ async function playAudio(nicheNameEncoded, lang) {
 
         titleEl.textContent = `Áudio ${lang} — ${nicheName}`;
         metaEl.textContent = `${audio.name} (${(audio.size / 1024).toFixed(1)} KB) — Via API`;
-        audioElement.src = `${API_BASE_URL}${audio.url}`;
+        audioElement.src = withMediaAuth(`${API_BASE_URL}${audio.url}`);
         playerBar.style.display = 'flex';
         audioElement.play();
         return;
@@ -1354,17 +1555,41 @@ async function checkSavedOneDriveHandle() {
     }
 }
 
-function changeMyPassword() {
-    const input = document.getElementById('change-pwd-input');
-    const nova = input.value.trim();
-    if (!nova) {
-        alert('Por favor, digite a nova senha.');
+async function changeMyPassword() {
+    const curInput = document.getElementById('change-current-pwd-input');
+    const newInput = document.getElementById('change-pwd-input');
+    const atual = (curInput ? curInput.value : '').trim();
+    const nova = (newInput ? newInput.value : '').trim();
+    if (!atual) {
+        alert('Por favor, digite sua senha atual.');
         return;
     }
-    currentUser.password = nova;
-    saveUserPreferences();
-    input.value = '';
-    alert('Sua senha foi alterada com sucesso!');
+    if (nova.length < 6) {
+        alert('A nova senha deve ter pelo menos 6 caracteres.');
+        return;
+    }
+    if (nova === '123456') {
+        alert('Escolha uma senha pessoal diferente da senha padrão inicial.');
+        return;
+    }
+    try {
+        const resp = await apiFetch('/api/auth/change-password', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ current_password: atual, new_password: nova })
+        });
+        const data = await resp.json();
+        if (!resp.ok || !data.success) {
+            alert(data.error || 'Erro ao atualizar a senha.');
+            return;
+        }
+        setAuthSession(data);
+        if (curInput) curInput.value = '';
+        if (newInput) newInput.value = '';
+        alert('Sua senha foi alterada com sucesso e salva na nuvem!');
+    } catch (e) {
+        alert('Erro de conexão ao alterar senha: ' + e.message);
+    }
 }
 
 // ========================================================
@@ -1518,6 +1743,8 @@ const META_COUNTRY_BLOCKS = {
 
 let metaState = {
     token: localStorage.getItem(STORAGE_KEYS.META_TOKEN) || META_DEFAULT_TOKEN,
+    hasServerToken: false,
+    isCloud: false,
     defaultAccountId: localStorage.getItem(STORAGE_KEYS.META_ACCOUNT) || META_DEFAULT_ACCOUNT_ID,
     user: null,
     accounts: [],
@@ -1535,35 +1762,79 @@ let metaState = {
 };
 
 function getMetaToken() {
-    return metaState.token || META_DEFAULT_TOKEN;
+    return metaState.token || '';
+}
+
+function hasActiveMetaAuth() {
+    return Boolean((metaState.token && metaState.token.trim()) || metaState.hasServerToken);
+}
+
+async function metaGraphRequest(method, pathOrUrl, params = null, manualTokenOverride = null) {
+    const manualToken = manualTokenOverride !== null ? manualTokenOverride : (metaState.token || '');
+    const resp = await apiFetch('/api/meta/graph', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            method: method || 'GET',
+            path: pathOrUrl,
+            params: params || undefined,
+            manual_token: manualToken
+        })
+    });
+    return resp.json();
+}
+
+function metaGraphGet(pathOrUrl, manualTokenOverride = null) {
+    return metaGraphRequest('GET', pathOrUrl, null, manualTokenOverride);
+}
+
+function metaGraphPost(pathOrUrl, paramsObj = {}, manualTokenOverride = null) {
+    return metaGraphRequest('POST', pathOrUrl, paramsObj, manualTokenOverride);
+}
+
+window.hasActiveMetaAuth = hasActiveMetaAuth;
+window.metaGraphRequest = metaGraphRequest;
+window.metaGraphGet = metaGraphGet;
+window.metaGraphPost = metaGraphPost;
+
+function refreshServerTokenBanner() {
+    const banner = document.getElementById('meta-server-token-banner');
+    if (!banner) return;
+    if (metaState.hasServerToken) {
+        banner.classList.remove('twod-hidden');
+        banner.innerHTML = metaState.token
+            ? `⚠️ <strong>Usando Token Manual temporário neste navegador.</strong> O servidor também possui <code>META_ACCESS_TOKEN</code> configurado — limpe o campo e clique em Salvar para voltar a usar o token protegido do servidor.`
+            : `🔒 <strong>Token definitivo ativo com segurança no Servidor (${metaState.isCloud ? 'Render' : '.env Local'}).</strong> Nenhuma chave da Meta está exposta no navegador ou no GitHub.`;
+    } else {
+        banner.classList.add('twod-hidden');
+    }
 }
 
 // Inicializa a API do Meta
 async function initMetaApi() {
-    // 1. Tenta sincronizar com o backend local caso esteja rodando
     try {
-        const resp = await fetch('/api/meta/config');
+        const resp = await apiFetch('/api/meta/config');
         if (resp.ok) {
             const data = await resp.json();
-            if (data.meta_access_token) {
-                metaState.token = data.meta_access_token;
-                localStorage.setItem(STORAGE_KEYS.META_TOKEN, data.meta_access_token);
-            }
+            metaState.hasServerToken = Boolean(data.has_server_token);
+            metaState.isCloud = Boolean(data.is_cloud);
             if (data.default_account_id) {
                 metaState.defaultAccountId = data.default_account_id;
                 localStorage.setItem(STORAGE_KEYS.META_ACCOUNT, data.default_account_id);
             }
         }
     } catch (e) {
-        // Backend não rodando localmente (ex: GitHub Pages), usa localStorage ou token padrão
+        console.warn('Falha ao consultar /api/meta/config:', e);
     }
 
-    // 2. Renderiza abas de blocos de países
+    refreshServerTokenBanner();
+
+    // Renderiza abas de blocos de países
     renderBlockNav();
     selectCountryBlock('BLOCO-01');
     loadCampaignCreativeLinks();
 
-    // 3. Valida token e carrega contas
+    // Valida conexão e carrega contas
     await testAndReloadMetaApi(false);
 }
 
@@ -1587,8 +1858,7 @@ function toggleDuplicatorTokenBox(forceState) {
 
 // Quando a aba de duplicador for aberta
 function onDuplicatorTabOpened() {
-    const token = getMetaToken();
-    if (!token) {
+    if (!hasActiveMetaAuth()) {
         toggleDuplicatorTokenBox(true);
     }
     if (!metaState.initialized) {
@@ -1604,23 +1874,22 @@ function onSettingsTabOpened() {
     if (tokenInput) tokenInput.value = metaState.token || '';
     if (accountInput) accountInput.value = metaState.defaultAccountId || '';
     if (backendInput) backendInput.value = localStorage.getItem('twod_backend_url') || '';
+    refreshServerTokenBanner();
 }
 
-// Testa e recarrega contas da Meta
+// Testa e recarrega contas da Meta (via proxy seguro no servidor)
 async function testAndReloadMetaApi(forceReload = false) {
-    const token = getMetaToken();
-    if (!token) {
+    if (!hasActiveMetaAuth()) {
         updateMetaStatusUI(false, 'Nenhum token configurado.');
         const selectAcc = document.getElementById('select-meta-account');
         const countLabel = document.getElementById('label-account-count');
-        if (selectAcc) selectAcc.innerHTML = '<option value="">Cole seu Token acima para carregar as contas...</option>';
+        if (selectAcc) selectAcc.innerHTML = '<option value="">Configure META_ACCESS_TOKEN no servidor ou cole um Token manual...</option>';
         if (countLabel) countLabel.innerText = '(Sem token)';
         return;
     }
 
     try {
-        const res = await fetch(`https://graph.facebook.com/${META_GRAPH_VERSION}/me?access_token=${encodeURIComponent(token)}&fields=id,name,permissions`);
-        const data = await res.json();
+        const data = await metaGraphGet(`/${META_GRAPH_VERSION}/me?fields=id,name,permissions`);
 
         if (data.error) {
             console.error('Erro na Meta API:', data.error);
@@ -1636,7 +1905,6 @@ async function testAndReloadMetaApi(forceReload = false) {
         metaState.initialized = true;
         updateMetaStatusUI(true, null, data);
 
-        // Carrega contas
         await loadMetaAccounts(forceReload);
 
     } catch (err) {
@@ -1656,21 +1924,27 @@ function updateMetaStatusUI(isSuccess, errorMessage = null, userData = null) {
     const dupBadge = document.getElementById('duplicador-api-badge');
     const dupSub = document.getElementById('duplicador-user-sub');
 
+    const tokenSrcNote = metaState.hasServerToken && !metaState.token
+        ? 'Token definitivo protegido no Servidor.'
+        : 'Token manual ativo neste navegador.';
+
     if (isSuccess && userData) {
         if (badgeOverview) {
             badgeOverview.className = 'badge-status status-active';
             badgeOverview.innerText = '🟢 Conectado';
         }
         if (userHeading) userHeading.innerText = `Meta Marketing API (${userData.name})`;
-        if (statusDesc) statusDesc.innerText = `Conexão ativa com Graph API ${META_GRAPH_VERSION}. Token salvo com segurança no seu navegador.`;
+        if (statusDesc) statusDesc.innerText = `Conexão ativa com Graph API ${META_GRAPH_VERSION}. ${tokenSrcNote}`;
         if (cardSubinfo) cardSubinfo.innerText = `${userData.name} (ID: ${userData.id})`;
 
         if (dupName) dupName.innerText = userData.name;
         if (dupBadge) {
             dupBadge.className = 'badge-status status-active';
-            dupBadge.innerText = `🟢 Meta API ${META_GRAPH_VERSION} Online`;
+            dupBadge.innerText = metaState.hasServerToken && !metaState.token
+                ? `🔒 Meta API ${META_GRAPH_VERSION} (Servidor)`
+                : `🟢 Meta API ${META_GRAPH_VERSION} Online`;
         }
-        if (dupSub) dupSub.innerText = `ID: ${userData.id} • Permissões ativas: ads_management, ads_read, business_management`;
+        if (dupSub) dupSub.innerText = `ID: ${userData.id} • ${tokenSrcNote}`;
         toggleDuplicatorTokenBox(false);
     } else {
         if (badgeOverview) {
@@ -1678,8 +1952,8 @@ function updateMetaStatusUI(isSuccess, errorMessage = null, userData = null) {
             badgeOverview.innerText = '🔴 Desconectado';
         }
         if (userHeading) userHeading.innerText = 'Meta Marketing API (Desconectado)';
-        if (statusDesc) statusDesc.innerText = errorMessage ? `Status: ${errorMessage}` : 'Token não configurado ou expirado. Configure no Duplicador ou em Configurações.';
-        if (cardSubinfo) cardSubinfo.innerText = 'Nenhum token ativo no navegador';
+        if (statusDesc) statusDesc.innerText = errorMessage ? `Status: ${errorMessage}` : 'Configure META_ACCESS_TOKEN no servidor ou informe um token em Configurações.';
+        if (cardSubinfo) cardSubinfo.innerText = 'Nenhum token ativo configurado';
 
         if (dupName) dupName.innerText = 'Duplicador Meta Ads';
         if (dupBadge) {
@@ -1687,7 +1961,7 @@ function updateMetaStatusUI(isSuccess, errorMessage = null, userData = null) {
             dupBadge.innerText = '🔴 Sem Token Ativo';
         }
         if (dupSub) {
-            dupSub.innerHTML = `⚠️ ${errorMessage || 'Nenhum token configurado.'} <a href="javascript:void(0)" onclick="toggleDuplicatorTokenBox(true)" style="color: var(--accent-primary); text-decoration: underline; font-weight: 600; margin-left: 6px;">Conectar Token aqui →</a>`;
+            dupSub.innerHTML = `⚠️ ${escHtml(errorMessage || 'Nenhum token configurado.')} <a href="javascript:void(0)" onclick="toggleDuplicatorTokenBox(true)" style="color: var(--accent-primary); text-decoration: underline; font-weight: 600; margin-left: 6px;">Conectar Token temporário →</a>`;
         }
     }
     if (typeof window.onCampaignBuilderMetaStatus === 'function') {
@@ -1697,7 +1971,6 @@ function updateMetaStatusUI(isSuccess, errorMessage = null, userData = null) {
 
 // Busca a lista de contas de anúncio do usuário
 async function loadMetaAccounts(forceReload = false) {
-    const token = getMetaToken();
     const select = document.getElementById('select-meta-account');
     const countLabel = document.getElementById('label-account-count');
 
@@ -1711,9 +1984,7 @@ async function loadMetaAccounts(forceReload = false) {
     if (countLabel) countLabel.innerText = '(Buscando contas...)';
 
     try {
-        const url = `https://graph.facebook.com/${META_GRAPH_VERSION}/me/adaccounts?access_token=${encodeURIComponent(token)}&fields=id,name,account_id,account_status,currency,amount_spent,business{id,name}&limit=150`;
-        const resp = await fetch(url);
-        const data = await resp.json();
+        const data = await metaGraphGet(`/${META_GRAPH_VERSION}/me/adaccounts?fields=id,name,account_id,account_status,currency,amount_spent,business{id,name}&limit=150`);
 
         if (data.data && Array.isArray(data.data)) {
             // Ordena ativas primeiro
@@ -1822,13 +2093,11 @@ async function onMetaAccountSelected() {
 
     if (labelCamp) labelCamp.innerText = '(Buscando...)';
 
-    const token = getMetaToken();
     try {
         let allCamps = [];
-        let nextUrl = `https://graph.facebook.com/${META_GRAPH_VERSION}/${accountId}/campaigns?access_token=${encodeURIComponent(token)}&fields=id,name,status,objective&limit=250`;
+        let nextUrl = `/${META_GRAPH_VERSION}/${accountId}/campaigns?fields=id,name,status,objective&limit=250`;
         for (let page = 0; page < 2 && nextUrl; page++) {
-            const resp = await fetch(nextUrl);
-            const data = await resp.json();
+            const data = await metaGraphGet(nextUrl);
             if (Array.isArray(data.data) && data.data.length > 0) {
                 allCamps = allCamps.concat(data.data);
             }
@@ -1934,17 +2203,14 @@ function _executeFilterMetaCampaigns() {
         const capturedAccount = metaState.selectedAccountId;
         const capturedQuery = rawQuery;
         _metaCampRemoteTimer = setTimeout(async () => {
-            const token = getMetaToken();
             const labelCamp = document.getElementById('label-campaign-count');
-            if (!token || metaState.selectedAccountId !== capturedAccount) return;
+            if (!hasActiveMetaAuth() || metaState.selectedAccountId !== capturedAccount) return;
             if ((document.getElementById('search-meta-campaign')?.value || '').trim() !== capturedQuery) return;
             if (labelCamp) labelCamp.innerText = '(Buscando na API...)';
 
             try {
                 const filtering = JSON.stringify([{ field: 'name', operator: 'CONTAIN', value: capturedQuery }]);
-                const url = `https://graph.facebook.com/${META_GRAPH_VERSION}/${capturedAccount}/campaigns?access_token=${encodeURIComponent(token)}&fields=id,name,status,objective&filtering=${encodeURIComponent(filtering)}&limit=50`;
-                const resp = await fetch(url);
-                const data = await resp.json();
+                const data = await metaGraphGet(`/${META_GRAPH_VERSION}/${capturedAccount}/campaigns?fields=id,name,status,objective&filtering=${encodeURIComponent(filtering)}&limit=50`);
                 if ((document.getElementById('search-meta-campaign')?.value || '').trim() !== capturedQuery) return;
 
                 const remoteList = Array.isArray(data.data) ? data.data : [];
@@ -1998,11 +2264,8 @@ async function onMetaCampaignSelected() {
 
     if (labelAdSet) labelAdSet.innerText = '(Buscando...)';
 
-    const token = getMetaToken();
     try {
-        const url = `https://graph.facebook.com/${META_GRAPH_VERSION}/${campaignId}/adsets?access_token=${encodeURIComponent(token)}&fields=id,name,daily_budget,targeting,status,dsa_beneficiary,dsa_payor,regional_regulated_categories,regional_regulation_identities&limit=100`;
-        const resp = await fetch(url);
-        const data = await resp.json();
+        const data = await metaGraphGet(`/${META_GRAPH_VERSION}/${campaignId}/adsets?fields=id,name,daily_budget,targeting,status,dsa_beneficiary,dsa_payor,regional_regulated_categories,regional_regulation_identities&limit=100`);
 
         // Se uma busca mais nova já iniciou, descarta essa resposta defasada!
         if (currentSeq !== _metaCampaignReqSeq || selectCamp.value !== campaignId) {
@@ -2162,8 +2425,12 @@ function openThumbZoomModal(imgUrl, title = 'Prévia do Criativo', subtitle = ''
 
     let finalUrl = imgUrl || '';
     if (finalUrl.includes('/api/graph/thumb/') && !finalUrl.includes('size=')) {
-        finalUrl += (finalUrl.includes('?') ? '&' : '?') + 'size=large';
+        const hashIdx = finalUrl.indexOf('#');
+        const bp = hashIdx >= 0 ? finalUrl.slice(0, hashIdx) : finalUrl;
+        const hp = hashIdx >= 0 ? finalUrl.slice(hashIdx) : '';
+        finalUrl = `${bp}${bp.includes('?') ? '&' : '?'}size=large${hp}`;
     }
+    finalUrl = withMediaAuth(finalUrl);
     imgEl.src = finalUrl;
     if (titleEl) titleEl.innerText = title || 'Prévia do Criativo';
     if (subEl) subEl.innerText = subtitle || '';
@@ -2387,7 +2654,7 @@ async function ensureLinkedPackHydrated(campaignId, forceRefresh = false) {
 
     try {
         const q = `niche=${encodeURIComponent(nicheSlug)}${forceRefresh ? '&refresh=true' : ''}`;
-        const resp = await fetch(`${API_BASE_URL}/api/onedrive/niche-packs?${q}`);
+        const resp = await apiFetch(`/api/onedrive/niche-packs?${q}`);
         const data = await resp.json();
         if (data.success && Array.isArray(data.packs)) {
             data.packs.forEach(p => {
@@ -2438,7 +2705,7 @@ async function loadCampaignCreativeLinks() {
         if (local) {
             try { campaignCreativesMap = JSON.parse(local) || {}; } catch (e) {}
         }
-        const resp = await fetch(`${API_BASE_URL}/api/campaign-creatives`);
+        const resp = await apiFetch('/api/campaign-creatives');
         const data = await resp.json();
         if (data.success && data.links) {
             campaignCreativesMap = { ...campaignCreativesMap, ...data.links };
@@ -2480,7 +2747,7 @@ async function linkCampaignToPack(campaignId, pack) {
     localStorage.setItem('twod_campaign_creatives_v1', JSON.stringify(campaignCreativesMap));
 
     try {
-        await fetch(`${API_BASE_URL}/api/campaign-creatives`, {
+        await apiFetch('/api/campaign-creatives', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
@@ -2502,7 +2769,7 @@ async function unlinkCampaignFromPack(campaignId) {
     localStorage.setItem('twod_campaign_creatives_v1', JSON.stringify(campaignCreativesMap));
 
     try {
-        await fetch(`${API_BASE_URL}/api/campaign-creatives`, {
+        await apiFetch('/api/campaign-creatives', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ campaign_id: campaignId, delete: true })
@@ -2530,13 +2797,10 @@ async function loadBaseAdSetMetaThumbnails(adsetId) {
     if (countBadge) countBadge.innerText = 'Carregando...';
 
     const currentSeq = ++_metaThumbReqSeq;
-    const token = getMetaToken();
     metaBaseAdsCache = [];
 
     try {
-        const url = `https://graph.facebook.com/${META_GRAPH_VERSION}/${adsetId}/ads?access_token=${encodeURIComponent(token)}&fields=id,name,status,url_tags,creative{id,name,thumbnail_url,image_url,video_id,object_story_spec,asset_feed_spec}&limit=50`;
-        const resp = await fetch(url);
-        const data = await resp.json();
+        const data = await metaGraphGet(`/${META_GRAPH_VERSION}/${adsetId}/ads?fields=id,name,status,url_tags,creative{id,name,thumbnail_url,image_url,video_id,object_story_spec,asset_feed_spec}&limit=50`);
 
         if (currentSeq !== _metaThumbReqSeq) return;
 
@@ -2547,8 +2811,7 @@ async function loadBaseAdSetMetaThumbnails(adsetId) {
                 let bestThumb = cr.image_url || cr.object_story_spec?.video_data?.image_url || cr.thumbnail_url || '';
                 if ((!bestThumb || bestThumb.includes('p64x64')) && cr.id) {
                     try {
-                        const r320 = await fetch(`https://graph.facebook.com/${META_GRAPH_VERSION}/${cr.id}?fields=id,thumbnail_url&thumbnail_width=320&thumbnail_height=320&access_token=${encodeURIComponent(token)}`);
-                        const d320 = await r320.json();
+                        const d320 = await metaGraphGet(`/${META_GRAPH_VERSION}/${cr.id}?fields=id,thumbnail_url&thumbnail_width=320&thumbnail_height=320`);
                         if (d320.thumbnail_url) bestThumb = d320.thumbnail_url;
                     } catch (e) {}
                 }
@@ -2724,8 +2987,10 @@ function renderPackCardThumbs(thumbsWrapEl, pack, selectedLang) {
 
         const thumbPath = v.thumb_url || '';
         const vUrl = v.url || '';
-        const fullVidUrl = vUrl.startsWith('http') ? vUrl : `${API_BASE_URL}${vUrl}`;
-        const fullThumbUrl = thumbPath ? (thumbPath.startsWith('http') ? thumbPath : `${API_BASE_URL}${thumbPath}`) : '';
+        const rawVidUrl = vUrl.startsWith('http') ? vUrl : `${API_BASE_URL}${vUrl}`;
+        const rawThumbUrl = thumbPath ? (thumbPath.startsWith('http') ? thumbPath : `${API_BASE_URL}${thumbPath}`) : '';
+        const fullVidUrl = withMediaAuth(rawVidUrl);
+        const fullThumbUrl = withMediaAuth(rawThumbUrl);
 
         if (fullThumbUrl) {
             const img = document.createElement('img');
@@ -2792,7 +3057,7 @@ async function loadNicheCandidatePacks(forceOpen = true, forceRefresh = false) {
     } else {
         try {
             const q = `niche=${encodeURIComponent(nicheSlug)}${forceRefresh ? '&refresh=true' : ''}`;
-            const resp = await fetch(`${API_BASE_URL}/api/onedrive/niche-packs?${q}`);
+            const resp = await apiFetch(`/api/onedrive/niche-packs?${q}`);
             const data = await resp.json();
             if (data.success && Array.isArray(data.packs)) {
                 packs = data.packs;
@@ -3091,9 +3356,10 @@ function updateDuplicatorLanguageNotice() {
                     chip.className = 'dup-notice-thumb-chip';
                     chip.style.cursor = 'pointer';
 
-                    const fullThumb = s.video.thumb_url
+                    const rawThumb = s.video.thumb_url
                         ? (s.video.thumb_url.startsWith('http') ? s.video.thumb_url : `${API_BASE_URL}${s.video.thumb_url}`)
                         : '';
+                    const fullThumb = withMediaAuth(rawThumb);
                     if (fullThumb) {
                         const img = document.createElement('img');
                         img.src = fullThumb;
@@ -3561,12 +3827,12 @@ function clearMetaLog() {
 async function startBatchDuplication() {
     if (metaState.isDuplicating) return;
 
-    const token = getMetaToken();
-    if (!token) {
-        alert('Por favor, informe seu Token de Acesso da Meta na aba Configurações antes de duplicar.');
+    if (!hasActiveMetaAuth()) {
+        alert('Configure META_ACCESS_TOKEN no servidor ou informe um Token na aba Configurações antes de duplicar.');
         switchTab('configuracoes');
         return;
     }
+    const token = getMetaToken();
 
     const selectAcc = document.getElementById('select-meta-account');
     const selectCamp = document.getElementById('select-meta-campaign');
@@ -3726,9 +3992,7 @@ async function startBatchDuplication() {
     // Busca previamente todos os anúncios e criativos completos (incluindo asset_feed_spec, object_story_spec e url_tags)
     let baseAds = [];
     try {
-        const adsUrl = `https://graph.facebook.com/${META_GRAPH_VERSION}/${adsetId}/ads?access_token=${encodeURIComponent(token)}&fields=id,name,status,url_tags,creative{id,name,object_story_spec,asset_feed_spec}&limit=50`;
-        const adsResp = await fetch(adsUrl);
-        const adsData = await adsResp.json();
+        const adsData = await metaGraphGet(`/${META_GRAPH_VERSION}/${adsetId}/ads?fields=id,name,status,url_tags,creative{id,name,object_story_spec,asset_feed_spec}&limit=50`);
         if (adsData.data && Array.isArray(adsData.data)) {
             baseAds = adsData.data;
         }
@@ -3755,23 +4019,29 @@ async function startBatchDuplication() {
         const cacheKey = `${accountId}:manual:${fileObj.name}:${fileObj.size}`;
         if (videoUploadCache[cacheKey]?.video_id) return videoUploadCache[cacheKey];
 
-        const form = new FormData();
-        form.append('access_token', token);
-        form.append('title', fileObj.name || 'video.mp4');
-        form.append('source', fileObj);
-        const upResp = await fetch(`https://graph.facebook.com/${META_GRAPH_VERSION}/${accountId}/advideos`, {
-            method: 'POST',
-            body: form
+        const q = new URLSearchParams({
+            account_id: accountId,
+            title: fileObj.name || 'video.mp4',
+            filename: fileObj.name || 'video.mp4',
+            graph_version: META_GRAPH_VERSION
         });
-        const upRes = await upResp.json();
-        if (!upRes.id) {
-            throw new Error(`Falha ao subir ${fileObj.name}: ${formatMetaApiError(upRes.error || upRes)}`);
+        const hdrs = { 'Content-Type': 'application/octet-stream' };
+        if (token) hdrs['X-Meta-Token'] = token;
+
+        const upResp = await apiFetch(`/api/meta/upload-video-binary?${q.toString()}`, {
+            method: 'POST',
+            headers: hdrs,
+            body: fileObj
+        });
+        const upJson = await upResp.json();
+        const upRes = upJson.result || upJson;
+        if (!upJson.success || !upRes.id) {
+            throw new Error(`Falha ao subir ${fileObj.name}: ${formatMetaApiError(upJson.error || upRes)}`);
         }
         let thumbnailUrl = '';
         for (let attempt = 0; attempt < 20; attempt++) {
             await new Promise(r => setTimeout(r, 3000));
-            const stResp = await fetch(`https://graph.facebook.com/${META_GRAPH_VERSION}/${upRes.id}?access_token=${encodeURIComponent(token)}&fields=status,picture,thumbnails`);
-            const stData = await stResp.json();
+            const stData = await metaGraphGet(`/${META_GRAPH_VERSION}/${upRes.id}?fields=status,picture,thumbnails`);
             const thumbUri = stData.thumbnails?.data?.[0]?.uri || stData.picture || '';
             if (thumbUri) thumbnailUrl = thumbUri;
             if (stData.status?.video_status === 'ready') break;
@@ -3806,22 +4076,7 @@ async function startBatchDuplication() {
                 if (progressStatus) progressStatus.innerText = `🎬 Preparando criativos e tradução para ${tLang.toUpperCase()}...`;
                 logMetaTerminal(`🌐 Preparando pacote de vídeos e tradução (${baseLang.toUpperCase()} ➔ ${tLang.toUpperCase()})...`, 'info');
 
-                const postCreative = async (pObj) => {
-                    if (typeof metaFormPost === 'function') {
-                        return metaFormPost(`/${metaState.selectedAccountId}/adcreatives`, pObj, token);
-                    }
-                    const form = new URLSearchParams();
-                    form.append('access_token', token);
-                    Object.entries(pObj).forEach(([k, v]) => {
-                        if (v !== undefined && v !== null) form.append(k, typeof v === 'object' ? JSON.stringify(v) : String(v));
-                    });
-                    const r = await fetch(`https://graph.facebook.com/${META_GRAPH_VERSION}/${metaState.selectedAccountId}/adcreatives`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                        body: form.toString()
-                    });
-                    return r.json();
-                };
+                const postCreative = (pObj) => metaGraphPost(`/${META_GRAPH_VERSION}/${metaState.selectedAccountId}/adcreatives`, pObj);
 
                 // Sobe 1 vídeo por vez e valida logo o primeiro AdCreative para abortar rápido em caso de bloqueio da Meta (ex: 1885183)
                 for (let uIdx = 0; uIdx < mediaItems.length; uIdx++) {
@@ -4038,16 +4293,10 @@ async function startBatchDuplication() {
 
         try {
             // PASSO 1: Clona a estrutura do conjunto base sempre em PAUSED primeiro e FORÇA explicitamente a campanha de destino
-            const copyForm = new URLSearchParams();
-            copyForm.append('access_token', token);
-            copyForm.append('status_option', 'PAUSED');
-            copyForm.append('campaign_id', campaignId);
-            const copyResp = await fetch(`https://graph.facebook.com/${META_GRAPH_VERSION}/${adsetId}/copies`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                body: copyForm.toString()
+            const copyData = await metaGraphPost(`/${META_GRAPH_VERSION}/${adsetId}/copies`, {
+                status_option: 'PAUSED',
+                campaign_id: campaignId
             });
-            const copyData = await copyResp.json();
 
             if (copyData.error) {
                 throw new Error(copyData.error.message || 'Erro ao copiar conjunto');
@@ -4098,19 +4347,13 @@ async function startBatchDuplication() {
             }
 
             const postAdSetUpdate = async (payloadObj) => {
-                const formData = new URLSearchParams();
-                formData.append('access_token', token);
-                Object.entries(payloadObj).forEach(([k, v]) => {
+                const cleanPayload = {};
+                Object.entries(payloadObj || {}).forEach(([k, v]) => {
                     if (v !== undefined && v !== null) {
-                        formData.append(k, typeof v === 'object' ? JSON.stringify(v) : String(v));
+                        cleanPayload[k] = typeof v === 'object' ? JSON.stringify(v) : String(v);
                     }
                 });
-                const r = await fetch(`https://graph.facebook.com/${META_GRAPH_VERSION}/${copiedAdSetId}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                    body: formData.toString()
-                });
-                return r.json();
+                return metaGraphPost(`/${META_GRAPH_VERSION}/${copiedAdSetId}`, cleanPayload);
             };
 
             let updateData = await postAdSetUpdate(updatePayload);
@@ -4145,24 +4388,21 @@ async function startBatchDuplication() {
             let adsCreated = 0;
             let countryModeMsg = '';
 
+            const createAdInCopiedSet = async (adName, creativeId, urlTags) => {
+                const payload = {
+                    name: adName,
+                    adset_id: copiedAdSetId,
+                    creative: JSON.stringify({ creative_id: creativeId }),
+                    status: initialStatus
+                };
+                if (urlTags) payload.url_tags = urlTags;
+                return metaGraphPost(`/${META_GRAPH_VERSION}/${metaState.selectedAccountId}/ads`, payload);
+            };
+
             if (countryLang === baseLang) {
                 for (const baseAd of baseAds) {
                     if (baseAd.creative && baseAd.creative.id) {
-                        const createAdUrl = `https://graph.facebook.com/${META_GRAPH_VERSION}/${metaState.selectedAccountId}/ads`;
-                        const adData = new URLSearchParams();
-                        adData.append('access_token', token);
-                        adData.append('name', baseAd.name || finalName);
-                        adData.append('adset_id', copiedAdSetId);
-                        adData.append('creative', JSON.stringify({ creative_id: baseAd.creative.id }));
-                        adData.append('status', initialStatus);
-                        if (baseAd.url_tags) adData.append('url_tags', baseAd.url_tags);
-
-                        const adResp = await fetch(createAdUrl, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                            body: adData.toString()
-                        });
-                        const adResult = await adResp.json();
+                        const adResult = await createAdInCopiedSet(baseAd.name || finalName, baseAd.creative.id, baseAd.url_tags);
                         if (adResult.id) {
                             adsCreated++;
                         } else if (adResult.error) {
@@ -4173,21 +4413,7 @@ async function startBatchDuplication() {
                 countryModeMsg = adsCreated > 0 ? `com ${adsCreated} anúncio(s) clonado(s)` : 'sem anúncios';
             } else if (Array.isArray(preparedCreativesByLang[countryLang]) && preparedCreativesByLang[countryLang].length > 0) {
                 for (const item of preparedCreativesByLang[countryLang]) {
-                    const createAdUrl = `https://graph.facebook.com/${META_GRAPH_VERSION}/${metaState.selectedAccountId}/ads`;
-                    const adData = new URLSearchParams();
-                    adData.append('access_token', token);
-                    adData.append('name', item.adName);
-                    adData.append('adset_id', copiedAdSetId);
-                    adData.append('creative', JSON.stringify({ creative_id: item.creativeId }));
-                    adData.append('status', initialStatus);
-                    if (item.urlTags) adData.append('url_tags', item.urlTags);
-
-                    const adResp = await fetch(createAdUrl, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                        body: adData.toString()
-                    });
-                    const adResult = await adResp.json();
+                    const adResult = await createAdInCopiedSet(item.adName, item.creativeId, item.urlTags);
                     if (adResult.id) {
                         adsCreated++;
                     } else if (adResult.error) {
@@ -4260,10 +4486,10 @@ function toggleTokenVisibility(inputId = 'meta-token-input', btnId = 'btn-toggle
 async function testMetaTokenFromUI(inputId = 'meta-token-input', resultBoxId = 'meta-token-test-result') {
     const tokenInput = document.getElementById(inputId);
     const resultBox = document.getElementById(resultBoxId);
-    const token = tokenInput ? tokenInput.value.trim() : '';
+    const manualToken = tokenInput ? tokenInput.value.trim() : '';
 
-    if (!token) {
-        alert('Por favor, cole um Token de Acesso.');
+    if (!manualToken && !metaState.hasServerToken) {
+        alert('Por favor, cole um Token de Acesso ou configure META_ACCESS_TOKEN no servidor.');
         return;
     }
 
@@ -4271,13 +4497,14 @@ async function testMetaTokenFromUI(inputId = 'meta-token-input', resultBoxId = '
         resultBox.className = '';
         resultBox.style.background = 'rgba(59, 130, 246, 0.15)';
         resultBox.style.color = '#3b82f6';
-        resultBox.innerText = '🔍 Validando token junto à Graph API da Meta...';
+        resultBox.innerText = manualToken
+            ? '🔍 Validando token manual junto à Graph API da Meta...'
+            : '🔍 Testando token definitivo configurado no servidor...';
         resultBox.classList.remove('twod-hidden');
     }
 
     try {
-        const res = await fetch(`https://graph.facebook.com/${META_GRAPH_VERSION}/me?access_token=${encodeURIComponent(token)}&fields=id,name,permissions`);
-        const data = await res.json();
+        const data = await metaGraphGet(`/${META_GRAPH_VERSION}/me?fields=id,name,permissions`, manualToken || null);
 
         if (data.error) {
             if (resultBox) {
@@ -4345,21 +4572,29 @@ async function saveMetaSettingsFromUI(source = 'configuracoes') {
         }
     }
 
-    // Salva no backend local se estiver ativo
-    try {
-        await fetch('/api/meta/config', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                meta_access_token: token,
-                default_account_id: accountId
-            })
-        });
-    } catch (e) {
-        // Ignora se estiver fora do localhost
+    // Salva no backend autenticado apenas se for Administrador (evita expor ou apagar token do servidor)
+    if (currentUser && currentUser.role === 'Administrador') {
+        try {
+            const cfgPayload = { default_account_id: accountId };
+            if (token && !metaState.isCloud) {
+                cfgPayload.meta_access_token = token;
+            }
+            await apiFetch('/api/meta/config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(cfgPayload)
+            });
+        } catch (e) {
+            // Ignora falhas não críticas ao salvar conta padrão
+        }
     }
 
     if (!token) {
+        if (metaState.hasServerToken) {
+            alert('Token manual removido do navegador. Usando o token definitivo do servidor!');
+            testAndReloadMetaApi(true);
+            return;
+        }
         metaState.user = null;
         metaState.accounts = [];
         metaState.campaigns = [];
@@ -4370,7 +4605,7 @@ async function saveMetaSettingsFromUI(source = 'configuracoes') {
         return;
     }
 
-    alert('Token salvo com sucesso no seu navegador!');
+    alert('Token temporário salvo com sucesso no seu navegador!');
     testAndReloadMetaApi(true);
 }
 
@@ -4388,7 +4623,7 @@ window.playAudio = playAudio;
 window.closeAudioPlayer = closeAudioPlayer;
 window.changeMyPassword = changeMyPassword;
 window.handleLogin = handleLogin;
-window.quickLogin = quickLogin;
+window.submitForcedPasswordChange = submitForcedPasswordChange;
 window.showLogin = showLogin;
 window.showApp = showApp;
 
@@ -4423,8 +4658,6 @@ window.handleManualDuplicatorVideos = handleManualDuplicatorVideos;
 // ========================================================
 function startApp() {
     checkSession();
-    checkSavedOneDriveHandle();
-    initMetaApi();
 }
 
 if (document.readyState === 'loading') {

@@ -71,8 +71,7 @@ let cbState = {
 // ========================================================
 
 window.onCampaignBuilderTabOpened = function () {
-    const token = getMetaToken();
-    if (!token) {
+    if (!hasActiveMetaAuth()) {
         toggleCampaignBuilderTokenBox(true);
     }
     const authorInput = document.getElementById('cb-author');
@@ -98,7 +97,8 @@ window.onCampaignBuilderMetaStatus = function (isSuccess, errorMessage, userData
             badgeEl.className = 'badge-status status-active';
             badgeEl.innerText = `🟢 Meta API ${META_GRAPH_VERSION} Online`;
         }
-        if (subEl) subEl.innerText = `ID: ${userData.id} • Conectado para criação de campanhas, pixels e páginas por BM.`;
+        const tokenOrigin = (!getMetaToken() && metaState.hasServerToken) ? ' • 🔒 Token definitivo no Servidor' : '';
+        if (subEl) subEl.innerText = `ID: ${userData.id}${tokenOrigin} • Conectado para criação de campanhas, pixels e páginas por BM.`;
         toggleCampaignBuilderTokenBox(false);
     } else {
         if (nameEl) nameEl.innerText = 'Gerador de Campanhas Padrão TwoD';
@@ -107,7 +107,7 @@ window.onCampaignBuilderMetaStatus = function (isSuccess, errorMessage, userData
             badgeEl.innerText = '🔴 Sem Token Ativo';
         }
         if (subEl) {
-            subEl.innerHTML = `⚠️ ${errorMessage || 'Nenhum token configurado.'} <a href="javascript:void(0)" onclick="toggleCampaignBuilderTokenBox(true)" style="color: var(--accent-primary); text-decoration: underline; font-weight: 600; margin-left: 6px;">Conectar Token aqui →</a>`;
+            subEl.innerHTML = `⚠️ ${errorMessage || 'Nenhum token configurado.'} <a href="javascript:void(0)" onclick="toggleCampaignBuilderTokenBox(true)" style="color: var(--accent-primary); text-decoration: underline; font-weight: 600; margin-left: 6px;">Conectar Token temporário →</a>`;
         }
     }
 };
@@ -120,7 +120,7 @@ function toggleCampaignBuilderTokenBox(forceState) {
     const shouldShow = (typeof forceState === 'boolean') ? forceState : box.classList.contains('twod-hidden');
     if (shouldShow) {
         box.classList.remove('twod-hidden');
-        if (input) input.value = metaState.token || '';
+        if (input) input.value = getMetaToken();
     } else {
         box.classList.add('twod-hidden');
     }
@@ -241,15 +241,13 @@ function extractSiteKeywordFromAccountName(accName = '') {
 }
 
 async function loadBuilderPixels(accountId) {
-    const token = getMetaToken();
     const select = document.getElementById('cb-pixel-select');
     const countEl = document.getElementById('cb-pixel-count');
-    if (!select || !token) return;
+    if (!select || !hasActiveMetaAuth()) return;
 
     select.innerHTML = '<option value="">Carregando pixels...</option>';
     try {
-        const resp = await fetch(`https://graph.facebook.com/${META_GRAPH_VERSION}/${accountId}/adspixels?access_token=${encodeURIComponent(token)}&fields=id,name`);
-        const data = await resp.json();
+        const data = await metaGraphGet(`/${META_GRAPH_VERSION}/${accountId}/adspixels?fields=id,name`);
         const pixels = Array.isArray(data.data) ? data.data : [];
         cbState.pixels = pixels;
 
@@ -282,11 +280,9 @@ async function loadBuilderPixels(accountId) {
 }
 
 async function loadBuilderCustomConversions(accountId) {
-    const token = getMetaToken();
-    if (!token || !accountId) return;
+    if (!hasActiveMetaAuth() || !accountId) return;
     try {
-        const resp = await fetch(`https://graph.facebook.com/${META_GRAPH_VERSION}/${accountId}/customconversions?access_token=${encodeURIComponent(token)}&fields=id,name,custom_event_type,pixel&limit=50`);
-        const data = await resp.json();
+        const data = await metaGraphGet(`/${META_GRAPH_VERSION}/${accountId}/customconversions?fields=id,name,custom_event_type,pixel&limit=50`);
         cbState.customConversions = Array.isArray(data.data) ? data.data : [];
     } catch (e) {
         cbState.customConversions = [];
@@ -294,16 +290,14 @@ async function loadBuilderCustomConversions(accountId) {
 }
 
 async function loadBuilderPagesForBM(accountId, bmId) {
-    const token = getMetaToken();
     const grid = document.getElementById('cb-pages-grid');
     const metaEl = document.getElementById('cb-pages-meta');
-    if (!grid || !token) return;
+    if (!grid || !hasActiveMetaAuth()) return;
 
     grid.innerHTML = '<div class="text-muted" style="font-size: 12px;">Carregando páginas pertencentes a esta BM...</div>';
 
     try {
-        const promoteResp = await fetch(`https://graph.facebook.com/${META_GRAPH_VERSION}/${accountId}/promote_pages?access_token=${encodeURIComponent(token)}&fields=id,name,business{id,name}&limit=100`);
-        const promoteData = await promoteResp.json();
+        const promoteData = await metaGraphGet(`/${META_GRAPH_VERSION}/${accountId}/promote_pages?fields=id,name,business{id,name}&limit=100`);
         let allPages = Array.isArray(promoteData.data) ? promoteData.data : [];
 
         // Se a conta pertence a uma BM e conseguirmos listar owned_pages/client_pages da BM, filtra estritamente por ela
@@ -311,8 +305,7 @@ async function loadBuilderPagesForBM(accountId, bmId) {
         if (bmId) {
             for (const edge of ['owned_pages', 'client_pages']) {
                 try {
-                    const bmResp = await fetch(`https://graph.facebook.com/${META_GRAPH_VERSION}/${bmId}/${edge}?access_token=${encodeURIComponent(token)}&fields=id,name&limit=100`);
-                    const bmJson = await bmResp.json();
+                    const bmJson = await metaGraphGet(`/${META_GRAPH_VERSION}/${bmId}/${edge}?fields=id,name&limit=100`);
                     if (Array.isArray(bmJson.data)) {
                         bmJson.data.forEach(p => bmOwnedIds.add(p.id));
                     }
@@ -386,16 +379,14 @@ function toggleAllBuilderPages(checked) {
 }
 
 async function loadBuilderModelCampaigns(accountId) {
-    const token = getMetaToken();
     const select = document.getElementById('cb-model-campaign-select');
     const searchInput = document.getElementById('cb-model-campaign-search');
     if (searchInput) searchInput.value = '';
-    if (!select || !token) return;
+    if (!select || !hasActiveMetaAuth()) return;
 
     select.innerHTML = '<option value="">Carregando campanhas da conta...</option>';
     try {
-        const resp = await fetch(`https://graph.facebook.com/${META_GRAPH_VERSION}/${accountId}/campaigns?access_token=${encodeURIComponent(token)}&fields=id,name,objective,status&limit=150`);
-        const data = await resp.json();
+        const data = await metaGraphGet(`/${META_GRAPH_VERSION}/${accountId}/campaigns?fields=id,name,objective,status&limit=150`);
         const camps = Array.isArray(data.data) ? data.data : [];
         cbState.campaigns = camps;
         renderBuilderModelCampaignOptions(camps, false);
@@ -443,10 +434,9 @@ function filterBuilderModelCampaigns() {
 }
 
 async function inspectModelCampaign() {
-    const token = getMetaToken();
     const campId = document.getElementById('cb-model-campaign-select')?.value;
     const box = document.getElementById('cb-model-inspector-box');
-    if (!token || !campId) {
+    if (!hasActiveMetaAuth() || !campId) {
         alert('Selecione uma campanha existente ao lado para ler os parâmetros dela (somente leitura).');
         return;
     }
@@ -457,18 +447,15 @@ async function inspectModelCampaign() {
     }
 
     try {
-        const campResp = await fetch(`https://graph.facebook.com/${META_GRAPH_VERSION}/${campId}?access_token=${encodeURIComponent(token)}&fields=id,name,objective,buying_type,is_adset_budget_sharing_enabled`);
-        const campData = await campResp.json();
+        const campData = await metaGraphGet(`/${META_GRAPH_VERSION}/${campId}?fields=id,name,objective,buying_type,is_adset_budget_sharing_enabled`);
 
-        const adsetsResp = await fetch(`https://graph.facebook.com/${META_GRAPH_VERSION}/${campId}/adsets?access_token=${encodeURIComponent(token)}&fields=id,name,optimization_goal,billing_event,bid_strategy,destination_type,promoted_object,targeting,dsa_beneficiary,dsa_payor,regional_regulated_categories,regional_regulation_identities,daily_budget&limit=1`);
-        const adsetsData = await adsetsResp.json();
+        const adsetsData = await metaGraphGet(`/${META_GRAPH_VERSION}/${campId}/adsets?fields=id,name,optimization_goal,billing_event,bid_strategy,destination_type,promoted_object,targeting,dsa_beneficiary,dsa_payor,regional_regulated_categories,regional_regulation_identities,daily_budget&limit=1`);
         const sampleAdSet = (adsetsData.data && adsetsData.data[0]) || null;
 
         let sampleAd = null;
         let sampleCreative = null;
         if (sampleAdSet) {
-            const adsResp = await fetch(`https://graph.facebook.com/${META_GRAPH_VERSION}/${sampleAdSet.id}/ads?access_token=${encodeURIComponent(token)}&fields=id,name,url_tags,creative{id,object_story_spec,asset_feed_spec,degrees_of_freedom_spec}&limit=1`);
-            const adsData = await adsResp.json();
+            const adsData = await metaGraphGet(`/${META_GRAPH_VERSION}/${sampleAdSet.id}/ads?fields=id,name,url_tags,creative{id,object_story_spec,asset_feed_spec,degrees_of_freedom_spec}&limit=1`);
             sampleAd = (adsData.data && adsData.data[0]) || null;
             sampleCreative = sampleAd?.creative || null;
         }
@@ -716,7 +703,7 @@ async function hydrateNicheVideosOnDemand(nicheName) {
         grid.innerHTML = '<div class="text-muted" style="font-size:13px;grid-column:1 / -1;">☁️ Buscando vídeos deste nicho direto no OneDrive Nuvem...</div>';
     }
     try {
-        const resp = await fetch(`${API_BASE_URL}/api/onedrive/niche-videos?name=${encodeURIComponent(nicheName)}`);
+        const resp = await apiFetch(`/api/onedrive/niche-videos?name=${encodeURIComponent(nicheName)}`);
         const data = await resp.json();
         if (data.success && data.videos) {
             let niche = (oneDriveData.niches || []).find(n => n.name === nicheName);
@@ -881,7 +868,7 @@ function renderBuilderCreativesGrid() {
 
         if (found) {
             const checked = cbState.selectedSlots.has(slotNum);
-            const streamUrl = found.video.url ? `${API_BASE_URL}${found.video.url}` : '';
+            const streamUrl = found.video.url ? withMediaAuth(`${API_BASE_URL}${found.video.url}`) : '';
             card.innerHTML = `
                 <div class="cb-creative-head">
                     <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-weight:700;">
@@ -996,7 +983,7 @@ async function translateTextsBatch(texts, targetLang, sourceLang = 'pt') {
 
     let results = [...texts];
     try {
-        const res = await fetch(`${API_BASE_URL}/api/translate`, {
+        const res = await apiFetch('/api/translate', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ texts, target_lang: targetLang, source_lang: sourceLang })
@@ -1161,8 +1148,7 @@ function clearBuilderTerminal() {
 async function resolveSpanishAllLocaleIds(token) {
     if (cbState.spanishLocaleIds) return cbState.spanishLocaleIds;
     try {
-        const resp = await fetch(`https://graph.facebook.com/${META_GRAPH_VERSION}/search?type=adlocale&q=Spanish&access_token=${encodeURIComponent(token)}`);
-        const data = await resp.json();
+        const data = await metaGraphGet(`/${META_GRAPH_VERSION}/search?type=adlocale&q=Spanish`, token || null);
         if (Array.isArray(data.data) && data.data.length > 0) {
             const allEs = data.data.find(l => /spanish\s*\(all\)|espanhol\s*\(todos\)/i.test(l.name));
             if (allEs && allEs.key) {
@@ -1182,19 +1168,13 @@ async function resolveSpanishAllLocaleIds(token) {
 }
 
 async function metaFormPost(endpoint, paramsObj, token) {
-    const form = new URLSearchParams();
-    form.append('access_token', token);
-    Object.entries(paramsObj).forEach(([k, v]) => {
+    const cleanParams = {};
+    Object.entries(paramsObj || {}).forEach(([k, v]) => {
         if (v !== undefined && v !== null && v !== '') {
-            form.append(k, typeof v === 'object' ? JSON.stringify(v) : String(v));
+            cleanParams[k] = typeof v === 'object' ? JSON.stringify(v) : String(v);
         }
     });
-    const resp = await fetch(`https://graph.facebook.com/${META_GRAPH_VERSION}${endpoint}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: form.toString()
-    });
-    return resp.json();
+    return metaGraphPost(`/${META_GRAPH_VERSION}${endpoint}`, cleanParams, token || null);
 }
 
 async function uploadOneDriveVideoToMeta(accountId, video, token, uploadCache) {
@@ -1206,7 +1186,7 @@ async function uploadOneDriveVideoToMeta(accountId, video, token, uploadCache) {
     // 1. Tenta resolver link direto da CDN Microsoft (OneDrive Nuvem) e enviar via file_url
     if (video.id) {
         try {
-            const dlResp = await fetch(`${API_BASE_URL}/api/graph/file/${video.id}?format=json`);
+            const dlResp = await apiFetch(`/api/graph/file/${video.id}?format=json`);
             const dlData = await dlResp.json();
             if (dlData.success && dlData.download_url) {
                 const upRes = await metaFormPost(`/${accountId}/advideos`, {
@@ -1222,12 +1202,12 @@ async function uploadOneDriveVideoToMeta(accountId, video, token, uploadCache) {
 
     // 2. Fallback / Local: envia via proxy multipart do backend Python
     if (!videoId) {
-        const upProxy = await fetch(`${API_BASE_URL}/api/meta/upload-video`, {
+        const upProxy = await apiFetch('/api/meta/upload-video', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 account_id: accountId,
-                access_token: token,
+                access_token: token || '',
                 title: video.name,
                 local_url: !video.id && video.url ? video.url : '',
                 graph_item_id: video.id || '',
@@ -1246,8 +1226,7 @@ async function uploadOneDriveVideoToMeta(accountId, video, token, uploadCache) {
     let thumbnailUrl = '';
     for (let attempt = 0; attempt < 20; attempt++) {
         await new Promise(r => setTimeout(r, 3000));
-        const stResp = await fetch(`https://graph.facebook.com/${META_GRAPH_VERSION}/${videoId}?access_token=${encodeURIComponent(token)}&fields=status,picture,thumbnails`);
-        const stData = await stResp.json();
+        const stData = await metaGraphGet(`/${META_GRAPH_VERSION}/${videoId}?fields=status,picture,thumbnails`, token || null);
         const thumbUri = stData.thumbnails?.data?.[0]?.uri || stData.picture || '';
         if (thumbUri) thumbnailUrl = thumbUri;
         if (stData.status?.video_status === 'ready') break;
@@ -1354,7 +1333,7 @@ async function launchStandardCampaign() {
     const targetCountries = cbState.selectedCountries.filter(c => c.checked);
     const niche = cbState.selectedNicheObj;
 
-    if (!token) return alert('Conecte seu Token da Meta antes de publicar.');
+    if (!hasActiveMetaAuth()) return alert('Configure o META_ACCESS_TOKEN no servidor ou conecte um token temporário antes de publicar.');
     if (!accountId) return alert('Selecione uma Conta de Anúncios.');
     if (!pixelId) return alert('Selecione o Pixel (Dataset) do site.');
     if (!campaignName) return alert('Preencha os campos do Nome da Campanha.');

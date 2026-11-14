@@ -26,27 +26,53 @@
             <form id="login-form" onsubmit="event.preventDefault(); handleLogin(event); return false;">
                 <div class="form-group">
                     <label for="login-username">Usuário</label>
-                    <input type="text" id="login-username" placeholder="Digite seu usuário..." autocomplete="username">
+                    <input type="text" id="login-username" placeholder="Digite seu usuário..." autocomplete="username" required>
                 </div>
 
                 <div class="form-group">
                     <label for="login-password">Senha</label>
-                    <input type="password" id="login-password" placeholder="Digite sua senha..." autocomplete="current-password">
+                    <input type="password" id="login-password" placeholder="Digite sua senha..." autocomplete="current-password" required>
                 </div>
 
                 <div id="login-error" class="login-error-msg twod-hidden">Usuário ou senha incorretos.</div>
 
-                <button type="button" class="btn btn-primary btn-block" onclick="handleLogin(event)">Acessar Painel</button>
+                <button type="submit" id="btn-login-submit" class="btn btn-primary btn-block">Acessar Painel</button>
             </form>
+        </div>
+    </div>
 
-            <div class="quick-login-box">
-                <p class="quick-login-title">Acesso Rápido para Teste:</p>
-                <div class="quick-login-chips">
-                    <button type="button" class="chip" onclick="quickLogin('thiago', '123456')">👑 Thiago (Adm)</button>
-                    <button type="button" class="chip" onclick="quickLogin('alexandre', '123456')">⚡ Alexandre</button>
-                    <button type="button" class="chip" onclick="quickLogin('wesley', '123456')">👤 Wesley</button>
+    <!-- ========================================== -->
+    <!-- TELA OBRIGATÓRIA DE TROCA NO 1º ACESSO     -->
+    <!-- ========================================== -->
+    <div id="force-password-screen" class="login-overlay twod-hidden" style="z-index: 10050;">
+        <div class="login-card">
+            <div class="login-brand" style="margin-bottom: 18px;">
+                <div class="brand-logo" style="background: linear-gradient(135deg, #f59e0b 0%, #ef4444 100%);">
+                    <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                        <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                    </svg>
                 </div>
+                <h2>Definir Senha Pessoal</h2>
+                <p id="force-pwd-user-label">Primeiro acesso detectado. Crie sua senha pessoal antes de entrar.</p>
             </div>
+
+            <form id="force-password-form" onsubmit="event.preventDefault(); submitForcedPasswordChange(event); return false;">
+                <div class="form-group">
+                    <label for="force-new-pwd">Nova Senha (mín. 6 caracteres)</label>
+                    <input type="password" id="force-new-pwd" placeholder="Digite sua nova senha pessoal..." autocomplete="new-password" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="force-confirm-pwd">Confirmar Nova Senha</label>
+                    <input type="password" id="force-confirm-pwd" placeholder="Repita a nova senha..." autocomplete="new-password" required>
+                </div>
+
+                <div id="force-pwd-error" class="login-error-msg twod-hidden"></div>
+
+                <button type="submit" id="btn-force-pwd-submit" class="btn btn-primary btn-block">🔒 Salvar Senha e Entrar</button>
+                <button type="button" class="btn btn-outline btn-block" onclick="showLogin()" style="margin-top: 10px;">← Voltar para o Login</button>
+            </form>
         </div>
     </div>
 
@@ -1183,22 +1209,23 @@
 
                         <div class="settings-section">
                             <h3>Meta Marketing API (Facebook Ads)</h3>
-                            <p class="text-muted" style="margin-bottom: 16px;">Configure ou renove o seu Token de Acesso da Meta para alimentar o Duplicador de Conjuntos e a automação de campanhas.</p>
+                            <p class="text-muted" style="margin-bottom: 12px;">Quando <code>META_ACCESS_TOKEN</code> está configurado nas variáveis de ambiente do servidor (Render), o token definitivo fica protegido somente no backend sem ser exposto no navegador.</p>
+                            <div id="meta-server-token-banner" class="twod-hidden" style="margin-bottom: 14px; padding: 10px 14px; border-radius: 8px; background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.35); color: #34d399; font-size: 12px; line-height: 1.5;"></div>
                             
                             <div class="form-group" style="margin-bottom: 14px;">
                                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; flex-wrap: wrap; gap: 6px;">
                                     <label for="meta-token-input" style="margin-bottom: 0;">
-                                        <strong>Access Token (User Token / System User):</strong>
+                                        <strong>Token Temporário / Substituto Manual (Opcional neste navegador):</strong>
                                     </label>
-                                    <a href="https://developers.facebook.com/tools/explorer/" target="_blank" rel="noopener noreferrer" class="btn btn-outline btn-sm" style="text-decoration: none; display: inline-flex; align-items: center; gap: 4px; font-size: 11px; padding: 4px 10px;" title="Abrir Graph API Explorer no Meta Developers">
-                                        🌐 Abrir Graph API Explorer (Gerar Token) ↗
+                                    <a href="https://business.facebook.com/settings/system-users" target="_blank" rel="noopener noreferrer" class="btn btn-outline btn-sm" style="text-decoration: none; display: inline-flex; align-items: center; gap: 4px; font-size: 11px; padding: 4px 10px;" title="Gerar System User Token definitivo no Business Manager">
+                                        🔑 Usuário do Sistema (Token Definitivo BM) ↗
                                     </a>
                                 </div>
                                 <div style="display: flex; gap: 8px;">
-                                    <input type="password" id="meta-token-input" class="twod-input" placeholder="EAA..." style="flex: 1; font-family: monospace; font-size: 12px;">
+                                    <input type="password" id="meta-token-input" class="twod-input" placeholder="Deixe vazio para usar o token seguro do servidor (ou cole EAA...)" style="flex: 1; font-family: monospace; font-size: 12px;">
                                     <button type="button" class="btn btn-outline" id="btn-toggle-token-vis" onclick="toggleTokenVisibility()">👁️ Ver</button>
                                 </div>
-                                <span class="help-text">Gerado no Meta for Developers (Graph API Explorer) ou no Business Manager (Usuário do Sistema).</span>
+                                <span class="help-text">Para token definitivo 100% privado, defina <code>META_ACCESS_TOKEN</code> nas Environment Variables do Render (sem colar aqui).</span>
                             </div>
 
                             <div class="form-grid-2" style="margin-bottom: 16px;">
@@ -1237,12 +1264,16 @@
                             <h3>Segurança da Conta</h3>
                             <div class="form-grid-2">
                                 <div class="form-group">
-                                    <label>Alterar Minha Senha</label>
-                                    <input type="password" id="change-pwd-input" placeholder="Nova senha...">
+                                    <label for="change-current-pwd-input">Senha Atual</label>
+                                    <input type="password" id="change-current-pwd-input" placeholder="Digite sua senha atual..." autocomplete="current-password">
                                 </div>
-                                <div class="form-group" style="align-self: flex-end;">
-                                    <button class="btn btn-secondary" onclick="changeMyPassword()">Salvar Nova Senha</button>
+                                <div class="form-group">
+                                    <label for="change-pwd-input">Nova Senha (mín. 6 caracteres)</label>
+                                    <input type="password" id="change-pwd-input" placeholder="Digite a nova senha..." autocomplete="new-password">
                                 </div>
+                            </div>
+                            <div style="margin-top: 10px;">
+                                <button type="button" class="btn btn-secondary" onclick="changeMyPassword()">🔒 Salvar Nova Senha</button>
                             </div>
                         </div>
                     </div>
@@ -1297,8 +1328,8 @@
                     <input type="text" id="new-user-name" placeholder="Ex: joao" required>
                 </div>
                 <div class="form-group">
-                    <label>Senha Provisória</label>
-                    <input type="password" id="new-user-pwd" placeholder="Digite uma senha..." required>
+                    <label>Senha Provisória (será trocada no 1º acesso)</label>
+                    <input type="password" id="new-user-pwd" placeholder="Mín. 6 caracteres (ex: 123456)..." value="123456" required>
                 </div>
                 <div class="form-group">
                     <label>Cargo / Permissão</label>
@@ -1326,8 +1357,8 @@
         </div>
     </div>
 
-    <script src="app.js?v=7.8"></script>
-    <script src="campaign_builder.js?v=1.6"></script>
+    <script src="app.js?v=8.0"></script>
+    <script src="campaign_builder.js?v=1.7"></script>
 </body>
 </html>
 

@@ -1,8 +1,12 @@
 import os
 import re
+import hmac
 import json
 import time
 import uuid
+import base64
+import hashlib
+import secrets
 import shutil
 import tempfile
 import threading
@@ -20,6 +24,7 @@ BACKEND_DIR = os.path.dirname(__file__)
 ENV_PATH = os.path.join(BACKEND_DIR, ".env")
 GRAPH_CACHE_PATH = os.path.join(BACKEND_DIR, ".graph_cache.json")
 CAMPAIGN_CREATIVES_PATH = os.path.join(BACKEND_DIR, ".campaign_creatives.json")
+USERS_PATH = os.path.join(BACKEND_DIR, ".users.json")
 
 # Auto-detecta a pasta local do OneDrive de Trabalho (quando rodando no PC do Thiago)
 DEFAULT_WORK_DIR = os.path.join(os.path.expanduser("~"), "OneDrive", "Documentos", "Trabalho")
@@ -27,6 +32,15 @@ if not os.path.exists(DEFAULT_WORK_DIR):
     DEFAULT_WORK_DIR = r"C:\Users\thiag\OneDrive\Documentos\Trabalho"
 
 PORT = int(os.environ.get("PORT", 8000))
+
+# Controle de autenticação, usuários e sessões
+USERS_LOCK = threading.Lock()
+USERS_MEM = None
+_USERS_ONEDRIVE_SYNCED = False
+_SESSION_SECRET_CACHE = None
+_LOGIN_FAILURES = {}
+SESSION_TTL_SECONDS = 7 * 24 * 3600
+ONEDRIVE_USERS_REMOTE_PATH = ".twod_hub/users.json"
 
 # Caches em memória e sincronização em segundo plano
 NICHES_CACHE = None
@@ -73,6 +87,8 @@ def load_env_vars():
         "ONEDRIVE_REDIRECT_URI",
         "ONEDRIVE_REFRESH_TOKEN",
         "ONEDRIVE_TENANT",
+        "HUB_SESSION_SECRET",
+        "HUB_INITIAL_PASSWORD",
     ]
     for k in keys:
         if k in os.environ and os.environ[k] != "":
@@ -104,6 +120,383 @@ def save_env_vars(updates):
                 f.write(f"{k}={v}\n")
     except Exception as e:
         print(f"⚠️ Aviso ao salvar .env (normal em container somente leitura): {e}")
+
+
+# ============================================================
+# AUTENTICAÇÃO, SESSÕES HMAC & PERSISTÊNCIA DE USUÁRIOS
+# ============================================================
+
+def get_session_secret():
+    """Obtém segredo HMAC persistente para tokens de sessão."""
+    global _SESSION_SECRET_CACHE
+    if _SESSION_SECRET_CACHE:
+        return _SESSION_SECRET_CACHE
+
+    cfg = load_env_vars()
+    explicit = cfg.get("HUB_SESSION_SECRET", "").strip()
+    if explicit:
+        _SESSION_SECRET_CACHE = explicit
+        return _SESSION_SECRET_CACHE
+
+    # Em nuvem sem HUB_SESSION_SECRET explícito, deriva de ONEDRIVE_CLIENT_SECRET para sobreviver a reinícios
+    od_secret = cfg.get("ONEDRIVE_CLIENT_SECRET", "").strip()
+    if od_secret:
+        _SESSION_SECRET_CACHE = hmac.new(
+            od_secret.encode("utf-8"),
+            b"twod-hub-session-key-v1",
+            hashlib.sha256,
+        ).hexdigest()
+        return _SESSION_SECRET_CACHE
+
+    generated = secrets.token_hex(32)
+    save_env_vars({"HUB_SESSION_SECRET": generated})
+    _SESSION_SECRET_CACHE = generated
+    return _SESSION_SECRET_CACHE
+
+
+def _b64url_encode(raw_bytes):
+    return base64.urlsafe_b64encode(raw_bytes).rstrip(b"=").decode("ascii")
+
+
+def _b64url_decode(raw_str):
+    pad = "=" * ((4 - len(raw_str) % 4) % 4)
+    return base64.urlsafe_b64decode((raw_str + pad).encode("ascii"))
+
+
+def create_signed_token(payload_dict, ttl_seconds=SESSION_TTL_SECONDS):
+    now = int(time.time())
+    body = dict(payload_dict)
+    body["iat"] = now
+    body["exp"] = now + int(ttl_seconds)
+    encoded = _b64url_encode(json.dumps(body, separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
+    sig = hmac.new(get_session_secret().encode("utf-8"), encoded.encode("ascii"), hashlib.sha256).digest()
+    return f"{encoded}.{_b64url_encode(sig)}"
+
+
+def verify_signed_token(token_str):
+    if not token_str or "." not in token_str:
+        return None
+    try:
+        encoded, sig_b64 = token_str.split(".", 1)
+        expected_sig = hmac.new(get_session_secret().encode("utf-8"), encoded.encode("ascii"), hashlib.sha256).digest()
+        provided_sig = _b64url_decode(sig_b64)
+        if not hmac.compare_digest(expected_sig, provided_sig):
+            return None
+        payload = json.loads(_b64url_decode(encoded).decode("utf-8"))
+        if int(payload.get("exp", 0)) < int(time.time()):
+            return None
+        return payload
+    except Exception:
+        return None
+
+
+def hash_password(password, salt=None):
+    if not salt:
+        salt = secrets.token_hex(16)
+    dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), 120000).hex()
+    return salt, dk
+
+
+def verify_password(password, salt, expected_hash):
+    if not password or not salt or not expected_hash:
+        return False
+    _, dk = hash_password(password, salt)
+    return hmac.compare_digest(dk, expected_hash)
+
+
+def safe_user_dict(user):
+    return {
+        "id": user.get("id", ""),
+        "username": user.get("username", ""),
+        "name": user.get("name", ""),
+        "role": user.get("role", "Operador"),
+        "themeMode": user.get("themeMode", "dark"),
+        "scheduleStart": user.get("scheduleStart", "06:00"),
+        "scheduleEnd": user.get("scheduleEnd", "18:00"),
+        "lastLogin": user.get("lastLogin", "Nunca"),
+        "must_change_password": bool(user.get("must_change_password", False)),
+    }
+
+
+def _build_default_users():
+    cfg = load_env_vars()
+    initial_pwd = cfg.get("HUB_INITIAL_PASSWORD", "").strip() or "123456"
+    seeds = [
+        ("usr_thiago", "thiago", "Thiago", "Administrador", "dark", "06:00", "18:00"),
+        ("usr_alexandre", "alexandre", "Alexandre", "Operador", "dark", "06:00", "18:00"),
+        ("usr_wesley", "wesley", "Wesley", "Operador", "auto", "07:00", "19:00"),
+    ]
+    out = []
+    for uid, uname, name, role, theme, s_start, s_end in seeds:
+        salt, h = hash_password(initial_pwd)
+        out.append({
+            "id": uid,
+            "username": uname,
+            "name": name,
+            "role": role,
+            "salt": salt,
+            "password_hash": h,
+            "must_change_password": True,
+            "pwd_version": 1,
+            "themeMode": theme,
+            "scheduleStart": s_start,
+            "scheduleEnd": s_end,
+            "lastLogin": "Nunca",
+        })
+    return {"users": out}
+
+
+def _load_users_from_onedrive():
+    tok, _ = get_graph_access_token()
+    if not tok:
+        return None
+    encoded = urllib.parse.quote(ONEDRIVE_USERS_REMOTE_PATH)
+    url = f"https://graph.microsoft.com/v1.0/me/drive/root:/{encoded}:/content"
+    req = urllib.request.Request(url, headers={"Authorization": f"Bearer {tok}"}, method="GET")
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            if isinstance(data, dict) and isinstance(data.get("users"), list):
+                return data
+    except urllib.error.HTTPError as e:
+        if e.code != 404:
+            print(f"⚠️ Erro ao ler usuários no OneDrive: HTTP {e.code}")
+    except Exception as e:
+        print(f"⚠️ Erro ao sincronizar usuários do OneDrive: {e}")
+    return None
+
+
+def _save_users_to_onedrive(users_data):
+    tok, _ = get_graph_access_token()
+    if not tok:
+        return False
+    encoded = urllib.parse.quote(ONEDRIVE_USERS_REMOTE_PATH)
+    url = f"https://graph.microsoft.com/v1.0/me/drive/root:/{encoded}:/content"
+    body = json.dumps(users_data, indent=2, ensure_ascii=False).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=body,
+        headers={
+            "Authorization": f"Bearer {tok}",
+            "Content-Type": "application/json; charset=utf-8",
+        },
+        method="PUT",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return 200 <= resp.status < 300
+    except Exception as e:
+        print(f"⚠️ Aviso ao salvar usuários no OneDrive: {e}")
+        return False
+
+
+def load_users_store(sync_remote=True):
+    """Carrega base de usuários com sincronização automática para nuvem (OneDrive) + disco local."""
+    global USERS_MEM, _USERS_ONEDRIVE_SYNCED
+    with USERS_LOCK:
+        if USERS_MEM is not None and (_USERS_ONEDRIVE_SYNCED or not sync_remote):
+            return USERS_MEM
+
+        if USERS_MEM is None and os.path.exists(USERS_PATH):
+            try:
+                with open(USERS_PATH, "r", encoding="utf-8") as f:
+                    disk_data = json.load(f)
+                if isinstance(disk_data, dict) and isinstance(disk_data.get("users"), list) and disk_data["users"]:
+                    USERS_MEM = disk_data
+            except Exception as e:
+                print(f"⚠️ Erro ao ler {USERS_PATH}: {e}")
+
+        if sync_remote and not _USERS_ONEDRIVE_SYNCED:
+            cfg = load_env_vars()
+            if cfg.get("ONEDRIVE_REFRESH_TOKEN"):
+                remote_data = _load_users_from_onedrive()
+                _USERS_ONEDRIVE_SYNCED = True
+                if remote_data and remote_data.get("users"):
+                    USERS_MEM = remote_data
+                    try:
+                        with open(USERS_PATH, "w", encoding="utf-8") as f:
+                            json.dump(USERS_MEM, f, indent=2, ensure_ascii=False)
+                    except Exception:
+                        pass
+            else:
+                _USERS_ONEDRIVE_SYNCED = True
+
+        if USERS_MEM is None:
+            USERS_MEM = _build_default_users()
+            try:
+                with open(USERS_PATH, "w", encoding="utf-8") as f:
+                    json.dump(USERS_MEM, f, indent=2, ensure_ascii=False)
+            except Exception:
+                pass
+            if sync_remote and load_env_vars().get("ONEDRIVE_REFRESH_TOKEN"):
+                threading.Thread(target=_save_users_to_onedrive, args=(json.loads(json.dumps(USERS_MEM)),), daemon=True).start()
+
+        return USERS_MEM
+
+
+def save_users_store(users_data, sync_remote=True, wait_remote=True):
+    """Persiste base de usuários no disco local e na nuvem OneDrive."""
+    global USERS_MEM
+    with USERS_LOCK:
+        USERS_MEM = users_data
+        try:
+            with open(USERS_PATH, "w", encoding="utf-8") as f:
+                json.dump(users_data, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            print(f"⚠️ Aviso ao salvar .users.json local: {e}")
+
+        if sync_remote and load_env_vars().get("ONEDRIVE_REFRESH_TOKEN"):
+            snapshot = json.loads(json.dumps(users_data))
+            if wait_remote:
+                _save_users_to_onedrive(snapshot)
+            else:
+                threading.Thread(target=_save_users_to_onedrive, args=(snapshot,), daemon=True).start()
+
+
+def _issue_session_tokens(user):
+    mcp = bool(user.get("must_change_password", False))
+    pv = int(user.get("pwd_version", 1))
+    session_tok = create_signed_token({
+        "scope": "session",
+        "uid": user.get("id", ""),
+        "username": user.get("username", ""),
+        "role": user.get("role", "Operador"),
+        "pv": pv,
+        "mcp": mcp,
+    }, ttl_seconds=SESSION_TTL_SECONDS)
+    media_tok = create_signed_token({
+        "scope": "media",
+        "uid": user.get("id", ""),
+        "username": user.get("username", ""),
+        "pv": pv,
+    }, ttl_seconds=SESSION_TTL_SECONDS)
+    return session_tok, media_tok
+
+
+def _check_login_rate_limit(client_ip):
+    now = time.time()
+    rec = _LOGIN_FAILURES.get(client_ip)
+    if not rec:
+        return True
+    attempts = [ts for ts in rec if now - ts < 300]
+    _LOGIN_FAILURES[client_ip] = attempts
+    return len(attempts) < 15
+
+
+def _record_login_failure(client_ip):
+    now = time.time()
+    attempts = [ts for ts in _LOGIN_FAILURES.get(client_ip, []) if now - ts < 300]
+    attempts.append(now)
+    _LOGIN_FAILURES[client_ip] = attempts
+
+
+def _clear_login_failures(client_ip):
+    _LOGIN_FAILURES.pop(client_ip, None)
+
+
+# ============================================================
+# PROXY SEGURO META GRAPH API (OCULTA TOKEN NO SERVIDOR)
+# ============================================================
+
+def resolve_meta_token(manual_token=""):
+    mt = (manual_token or "").strip()
+    if mt:
+        return mt
+    return load_env_vars().get("META_ACCESS_TOKEN", "").strip()
+
+
+def _scrub_meta_secret(obj, secret_token=""):
+    """Remove access_token de URLs de paginação (paging.next) e strings antes de responder ao cliente."""
+    if isinstance(obj, str):
+        cleaned = re.sub(
+            r'([?&])access_token=[^&"\'\s]+(&?)',
+            lambda m: "?" if (m.group(1) == "?" and m.group(2)) else (m.group(2) if (m.group(1) == "&" and m.group(2)) else ""),
+            obj,
+        )
+        cleaned = cleaned.rstrip("?&")
+        if secret_token and secret_token in cleaned:
+            cleaned = cleaned.replace(secret_token, "[REDACTED]")
+        return cleaned
+    if isinstance(obj, list):
+        return [_scrub_meta_secret(x, secret_token) for x in obj]
+    if isinstance(obj, dict):
+        return {k: _scrub_meta_secret(v, secret_token) for k, v in obj.items()}
+    return obj
+
+
+def _execute_meta_graph_request(method, raw_path, params=None, manual_token=""):
+    token = resolve_meta_token(manual_token)
+    if not token:
+        return 400, {"error": {"message": "Nenhum Token da Meta configurado no servidor nem manualmente.", "code": 190}}
+
+    req_method = (method or "GET").upper()
+    if req_method not in ("GET", "POST", "DELETE"):
+        return 400, {"error": {"message": f"Método não suportado: {req_method}"}}
+
+    path_str = (raw_path or "").strip()
+    existing_query = {}
+    if path_str.startswith("http://") or path_str.startswith("https://"):
+        parsed_u = urlparse(path_str)
+        if parsed_u.scheme != "https" or parsed_u.netloc.lower() != "graph.facebook.com":
+            return 400, {"error": {"message": "Host inválido no proxy Graph API."}}
+        clean_path = parsed_u.path or "/v21.0/me"
+        for qk, qvals in parse_qs(parsed_u.query, keep_blank_values=True).items():
+            if qk.lower() != "access_token" and qvals:
+                existing_query[qk] = qvals[-1]
+    else:
+        if "?" in path_str:
+            base_p, q_raw = path_str.split("?", 1)
+            for qk, qvals in parse_qs(q_raw, keep_blank_values=True).items():
+                if qk.lower() != "access_token" and qvals:
+                    existing_query[qk] = qvals[-1]
+        else:
+            base_p = path_str
+        if not base_p.startswith("/"):
+            base_p = "/" + base_p
+        if not re.match(r"^/v\d+\.\d+/", base_p):
+            base_p = "/v21.0" + base_p
+        clean_path = base_p
+
+    merged = dict(existing_query)
+    if isinstance(params, dict):
+        for k, v in params.items():
+            if str(k).lower() == "access_token" or v is None:
+                continue
+            merged[k] = json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list)) else str(v)
+
+    merged["access_token"] = token
+
+    if req_method in ("GET", "DELETE"):
+        qs_encoded = urllib.parse.urlencode(merged)
+        target_url = f"https://graph.facebook.com{clean_path}?{qs_encoded}"
+        req = urllib.request.Request(target_url, method=req_method)
+    else:
+        target_url = f"https://graph.facebook.com{clean_path}"
+        body_bytes = urllib.parse.urlencode(merged).encode("utf-8")
+        req = urllib.request.Request(
+            target_url,
+            data=body_bytes,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            method="POST",
+        )
+
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            raw_txt = resp.read().decode("utf-8", errors="replace")
+            try:
+                parsed_json = json.loads(raw_txt)
+            except Exception:
+                parsed_json = {"raw": raw_txt}
+            return resp.status, _scrub_meta_secret(parsed_json, token)
+    except urllib.error.HTTPError as e:
+        raw_txt = e.read().decode("utf-8", errors="replace")
+        try:
+            parsed_json = json.loads(raw_txt)
+        except Exception:
+            parsed_json = {"error": {"message": raw_txt or f"HTTP {e.code}"}}
+        return e.code, _scrub_meta_secret(parsed_json, token)
+    except Exception as e:
+        return 502, _scrub_meta_secret({"error": {"message": str(e)}}, token)
 
 
 # ============================================================
@@ -981,7 +1374,7 @@ class APIHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Meta-Token")
         self.end_headers()
         self.wfile.write(json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8"))
 
@@ -1016,6 +1409,125 @@ class APIHandler(BaseHTTPRequestHandler):
             while chunk := f.read(64 * 1024):
                 self.wfile.write(chunk)
 
+    def _get_client_ip(self):
+        xff = self.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+        if xff:
+            return xff
+        return self.client_address[0] if self.client_address else "unknown"
+
+    def _read_json_body(self):
+        content_len = int(self.headers.get("Content-Length", 0))
+        if content_len <= 0:
+            return {}
+        raw = self.rfile.read(content_len).decode("utf-8")
+        return json.loads(raw) if raw else {}
+
+    def _extract_auth_token(self, qs=None, allow_query=False):
+        auth_header = (self.headers.get("Authorization") or "").strip()
+        if auth_header.lower().startswith("bearer "):
+            return auth_header[7:].strip()
+        if allow_query and qs:
+            q_tok = (qs.get("t", [""])[0] or "").strip()
+            if q_tok:
+                return q_tok
+        return ""
+
+    def _authenticate_request(self, qs=None, allow_media_scope=False, require_admin=False, allow_mcp=False, silent=False):
+        raw_tok = self._extract_auth_token(qs=qs, allow_query=allow_media_scope)
+        payload = verify_signed_token(raw_tok)
+        if not payload:
+            if not silent:
+                self._send_json({
+                    "success": False,
+                    "auth_error": True,
+                    "code": "AUTH_REQUIRED",
+                    "error": "Sessão ausente ou expirada. Faça login novamente."
+                }, 401)
+            return None
+
+        scope = payload.get("scope", "")
+        if scope == "media":
+            if not allow_media_scope or require_admin:
+                if not silent:
+                    self._send_json({"success": False, "auth_error": True, "code": "AUTH_REQUIRED", "error": "Token inválido para esta rota."}, 401)
+                return None
+            store = load_users_store()
+            user = next((u for u in store.get("users", []) if u.get("username") == payload.get("username")), None)
+            if not user or int(user.get("pwd_version", 1)) != int(payload.get("pv", 1)) or user.get("must_change_password"):
+                if not silent:
+                    self._send_json({"success": False, "auth_error": True, "code": "AUTH_REQUIRED", "error": "Sessão expirada."}, 401)
+                return None
+            return user
+
+        if scope != "session":
+            if not silent:
+                self._send_json({"success": False, "auth_error": True, "code": "AUTH_REQUIRED", "error": "Token inválido."}, 401)
+            return None
+
+        store = load_users_store()
+        user = next((u for u in store.get("users", []) if u.get("username") == payload.get("username")), None)
+        if not user or int(user.get("pwd_version", 1)) != int(payload.get("pv", 1)):
+            if not silent:
+                self._send_json({
+                    "success": False,
+                    "auth_error": True,
+                    "code": "SESSION_EXPIRED",
+                    "error": "Sua sessão expirou após alteração de senha."
+                }, 401)
+            return None
+
+        if user.get("must_change_password") and not allow_mcp:
+            if not silent:
+                self._send_json({
+                    "success": False,
+                    "auth_error": True,
+                    "code": "PASSWORD_CHANGE_REQUIRED",
+                    "error": "Você precisa alterar a senha provisória antes de usar o painel."
+                }, 403)
+            return None
+
+        if require_admin and user.get("role") != "Administrador":
+            if not silent:
+                self._send_json({"success": False, "error": "Acesso restrito a administradores."}, 403)
+            return None
+
+        return user
+
+    def _upload_video_file_to_meta(self, account_id, access_token, title, filename, tmp_path, graph_version="v21.0"):
+        import http.client
+        boundary = "----TwoDHubBoundary" + uuid.uuid4().hex
+        pre_fields = b"".join([
+            f"--{boundary}\r\nContent-Disposition: form-data; name=\"{fn}\"\r\n\r\n{fv}\r\n".encode("utf-8")
+            for fn, fv in [("access_token", access_token), ("title", title)]
+        ])
+        file_header = (
+            f"--{boundary}\r\nContent-Disposition: form-data; name=\"source\"; filename=\"{filename}\"\r\n"
+            f"Content-Type: video/mp4\r\n\r\n"
+        ).encode("utf-8")
+        footer = f"\r\n--{boundary}--\r\n".encode("utf-8")
+        file_size = os.path.getsize(tmp_path)
+        total_len = len(pre_fields) + len(file_header) + file_size + len(footer)
+
+        conn = http.client.HTTPSConnection("graph-video.facebook.com", timeout=240)
+        conn.putrequest("POST", f"/{graph_version}/{account_id}/advideos")
+        conn.putheader("Content-Type", f"multipart/form-data; boundary={boundary}")
+        conn.putheader("Content-Length", str(total_len))
+        conn.endheaders()
+        conn.send(pre_fields)
+        conn.send(file_header)
+        with open(tmp_path, "rb") as vf:
+            while True:
+                chunk = vf.read(1024 * 512)
+                if not chunk:
+                    break
+                conn.send(chunk)
+        conn.send(footer)
+
+        resp = conn.getresponse()
+        raw_res = resp.read().decode("utf-8", errors="ignore")
+        conn.close()
+        return resp.status, _scrub_meta_secret(raw_res, access_token)
+
     def do_HEAD(self):
         self.do_GET()
 
@@ -1023,7 +1535,7 @@ class APIHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Meta-Token")
         self.end_headers()
 
     def do_GET(self):
@@ -1032,9 +1544,14 @@ class APIHandler(BaseHTTPRequestHandler):
         qs = parse_qs(parsed.query)
 
         # --------------------------------------------------------
-        # 1. STATUS GERAL DO BACKEND
+        # 1. STATUS GERAL DO BACKEND & AUTENTICAÇÃO
         # --------------------------------------------------------
         if path == "/api/status":
+            authed_user = self._authenticate_request(silent=True)
+            if not authed_user:
+                self._send_json({"status": "online", "auth_required": True})
+                return
+
             cfg = load_env_vars()
             local_exists = os.path.exists(DEFAULT_WORK_DIR)
             graph_configured = bool(cfg.get("ONEDRIVE_CLIENT_ID") and cfg.get("ONEDRIVE_CLIENT_SECRET"))
@@ -1061,10 +1578,35 @@ class APIHandler(BaseHTTPRequestHandler):
                 "graph_completed": graph_completed,
             })
 
+        elif path == "/api/auth/me":
+            user = self._authenticate_request(allow_mcp=True)
+            if not user:
+                return
+            _, media_tok = _issue_session_tokens(user)
+            self._send_json({
+                "success": True,
+                "must_change_password": bool(user.get("must_change_password", False)),
+                "media_token": media_tok,
+                "user": safe_user_dict(user),
+            })
+
+        elif path == "/api/users":
+            admin = self._authenticate_request(require_admin=True)
+            if not admin:
+                return
+            store = load_users_store()
+            self._send_json({
+                "success": True,
+                "users": [safe_user_dict(u) for u in store.get("users", [])],
+            })
+
         # --------------------------------------------------------
         # 2. FLUXO OAUTH2 DO ONEDRIVE (MICROSOFT GRAPH API)
         # --------------------------------------------------------
         elif path == "/api/onedrive/auth":
+            admin = self._authenticate_request(require_admin=True)
+            if not admin:
+                return
             cfg = load_env_vars()
             if not cfg.get("ONEDRIVE_CLIENT_ID") or not cfg.get("ONEDRIVE_CLIENT_SECRET"):
                 self._send_json({"success": False, "error": "ONEDRIVE_CLIENT_ID ou SECRET não configurados."}, 400)
@@ -1132,6 +1674,8 @@ class APIHandler(BaseHTTPRequestHandler):
             """)
 
         elif path == "/api/onedrive/graph-status":
+            if not self._authenticate_request():
+                return
             tok, err = get_graph_access_token()
             if not tok:
                 self._send_json({"connected": False, "error": err}, 200)
@@ -1160,6 +1704,8 @@ class APIHandler(BaseHTTPRequestHandler):
         # 3. LISTAGEM DE NICHOS (NUVEM GRAPH API OU DISCO LOCAL)
         # --------------------------------------------------------
         elif path == "/api/onedrive/niches":
+            if not self._authenticate_request():
+                return
             try:
                 reload_force = qs.get("reload", ["false"])[0] == "true"
                 source_pref = qs.get("source", ["auto"])[0]
@@ -1195,6 +1741,8 @@ class APIHandler(BaseHTTPRequestHandler):
                 self._send_json({"success": False, "error": str(e)}, 500)
 
         elif path == "/api/onedrive/niche-videos":
+            if not self._authenticate_request():
+                return
             niche_name = (qs.get("name", [""])[0] or "").strip()
             if not niche_name:
                 self._send_json({"success": False, "error": "Parâmetro 'name' obrigatório"}, 400)
@@ -1206,6 +1754,8 @@ class APIHandler(BaseHTTPRequestHandler):
             self._send_json({"success": True, "niche": niche_name, "videos": videos})
 
         elif path == "/api/onedrive/niche-packs":
+            if not self._authenticate_request():
+                return
             niche = (qs.get("niche", [""])[0] or qs.get("name", [""])[0] or "").strip()
             if not niche:
                 self._send_json({"success": False, "error": "Parâmetro 'niche' obrigatório"}, 400)
@@ -1215,6 +1765,8 @@ class APIHandler(BaseHTTPRequestHandler):
             self._send_json({"success": True, "niche": niche, "packs": packs})
 
         elif path == "/api/campaign-creatives":
+            if not self._authenticate_request():
+                return
             data = load_campaign_creatives()
             self._send_json({"success": True, "links": data})
 
@@ -1222,6 +1774,8 @@ class APIHandler(BaseHTTPRequestHandler):
         # 4. STREAM / DOWNLOAD DIRETO & MINIATURA VIA MICROSOFT GRAPH CDN
         # --------------------------------------------------------
         elif path.startswith("/api/graph/thumb/"):
+            if not self._authenticate_request(qs=qs, allow_media_scope=True):
+                return
             parts = [p for p in path.replace("/api/graph/thumb/", "").split("/") if p]
             item_id = parts[0] if parts else ""
             if not item_id:
@@ -1272,6 +1826,8 @@ class APIHandler(BaseHTTPRequestHandler):
             self.end_headers()
 
         elif path.startswith("/api/graph/file/"):
+            if not self._authenticate_request(qs=qs, allow_media_scope=True):
+                return
             parts = path.replace("/api/graph/file/", "").split("/")
             item_id = parts[0] if parts else ""
             if not item_id:
@@ -1307,14 +1863,20 @@ class APIHandler(BaseHTTPRequestHandler):
         # 5. CONFIG META & ARQUIVOS LOCAIS
         # --------------------------------------------------------
         elif path == "/api/meta/config":
+            if not self._authenticate_request():
+                return
             env_vars = load_env_vars()
+            has_server_token = bool(env_vars.get("META_ACCESS_TOKEN", "").strip())
             self._send_json({
                 "success": True,
-                "meta_access_token": env_vars.get("META_ACCESS_TOKEN", ""),
+                "has_server_token": has_server_token,
                 "default_account_id": env_vars.get("DEFAULT_AD_ACCOUNT_ID", "act_522793227047438"),
+                "is_cloud": bool(os.environ.get("RENDER") or os.environ.get("RAILWAY_ENVIRONMENT")),
             })
 
         elif path.startswith("/api/audio/"):
+            if not self._authenticate_request(qs=qs, allow_media_scope=True):
+                return
             parts = path.replace("/api/audio/", "").split("/")
             if len(parts) >= 2:
                 niche_name = parts[0]
@@ -1325,6 +1887,8 @@ class APIHandler(BaseHTTPRequestHandler):
                 self._send_json({"error": "Caminho de áudio inválido"}, 400)
 
         elif path.startswith("/api/video/"):
+            if not self._authenticate_request(qs=qs, allow_media_scope=True):
+                return
             parts = path.replace("/api/video/", "").split("/")
             if len(parts) >= 3:
                 niche_name = parts[0]
@@ -1350,38 +1914,268 @@ class APIHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         parsed = urlparse(self.path)
         path = unquote(parsed.path)
+        qs = parse_qs(parsed.query)
 
-        if path == "/api/meta/config":
+        if path == "/api/auth/login":
+            client_ip = self._get_client_ip()
+            if not _check_login_rate_limit(client_ip):
+                self._send_json({
+                    "success": False,
+                    "error": "Muitas tentativas inválidas seguidas. Aguarde alguns minutos."
+                }, 429)
+                return
             try:
-                content_len = int(self.headers.get("Content-Length", 0))
-                post_body = self.rfile.read(content_len).decode("utf-8")
-                payload = json.loads(post_body) if post_body else {}
-                updates = {}
-                if "meta_access_token" in payload:
-                    updates["META_ACCESS_TOKEN"] = payload["meta_access_token"]
-                if "default_account_id" in payload:
-                    updates["DEFAULT_AD_ACCOUNT_ID"] = payload["default_account_id"]
+                payload = self._read_json_body()
+                username = (payload.get("username") or "").strip().lower()
+                password = (payload.get("password") or "").strip()
+                if not username or not password:
+                    self._send_json({"success": False, "error": "Usuário e senha são obrigatórios."}, 400)
+                    return
 
-                save_env_vars(updates)
-                self._send_json({"success": True, "message": "Configurações salvas no .env"})
+                store = load_users_store()
+                user = next((u for u in store.get("users", []) if (u.get("username") or "").lower() == username), None)
+                if not user or not verify_password(password, user.get("salt", ""), user.get("password_hash", "")):
+                    _record_login_failure(client_ip)
+                    self._send_json({"success": False, "error": "Usuário ou senha incorretos."}, 401)
+                    return
+
+                _clear_login_failures(client_ip)
+                user["lastLogin"] = time.strftime("%d/%m %H:%M")
+                save_users_store(store, sync_remote=True, wait_remote=False)
+
+                session_tok, media_tok = _issue_session_tokens(user)
+                self._send_json({
+                    "success": True,
+                    "token": session_tok,
+                    "media_token": media_tok,
+                    "must_change_password": bool(user.get("must_change_password", False)),
+                    "user": safe_user_dict(user),
+                })
             except Exception as e:
                 self._send_json({"success": False, "error": str(e)}, 500)
 
-        elif path == "/api/meta/upload-video":
+        elif path == "/api/auth/change-password":
+            authed = self._authenticate_request(allow_mcp=True)
+            if not authed:
+                return
             try:
-                content_len = int(self.headers.get("Content-Length", 0))
-                post_body = self.rfile.read(content_len).decode("utf-8")
-                payload = json.loads(post_body) if post_body else {}
+                payload = self._read_json_body()
+                current_pwd = (payload.get("current_password") or "").strip()
+                new_pwd = (payload.get("new_password") or "").strip()
 
+                if len(new_pwd) < 6:
+                    self._send_json({"success": False, "error": "A nova senha deve ter pelo menos 6 caracteres."}, 400)
+                    return
+
+                cfg = load_env_vars()
+                initial_pwd = cfg.get("HUB_INITIAL_PASSWORD", "").strip() or "123456"
+                if new_pwd == initial_pwd or new_pwd == "123456":
+                    self._send_json({"success": False, "error": "Escolha uma senha pessoal diferente da senha padrão inicial."}, 400)
+                    return
+
+                store = load_users_store()
+                user = next((u for u in store.get("users", []) if u.get("username") == authed.get("username")), None)
+                if not user:
+                    self._send_json({"success": False, "error": "Usuário não encontrado."}, 404)
+                    return
+
+                if not user.get("must_change_password", False):
+                    if not verify_password(current_pwd, user.get("salt", ""), user.get("password_hash", "")):
+                        self._send_json({"success": False, "error": "Senha atual incorreta."}, 400)
+                        return
+
+                if verify_password(new_pwd, user.get("salt", ""), user.get("password_hash", "")):
+                    self._send_json({"success": False, "error": "A nova senha deve ser diferente da senha atual."}, 400)
+                    return
+
+                new_salt, new_hash = hash_password(new_pwd)
+                user["salt"] = new_salt
+                user["password_hash"] = new_hash
+                user["must_change_password"] = False
+                user["pwd_version"] = int(user.get("pwd_version", 1)) + 1
+                save_users_store(store, sync_remote=True, wait_remote=True)
+
+                session_tok, media_tok = _issue_session_tokens(user)
+                self._send_json({
+                    "success": True,
+                    "token": session_tok,
+                    "media_token": media_tok,
+                    "must_change_password": False,
+                    "user": safe_user_dict(user),
+                })
+            except Exception as e:
+                self._send_json({"success": False, "error": str(e)}, 500)
+
+        elif path == "/api/users/preferences":
+            authed = self._authenticate_request()
+            if not authed:
+                return
+            try:
+                payload = self._read_json_body()
+                store = load_users_store()
+                user = next((u for u in store.get("users", []) if u.get("username") == authed.get("username")), None)
+                if not user:
+                    self._send_json({"success": False, "error": "Usuário não encontrado."}, 404)
+                    return
+                if payload.get("themeMode") in ("light", "dark", "auto"):
+                    user["themeMode"] = payload["themeMode"]
+                if "scheduleStart" in payload:
+                    user["scheduleStart"] = str(payload["scheduleStart"])[:5]
+                if "scheduleEnd" in payload:
+                    user["scheduleEnd"] = str(payload["scheduleEnd"])[:5]
+                save_users_store(store, sync_remote=True, wait_remote=False)
+                self._send_json({"success": True, "user": safe_user_dict(user)})
+            except Exception as e:
+                self._send_json({"success": False, "error": str(e)}, 500)
+
+        elif path == "/api/users":
+            admin = self._authenticate_request(require_admin=True)
+            if not admin:
+                return
+            try:
+                payload = self._read_json_body()
+                name = (payload.get("name") or "").strip()
+                raw_uname = (payload.get("username") or name).strip().lower().replace(" ", "")
+                pwd = (payload.get("password") or "123456").strip()
+                role = payload.get("role") if payload.get("role") in ("Administrador", "Operador") else "Operador"
+                if not name or not raw_uname:
+                    self._send_json({"success": False, "error": "Nome e usuário obrigatórios."}, 400)
+                    return
+                if len(pwd) < 6:
+                    self._send_json({"success": False, "error": "Senha provisória deve ter pelo menos 6 caracteres."}, 400)
+                    return
+
+                store = load_users_store()
+                if any((u.get("username") or "").lower() == raw_uname for u in store.get("users", [])):
+                    self._send_json({"success": False, "error": "Este nome de usuário já existe."}, 400)
+                    return
+
+                salt, p_hash = hash_password(pwd)
+                new_user = {
+                    "id": f"usr_{int(time.time() * 1000)}",
+                    "username": raw_uname,
+                    "name": name,
+                    "role": role,
+                    "salt": salt,
+                    "password_hash": p_hash,
+                    "must_change_password": True,
+                    "pwd_version": 1,
+                    "themeMode": "dark",
+                    "scheduleStart": "06:00",
+                    "scheduleEnd": "18:00",
+                    "lastLogin": "Nunca",
+                }
+                store["users"].append(new_user)
+                save_users_store(store, sync_remote=True, wait_remote=True)
+                self._send_json({"success": True, "user": safe_user_dict(new_user)})
+            except Exception as e:
+                self._send_json({"success": False, "error": str(e)}, 500)
+
+        elif path == "/api/users/reset-password":
+            admin = self._authenticate_request(require_admin=True)
+            if not admin:
+                return
+            try:
+                payload = self._read_json_body()
+                target_uname = (payload.get("username") or "").strip().lower()
+                new_pwd = (payload.get("new_password") or "123456").strip()
+                if not target_uname or len(new_pwd) < 6:
+                    self._send_json({"success": False, "error": "Usuário e nova senha (mín. 6 caracteres) obrigatórios."}, 400)
+                    return
+
+                store = load_users_store()
+                target = next((u for u in store.get("users", []) if (u.get("username") or "").lower() == target_uname), None)
+                if not target:
+                    self._send_json({"success": False, "error": "Usuário não encontrado."}, 404)
+                    return
+
+                salt, p_hash = hash_password(new_pwd)
+                target["salt"] = salt
+                target["password_hash"] = p_hash
+                target["must_change_password"] = True
+                target["pwd_version"] = int(target.get("pwd_version", 1)) + 1
+                save_users_store(store, sync_remote=True, wait_remote=True)
+                self._send_json({"success": True, "user": safe_user_dict(target)})
+            except Exception as e:
+                self._send_json({"success": False, "error": str(e)}, 500)
+
+        elif path == "/api/users/delete":
+            admin = self._authenticate_request(require_admin=True)
+            if not admin:
+                return
+            try:
+                payload = self._read_json_body()
+                target_uname = (payload.get("username") or "").strip().lower()
+                if not target_uname or target_uname == admin.get("username"):
+                    self._send_json({"success": False, "error": "Operação inválida para o usuário informado."}, 400)
+                    return
+                store = load_users_store()
+                store["users"] = [u for u in store.get("users", []) if (u.get("username") or "").lower() != target_uname]
+                save_users_store(store, sync_remote=True, wait_remote=True)
+                self._send_json({"success": True})
+            except Exception as e:
+                self._send_json({"success": False, "error": str(e)}, 500)
+
+        elif path == "/api/meta/config":
+            admin = self._authenticate_request(require_admin=True)
+            if not admin:
+                return
+            try:
+                payload = self._read_json_body()
+                is_cloud = bool(os.environ.get("RENDER") or os.environ.get("RAILWAY_ENVIRONMENT"))
+                updates = {}
+                if "default_account_id" in payload:
+                    updates["DEFAULT_AD_ACCOUNT_ID"] = payload["default_account_id"]
+                if "meta_access_token" in payload:
+                    tok_val = str(payload["meta_access_token"] or "").strip()
+                    if tok_val:
+                        updates["META_ACCESS_TOKEN"] = tok_val
+                    elif not is_cloud:
+                        updates["META_ACCESS_TOKEN"] = ""
+
+                if updates:
+                    save_env_vars(updates)
+                env_vars = load_env_vars()
+                self._send_json({
+                    "success": True,
+                    "has_server_token": bool(env_vars.get("META_ACCESS_TOKEN", "").strip()),
+                    "is_cloud": is_cloud,
+                    "message": "Salvo no ambiente em memória. Para fixar em nuvem definitivamente, configure META_ACCESS_TOKEN nas Environment Variables do Render." if is_cloud else "Configurações salvas no .env local.",
+                })
+            except Exception as e:
+                self._send_json({"success": False, "error": str(e)}, 500)
+
+        elif path == "/api/meta/graph":
+            authed = self._authenticate_request()
+            if not authed:
+                return
+            try:
+                payload = self._read_json_body()
+                status_code, res_json = _execute_meta_graph_request(
+                    payload.get("method", "GET"),
+                    payload.get("path", ""),
+                    payload.get("params"),
+                    payload.get("manual_token", ""),
+                )
+                self._send_json(res_json, status_code)
+            except Exception as e:
+                self._send_json({"error": {"message": str(e)}}, 500)
+
+        elif path == "/api/meta/upload-video":
+            authed = self._authenticate_request()
+            if not authed:
+                return
+            try:
+                payload = self._read_json_body()
                 account_id = payload.get("account_id", "").strip()
-                access_token = payload.get("access_token", "").strip()
+                access_token = resolve_meta_token(payload.get("access_token", ""))
                 title = payload.get("title", "criativo.mp4").strip()
                 local_path_rel = payload.get("local_url", "").strip()
                 graph_item_id = payload.get("graph_item_id", "").strip()
                 graph_version = payload.get("graph_version", "v21.0").strip()
 
                 if not account_id or not access_token:
-                    self._send_json({"success": False, "error": "account_id e access_token obrigatórios"}, 400)
+                    self._send_json({"success": False, "error": "account_id e META_ACCESS_TOKEN obrigatórios"}, 400)
                     return
 
                 filename = os.path.basename(local_path_rel) if local_path_rel else (title if title.endswith(".mp4") else f"{title}.mp4")
@@ -1413,43 +2207,13 @@ class APIHandler(BaseHTTPRequestHandler):
                         self._send_json({"success": False, "error": "Arquivo de vídeo não encontrado para upload"}, 404)
                         return
 
-                    import http.client
-                    boundary = "----TwoDHubBoundary" + uuid.uuid4().hex
-                    pre_fields = b"".join([
-                        f"--{boundary}\r\nContent-Disposition: form-data; name=\"{fn}\"\r\n\r\n{fv}\r\n".encode("utf-8")
-                        for fn, fv in [("access_token", access_token), ("title", title)]
-                    ])
-                    file_header = (
-                        f"--{boundary}\r\nContent-Disposition: form-data; name=\"source\"; filename=\"{filename}\"\r\n"
-                        f"Content-Type: video/mp4\r\n\r\n"
-                    ).encode("utf-8")
-                    footer = f"\r\n--{boundary}--\r\n".encode("utf-8")
-                    file_size = os.path.getsize(tmp_path)
-                    total_len = len(pre_fields) + len(file_header) + file_size + len(footer)
-
-                    conn = http.client.HTTPSConnection("graph-video.facebook.com", timeout=240)
-                    conn.putrequest("POST", f"/{graph_version}/{account_id}/advideos")
-                    conn.putheader("Content-Type", f"multipart/form-data; boundary={boundary}")
-                    conn.putheader("Content-Length", str(total_len))
-                    conn.endheaders()
-                    conn.send(pre_fields)
-                    conn.send(file_header)
-                    with open(tmp_path, "rb") as vf:
-                        while True:
-                            chunk = vf.read(1024 * 512)
-                            if not chunk:
-                                break
-                            conn.send(chunk)
-                    conn.send(footer)
-
-                    resp = conn.getresponse()
-                    raw_res = resp.read().decode("utf-8", errors="ignore")
-                    conn.close()
-
-                    if 200 <= resp.status < 300:
+                    resp_status, raw_res = self._upload_video_file_to_meta(
+                        account_id, access_token, title, filename, tmp_path, graph_version
+                    )
+                    if 200 <= resp_status < 300:
                         self._send_json({"success": True, "result": json.loads(raw_res)})
                     else:
-                        self._send_json({"success": False, "error": raw_res}, resp.status)
+                        self._send_json({"success": False, "error": raw_res}, resp_status)
                 finally:
                     if cleanup_tmp and tmp_path and os.path.exists(tmp_path):
                         try:
@@ -1459,12 +2223,60 @@ class APIHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 self._send_json({"success": False, "error": str(e)}, 500)
 
-        elif path == "/api/translate":
+        elif path == "/api/meta/upload-video-binary":
+            authed = self._authenticate_request()
+            if not authed:
+                return
+            tmp_path = None
             try:
-                content_len = int(self.headers.get("Content-Length", 0))
-                post_body = self.rfile.read(content_len).decode("utf-8")
-                payload = json.loads(post_body) if post_body else {}
+                account_id = (qs.get("account_id", [""])[0] or "").strip()
+                title = (qs.get("title", ["video.mp4"])[0] or "video.mp4").strip()
+                filename = os.path.basename((qs.get("filename", [title])[0] or title).strip()) or "video.mp4"
+                graph_version = (qs.get("graph_version", ["v21.0"])[0] or "v21.0").strip()
+                manual_tok = (self.headers.get("X-Meta-Token") or "").strip()
+                access_token = resolve_meta_token(manual_tok)
 
+                if not account_id or not access_token:
+                    self._send_json({"success": False, "error": "account_id e META_ACCESS_TOKEN obrigatórios"}, 400)
+                    return
+
+                content_len = int(self.headers.get("Content-Length", 0))
+                if content_len <= 0:
+                    self._send_json({"success": False, "error": "Corpo de vídeo vazio."}, 400)
+                    return
+
+                fd, tmp_path = tempfile.mkstemp(prefix="twod_up_", suffix=".mp4")
+                os.close(fd)
+                remaining = content_len
+                with open(tmp_path, "wb") as tf:
+                    while remaining > 0:
+                        chunk = self.rfile.read(min(remaining, 1024 * 512))
+                        if not chunk:
+                            break
+                        tf.write(chunk)
+                        remaining -= len(chunk)
+
+                resp_status, raw_res = self._upload_video_file_to_meta(
+                    account_id, access_token, title, filename, tmp_path, graph_version
+                )
+                if 200 <= resp_status < 300:
+                    self._send_json({"success": True, "result": json.loads(raw_res)})
+                else:
+                    self._send_json({"success": False, "error": raw_res}, resp_status)
+            except Exception as e:
+                self._send_json({"success": False, "error": str(e)}, 500)
+            finally:
+                if tmp_path and os.path.exists(tmp_path):
+                    try:
+                        os.unlink(tmp_path)
+                    except OSError:
+                        pass
+
+        elif path == "/api/translate":
+            if not self._authenticate_request():
+                return
+            try:
+                payload = self._read_json_body()
                 texts = payload.get("texts", [])
                 target_lang = (payload.get("target_lang") or "es").strip()
                 source_lang = (payload.get("source_lang") or "pt").strip()
@@ -1479,10 +2291,10 @@ class APIHandler(BaseHTTPRequestHandler):
                 self._send_json({"success": False, "error": str(e)}, 500)
 
         elif path == "/api/campaign-creatives":
+            if not self._authenticate_request():
+                return
             try:
-                content_len = int(self.headers.get("Content-Length", 0))
-                post_body = self.rfile.read(content_len).decode("utf-8")
-                payload = json.loads(post_body) if post_body else {}
+                payload = self._read_json_body()
                 camp_id = str(payload.get("campaign_id", "")).strip()
                 if not camp_id:
                     self._send_json({"success": False, "error": "campaign_id obrigatório"}, 400)
@@ -1521,6 +2333,9 @@ def run():
     cfg = load_env_vars()
     if cfg.get("ONEDRIVE_REFRESH_TOKEN"):
         start_graph_sync_background(force_full=False)
+        threading.Thread(target=load_users_store, kwargs={"sync_remote": True}, daemon=True).start()
+    else:
+        load_users_store(sync_remote=False)
 
     host = "0.0.0.0" if (os.environ.get("RENDER") or os.environ.get("RAILWAY_ENVIRONMENT") or os.environ.get("PORT")) else "127.0.0.1"
     server_address = (host, PORT)
