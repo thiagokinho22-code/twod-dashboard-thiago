@@ -388,25 +388,58 @@ function toggleAllBuilderPages(checked) {
 async function loadBuilderModelCampaigns(accountId) {
     const token = getMetaToken();
     const select = document.getElementById('cb-model-campaign-select');
+    const searchInput = document.getElementById('cb-model-campaign-search');
+    if (searchInput) searchInput.value = '';
     if (!select || !token) return;
 
     select.innerHTML = '<option value="">Carregando campanhas da conta...</option>';
     try {
-        const resp = await fetch(`https://graph.facebook.com/${META_GRAPH_VERSION}/${accountId}/campaigns?access_token=${encodeURIComponent(token)}&fields=id,name,objective,status&limit=50`);
+        const resp = await fetch(`https://graph.facebook.com/${META_GRAPH_VERSION}/${accountId}/campaigns?access_token=${encodeURIComponent(token)}&fields=id,name,objective,status&limit=150`);
         const data = await resp.json();
         const camps = Array.isArray(data.data) ? data.data : [];
         cbState.campaigns = camps;
-
-        select.innerHTML = '<option value="">Selecione uma campanha existente p/ espelhar...</option>';
-        camps.forEach(c => {
-            const opt = document.createElement('option');
-            opt.value = c.id;
-            opt.innerText = `${c.status === 'ACTIVE' ? '🟢' : '⏸️'} ${c.name}`;
-            select.appendChild(opt);
-        });
+        renderBuilderModelCampaignOptions(camps, false);
     } catch (e) {
         select.innerHTML = '<option value="">Erro ao carregar campanhas</option>';
     }
+}
+
+function renderBuilderModelCampaignOptions(camps, autoPickFirst = false) {
+    const select = document.getElementById('cb-model-campaign-select');
+    if (!select) return;
+    const prev = select.value;
+    select.innerHTML = '';
+
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.innerText = camps.length > 0
+        ? `Selecione uma campanha (${camps.length})...`
+        : 'Nenhuma campanha encontrada para essa busca';
+    select.appendChild(placeholder);
+
+    camps.forEach(c => {
+        const opt = document.createElement('option');
+        opt.value = c.id;
+        opt.innerText = `${c.status === 'ACTIVE' ? '🟢' : '⏸️'} ${c.name}`;
+        select.appendChild(opt);
+    });
+
+    if (prev && camps.some(c => c.id === prev)) {
+        select.value = prev;
+    } else if (autoPickFirst && camps.length > 0) {
+        select.value = camps[0].id;
+    }
+}
+
+function filterBuilderModelCampaigns() {
+    const q = (document.getElementById('cb-model-campaign-search')?.value || '').trim().toLowerCase();
+    const all = cbState.campaigns || [];
+    if (!q) {
+        renderBuilderModelCampaignOptions(all, false);
+        return;
+    }
+    const filtered = all.filter(c => (c.name || '').toLowerCase().includes(q));
+    renderBuilderModelCampaignOptions(filtered, filtered.length > 0);
 }
 
 async function inspectModelCampaign() {
@@ -1513,6 +1546,7 @@ async function launchStandardCampaign() {
 window.toggleCampaignBuilderTokenBox = toggleCampaignBuilderTokenBox;
 window.onCampaignBuilderAccountChanged = onCampaignBuilderAccountChanged;
 window.toggleAllBuilderPages = toggleAllBuilderPages;
+window.filterBuilderModelCampaigns = filterBuilderModelCampaigns;
 window.inspectModelCampaign = inspectModelCampaign;
 window.updateCampaignNamePreview = updateCampaignNamePreview;
 window.setCampaignTypePreset = setCampaignTypePreset;

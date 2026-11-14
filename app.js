@@ -1793,6 +1793,12 @@ async function onMetaAccountSelected() {
 
     selectCamp.innerHTML = '<option value="">Carregando campanhas...</option>';
     selectCamp.disabled = true;
+    const searchCamp = document.getElementById('search-meta-campaign');
+    if (searchCamp) {
+        searchCamp.value = '';
+        searchCamp.disabled = true;
+    }
+    metaState.campaigns = [];
     if (selectAdSet) {
         selectAdSet.innerHTML = '<option value="">Selecione uma campanha primeiro...</option>';
         selectAdSet.disabled = true;
@@ -1817,37 +1823,21 @@ async function onMetaAccountSelected() {
 
     const token = getMetaToken();
     try {
-        const url = `https://graph.facebook.com/${META_GRAPH_VERSION}/${accountId}/campaigns?access_token=${encodeURIComponent(token)}&fields=id,name,status,objective&limit=100`;
-        const resp = await fetch(url);
-        const data = await resp.json();
-
-        if (data.data && Array.isArray(data.data) && data.data.length > 0) {
-            metaState.campaigns = data.data;
-            selectCamp.innerHTML = '';
-
-            let firstActive = '';
-            data.data.forEach(camp => {
-                const opt = document.createElement('option');
-                opt.value = camp.id;
-                const statusTag = camp.status === 'ACTIVE' ? '🟢' : '⏸️';
-                opt.innerText = `${statusTag} ${camp.name}`;
-                selectCamp.appendChild(opt);
-
-                if (!firstActive && camp.status === 'ACTIVE') {
-                    firstActive = camp.id;
-                }
-            });
-
-            selectCamp.disabled = false;
-            if (labelCamp) labelCamp.innerText = `(${data.data.length} campanhas)`;
-
-            if (firstActive) {
-                selectCamp.value = firstActive;
-            } else {
-                selectCamp.value = data.data[0].id;
+        let allCamps = [];
+        let nextUrl = `https://graph.facebook.com/${META_GRAPH_VERSION}/${accountId}/campaigns?access_token=${encodeURIComponent(token)}&fields=id,name,status,objective&limit=250`;
+        for (let page = 0; page < 2 && nextUrl; page++) {
+            const resp = await fetch(nextUrl);
+            const data = await resp.json();
+            if (Array.isArray(data.data) && data.data.length > 0) {
+                allCamps = allCamps.concat(data.data);
             }
+            nextUrl = data.paging?.next || null;
+        }
 
-            onMetaCampaignSelected();
+        if (allCamps.length > 0) {
+            metaState.campaigns = allCamps;
+            if (searchCamp) searchCamp.disabled = false;
+            renderMetaCampaignOptions(allCamps, true);
         } else {
             selectCamp.innerHTML = '<option value="">Nenhuma campanha nesta conta</option>';
             if (labelCamp) labelCamp.innerText = '(0 campanhas)';
@@ -1856,6 +1846,109 @@ async function onMetaAccountSelected() {
         console.error('Erro ao buscar campanhas:', e);
         selectCamp.innerHTML = '<option value="">Erro ao carregar campanhas</option>';
         if (labelCamp) labelCamp.innerText = '(Erro)';
+    }
+}
+
+let _metaCampRemoteTimer = null;
+
+function renderMetaCampaignOptions(campaignsList, autoSelectFirst = false) {
+    const selectCamp = document.getElementById('select-meta-campaign');
+    const labelCamp = document.getElementById('label-campaign-count');
+    if (!selectCamp) return;
+
+    const prevId = selectCamp.value;
+    selectCamp.innerHTML = '';
+
+    if (!campaignsList || campaignsList.length === 0) {
+        const emptyOpt = document.createElement('option');
+        emptyOpt.value = '';
+        emptyOpt.innerText = 'Nenhuma campanha encontrada para essa busca';
+        selectCamp.appendChild(emptyOpt);
+        selectCamp.disabled = false;
+        if (labelCamp) labelCamp.innerText = `(0 de ${(metaState.campaigns || []).length})`;
+        return;
+    }
+
+    let firstActive = '';
+    campaignsList.forEach(camp => {
+        const opt = document.createElement('option');
+        opt.value = camp.id;
+        const statusTag = camp.status === 'ACTIVE' ? '🟢' : '⏸️';
+        opt.innerText = `${statusTag} ${camp.name}`;
+        selectCamp.appendChild(opt);
+        if (!firstActive && camp.status === 'ACTIVE') firstActive = camp.id;
+    });
+
+    selectCamp.disabled = false;
+    const total = (metaState.campaigns || []).length;
+    if (labelCamp) {
+        labelCamp.innerText = campaignsList.length === total
+            ? `(${total} campanhas)`
+            : `(${campaignsList.length} de ${total})`;
+    }
+
+    const stillVisible = prevId && campaignsList.some(c => c.id === prevId);
+    if (stillVisible && !autoSelectFirst) {
+        selectCamp.value = prevId;
+        return;
+    }
+
+    const nextSelected = firstActive || campaignsList[0].id;
+    selectCamp.value = nextSelected;
+    if (nextSelected !== prevId || autoSelectFirst) {
+        onMetaCampaignSelected();
+    }
+}
+
+function filterMetaCampaigns() {
+    const rawQuery = (document.getElementById('search-meta-campaign')?.value || '').trim();
+    const allCamps = metaState.campaigns || [];
+    if (!rawQuery) {
+        renderMetaCampaignOptions(allCamps, false);
+        return;
+    }
+
+    const tokens = normalizeText(rawQuery).split(' ').filter(Boolean);
+    const filtered = allCamps.filter(c => {
+        const normName = normalizeText(c.name || '');
+        const rawLower = (c.name || '').toLowerCase();
+        const qLower = rawQuery.toLowerCase();
+        return rawLower.includes(qLower) || tokens.every(t => normName.includes(t));
+    });
+
+    renderMetaCampaignOptions(filtered, filtered.length > 0);
+
+    // Se não achou nas campanhas em memória e digitou 3+ caracteres (ex: PostID antigo), pesquisa na Meta API
+    if (_metaCampRemoteTimer) clearTimeout(_metaCampRemoteTimer);
+    if (filtered.length === 0 && rawQuery.length >= 3 && metaState.selectedAccountId) {
+        const capturedAccount = metaState.selectedAccountId;
+        const capturedQuery = rawQuery;
+        _metaCampRemoteTimer = setTimeout(async () => {
+            const token = getMetaToken();
+            const labelCamp = document.getElementById('label-campaign-count');
+            if (!token || metaState.selectedAccountId !== capturedAccount) return;
+            if ((document.getElementById('search-meta-campaign')?.value || '').trim() !== capturedQuery) return;
+            if (labelCamp) labelCamp.innerText = '(Buscando na API...)';
+
+            try {
+                const filtering = JSON.stringify([{ field: 'name', operator: 'CONTAIN', value: capturedQuery }]);
+                const url = `https://graph.facebook.com/${META_GRAPH_VERSION}/${capturedAccount}/campaigns?access_token=${encodeURIComponent(token)}&fields=id,name,status,objective&filtering=${encodeURIComponent(filtering)}&limit=50`;
+                const resp = await fetch(url);
+                const data = await resp.json();
+                if ((document.getElementById('search-meta-campaign')?.value || '').trim() !== capturedQuery) return;
+
+                const remoteList = Array.isArray(data.data) ? data.data : [];
+                if (remoteList.length > 0) {
+                    const existingIds = new Set(metaState.campaigns.map(c => c.id));
+                    remoteList.forEach(rc => {
+                        if (!existingIds.has(rc.id)) metaState.campaigns.push(rc);
+                    });
+                }
+                renderMetaCampaignOptions(remoteList, remoteList.length > 0);
+            } catch (e) {
+                console.warn('Busca remota de campanha falhou:', e);
+            }
+        }, 320);
     }
 }
 

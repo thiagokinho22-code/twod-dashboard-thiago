@@ -459,6 +459,7 @@
                                 <label for="cb-model-campaign-select">
                                     <strong>Copiar Ajustes Internos de Modelo (Opcional):</strong>
                                 </label>
+                                <input type="search" id="cb-model-campaign-search" class="twod-input" placeholder="🔍 Filtrar modelo por PostID ou nome..." oninput="filterBuilderModelCampaigns()" style="margin-bottom: 6px; padding: 7px 10px; font-size: 13px;">
                                 <div style="display: flex; gap: 8px;">
                                     <select id="cb-model-campaign-select" class="twod-select" style="flex: 1;">
                                         <option value="">Selecione uma campanha existente...</option>
@@ -825,6 +826,7 @@
                                     <strong>Campanha Ativa:</strong>
                                     <span class="text-muted" id="label-campaign-count"></span>
                                 </label>
+                                <input type="search" id="search-meta-campaign" class="twod-input" placeholder="🔍 Digite o PostID ou nome da campanha..." oninput="filterMetaCampaigns()" style="margin-bottom: 6px; padding: 7px 10px; font-size: 13px;" disabled>
                                 <select id="select-meta-campaign" class="twod-select" onchange="onMetaCampaignSelected()" disabled>
                                     <option value="">Selecione uma conta primeiro...</option>
                                 </select>
@@ -1253,8 +1255,8 @@
         </div>
     </div>
 
-    <script src="app.js?v=7.2"></script>
-    <script src="campaign_builder.js?v=1.3"></script>
+    <script src="app.js?v=7.3"></script>
+    <script src="campaign_builder.js?v=1.4"></script>
 </body>
 </html>
 
