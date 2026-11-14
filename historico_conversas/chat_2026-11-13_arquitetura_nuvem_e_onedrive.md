@@ -91,5 +91,19 @@
      - Na aba **Configurações** logo acima do campo de Access Token da Meta.
   3. Atualizou a versão do script para `app.js?v=7.4` em `index.html`.
 
+- **Thiago:** Reportou que tentou duplicar uma campanha (24944, RastrearOnibus), mas os conjuntos foram criados na campanha de Bingo (25111, BingoEmCasa).
+- **Agente:**
+  1. **Diagnóstico da Causa Raiz:**
+     - Quando a conta é carregada, a primeira campanha ativa (Bingo) era pré-selecionada. Ao digitar `249` no campo de busca, múltiplos eventos assíncronos (`filterMetaCampaigns`) concorriam sem cancelamento de requisições defasadas (race condition), fazendo a resposta de uma busca anterior sobrescrever o conjunto base em memória.
+     - No endpoint `POST /{adset_id}/copies` da Graph API, não estava sendo passado explicitamente o parâmetro `campaign_id`. Sem esse parâmetro, a Meta clona o conjunto sempre para a campanha original do `{adset_id}` de origem.
+     - Faltava validação cruzada entre o dropdown visível na tela e a variável em memória, além de aviso claro na confirmação.
+  2. **Correções Aplicadas:**
+     - Inserido `copyForm.append('campaign_id', campaignId)` na chamada `POST /{adset_id}/copies` para forçar a Meta a criar o conjunto 100% dentro da campanha selecionada na tela.
+     - Implementado token de sequência (`_metaCampaignReqSeq`) para descartar requisições assíncronas defasadas e debounce de 120ms na digitação da busca de campanhas.
+     - Limpeza imediata de `metaState.selectedAdSetId` e `metaState.selectedAdSet` ao trocar de campanha, impedindo herança de conjunto de outra campanha.
+     - Validação estrita antes do disparo garantindo que o conjunto base realmente pertence à campanha ativa selecionada.
+     - Pop-up de confirmação aprimorado exibindo em destaque o **Nome e ID da Campanha de Destino** e do **Conjunto Base**.
+     - Versão atualizada para `app.js?v=7.5`. Commit `7c9471a` enviado para a branch `main`.
+
 ---
 *(Este arquivo será atualizado continuamente conforme avançamos no desenvolvimento)*
