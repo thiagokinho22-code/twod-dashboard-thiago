@@ -9,6 +9,7 @@ venv/
 .env
 TwoD Hub OneDrive.txt
 backend/.graph_cache.json
+backend/.campaign_creatives.json
 
 # Binários pesados gerados localmente
 *.exe

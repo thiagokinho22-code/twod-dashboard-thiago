@@ -10,6 +10,7 @@ import mimetypes
 import urllib.request
 import urllib.parse
 import urllib.error
+from concurrent.futures import ThreadPoolExecutor
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, unquote, parse_qs
 
@@ -344,6 +345,104 @@ def _recompute_niche_status(niche_obj):
         niche_obj["status"] = "pending"
 
 
+GRAPH_THUMB_CACHE = {}
+TRANSLATION_CACHE = {}
+
+
+def _translate_single_text(txt, source_lang, tl_code):
+    """Traduz texto com cache e múltiplos provedores (clients5, googleapis gtx, MyMemory) para evitar HTTP 429."""
+    if not txt or not isinstance(txt, str):
+        return txt
+    stripped = txt.strip()
+    if tl_code.lower() == source_lang.lower() or not any(c.isalpha() for c in stripped):
+        return txt
+
+    cache_key = (source_lang.lower(), tl_code.lower(), txt)
+    with GRAPH_LOCK:
+        if cache_key in TRANSLATION_CACHE:
+            return TRANSLATION_CACHE[cache_key]
+
+    headers = {"User-Agent": "Mozilla/5.0"}
+    joined = None
+
+    # 1. Google Translate clients5 (não costuma dar 429)
+    try:
+        u1 = "https://clients5.google.com/translate_a/t?" + urllib.parse.urlencode({
+            "client": "dict-chrome-ex",
+            "sl": source_lang,
+            "tl": tl_code,
+            "q": txt,
+        })
+        req = urllib.request.Request(u1, headers=headers)
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            raw = json.loads(resp.read().decode("utf-8"))
+            if isinstance(raw, list) and raw:
+                if isinstance(raw[0], str):
+                    joined = raw[0]
+                elif isinstance(raw[0], list) and raw[0] and isinstance(raw[0][0], str):
+                    joined = raw[0][0]
+    except Exception:
+        joined = None
+
+    # 2. Google Translate gtx
+    if not joined:
+        try:
+            u2 = "https://translate.googleapis.com/translate_a/single?" + urllib.parse.urlencode({
+                "client": "gtx",
+                "sl": source_lang,
+                "tl": tl_code,
+                "dt": "t",
+                "q": txt,
+            })
+            req = urllib.request.Request(u2, headers=headers)
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                raw = json.loads(resp.read().decode("utf-8"))
+                cand = "".join(seg[0] for seg in raw[0] if seg and seg[0])
+                if cand:
+                    joined = cand
+        except Exception:
+            joined = None
+
+    # 3. MyMemory fallback
+    if not joined:
+        try:
+            u3 = "https://api.mymemory.translated.net/get?" + urllib.parse.urlencode({
+                "q": txt,
+                "langpair": f"{source_lang}|{tl_code}",
+            })
+            req = urllib.request.Request(u3, headers=headers)
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                raw = json.loads(resp.read().decode("utf-8"))
+                cand = (raw.get("responseData") or {}).get("translatedText")
+                if cand and "MYMEMORY WARNING" not in cand.upper():
+                    joined = cand
+        except Exception:
+            joined = None
+
+    if not joined:
+        return txt
+
+    if stripped == stripped.upper() and any(c.isalpha() for c in stripped):
+        joined = joined.upper()
+
+    with GRAPH_LOCK:
+        TRANSLATION_CACHE[cache_key] = joined
+    return joined
+
+
+def _extract_block_and_lang(rel_subfolders):
+    """Extrai (block, lang) a partir das subpastas relativas dentro da pasta do nicho."""
+    parts = [p.strip() for p in (rel_subfolders or []) if p and p.strip()]
+    if not parts:
+        return "", ""
+    if len(parts) == 1:
+        single = parts[0]
+        if single.lower().startswith("bloco"):
+            return single, ""
+        return "", single
+    return " / ".join(parts[:-1]), parts[-1]
+
+
 def _apply_delta_item(item, root_kind):
     """Interpreta cada item retornado pelo endpoint /delta da Microsoft Graph API."""
     if "deleted" in item:
@@ -407,11 +506,12 @@ def _apply_delta_item(item, root_kind):
     elif root_kind == "video" and is_file and name.lower().endswith(".mp4"):
         m_num = re.match(r"^(\d+)", name)
         num = int(m_num.group(1)) if m_num else 0
-        lang_folder = rel_parts[-1] if len(rel_parts) >= 2 else ""
+        block_folder, lang_folder = _extract_block_and_lang(rel_parts[1:])
         item_data = {
             "id": item_id,
             "name": name,
             "num": num,
+            "block": block_folder,
             "lang": lang_folder,
             "size": item.get("size", 0),
             "url": f"/api/graph/file/{item_id}/{urllib.parse.quote(name)}",
@@ -426,15 +526,17 @@ def _apply_delta_item(item, root_kind):
     _recompute_niche_status(niche)
 
 
-def fetch_single_niche_videos_from_graph(niche_name):
-    """Busca diretamente no OneDrive Nuvem os vídeos de um nicho específico (mesmo com subpastas)."""
-    tok, err = get_graph_access_token()
+def fetch_single_niche_videos_from_graph(niche_name, videos_id=None, tok=None):
+    """Busca diretamente no OneDrive Nuvem os vídeos de um nicho específico (preservando Bloco A/B e Idioma)."""
     if not tok:
-        return None, err or "OneDrive não autenticado"
+        tok, err = get_graph_access_token()
+        if not tok:
+            return None, err or "OneDrive não autenticado"
 
-    _, _, videos_id = _find_work_folder_ids(tok)
     if not videos_id:
-        return None, "Pasta Vídeos não encontrada no OneDrive"
+        _, _, videos_id = _find_work_folder_ids(tok)
+        if not videos_id:
+            return None, "Pasta Vídeos não encontrada no OneDrive"
 
     encoded = urllib.parse.quote(niche_name.strip())
     root_res = _graph_get(f"https://graph.microsoft.com/v1.0/me/drive/items/{videos_id}:/{encoded}", tok)
@@ -443,29 +545,34 @@ def fetch_single_niche_videos_from_graph(niche_name):
 
     feed = []
     reels = []
-    queue = [(root_res["id"], "")]
-    while queue:
-        folder_id, parent_folder_name = queue.pop(0)
-        children = _graph_list_all_children(folder_id, tok)
-        for ch in children:
-            cname = ch.get("name", "")
-            if "folder" in ch:
-                queue.append((ch["id"], cname))
-            elif "file" in ch and cname.lower().endswith(".mp4"):
-                m_num = re.match(r"^(\d+)", cname)
-                num = int(m_num.group(1)) if m_num else 0
-                item_data = {
-                    "id": ch["id"],
-                    "name": cname,
-                    "num": num,
-                    "lang": parent_folder_name,
-                    "size": ch.get("size", 0),
-                    "url": f"/api/graph/file/{ch['id']}/{urllib.parse.quote(cname)}",
-                }
-                if 1 <= num <= 3:
-                    feed.append(item_data)
-                elif 4 <= num <= 9:
-                    reels.append(item_data)
+    current_level = [(root_res["id"], ())]
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        while current_level:
+            results = list(pool.map(lambda node: (node[1], _graph_list_all_children(node[0], tok)), current_level))
+            next_level = []
+            for rel_folders, children in results:
+                for ch in children:
+                    cname = ch.get("name", "")
+                    if "folder" in ch:
+                        next_level.append((ch["id"], rel_folders + (cname,)))
+                    elif "file" in ch and cname.lower().endswith(".mp4"):
+                        m_num = re.match(r"^(\d+)", cname)
+                        num = int(m_num.group(1)) if m_num else 0
+                        block_folder, lang_folder = _extract_block_and_lang(list(rel_folders))
+                        item_data = {
+                            "id": ch["id"],
+                            "name": cname,
+                            "num": num,
+                            "block": block_folder,
+                            "lang": lang_folder,
+                            "size": ch.get("size", 0),
+                            "url": f"/api/graph/file/{ch['id']}/{urllib.parse.quote(cname)}",
+                        }
+                        if 1 <= num <= 3:
+                            feed.append(item_data)
+                        elif 4 <= num <= 9:
+                            reels.append(item_data)
+            current_level = next_level
 
     with GRAPH_LOCK:
         niches_map = GRAPH_SYNC_STATE["niches_map"]
@@ -479,6 +586,7 @@ def fetch_single_niche_videos_from_graph(niche_name):
             }
         niches_map[niche_name]["videos"]["feed"] = feed
         niches_map[niche_name]["videos"]["reels"] = reels
+        niches_map[niche_name]["deep_synced"] = True
         _recompute_niche_status(niches_map[niche_name])
 
     return {"feed": feed, "reels": reels, "found_in_cloud": True}, None
@@ -507,58 +615,166 @@ def save_campaign_creatives(data):
         return False
 
 
-def find_niche_candidate_packs(niche_slug):
-    """Busca todas as pastas de nicho do OneDrive que contêm ou combinam com o slug (ex: RastrearOnibus 04.11.26)."""
+def find_niche_candidate_packs(niche_slug, force_refresh=False):
+    """Busca pacotes de criativo do OneDrive para o nicho, separando Bloco A / Bloco B e ordenando da data mais nova para a mais antiga."""
     import unicodedata
     if not niche_slug:
         return []
 
-    # Normalização sem acentos nem caracteres especiais
-    nfd = unicodedata.normalize('NFD', niche_slug)
-    clean_target = ''.join(c for c in nfd if unicodedata.category(c) != 'Mn')
-    target_norm = re.sub(r'[^a-zA-Z0-9]', '', clean_target).lower()
+    def _norm(txt):
+        nfd = unicodedata.normalize('NFD', txt or '')
+        clean = ''.join(c for c in nfd if unicodedata.category(c) != 'Mn')
+        return re.sub(r'[^a-zA-Z0-9]', '', clean).lower()
 
-    matched_packs = []
-    candidate_names = []
-    with GRAPH_LOCK:
-        niches_map = GRAPH_SYNC_STATE.get("niches_map", {})
-        for nname in niches_map.keys():
-            n_nfd = unicodedata.normalize('NFD', nname)
-            n_clean = ''.join(c for c in n_nfd if unicodedata.category(c) != 'Mn')
-            n_norm = re.sub(r'[^a-zA-Z0-9]', '', n_clean).lower()
-            if target_norm in n_norm or n_norm in target_norm:
-                candidate_names.append(nname)
+    def _pack_date_key(folder_name):
+        m = re.search(r'(\d{2})[./-](\d{2})[./-](\d{2,4})', folder_name or '')
+        if not m:
+            return (0, 0, 0, 0)
+        d, mo, y = int(m.group(1)), int(m.group(2)), m.group(3)
+        y_int = int(y) + 2000 if len(y) == 2 else int(y)
+        return (1, y_int, mo, d)
 
-    # Para cada pasta candidata, garante que os vídeos estão carregados
-    for cname in candidate_names:
-        niche_obj = None
+    target_norm = _norm(niche_slug)
+    if not target_norm:
+        return []
+
+    cfg = load_env_vars()
+    has_graph = bool(cfg.get("ONEDRIVE_REFRESH_TOKEN"))
+
+    source_niches = []
+    if has_graph:
         with GRAPH_LOCK:
-            niche_obj = GRAPH_SYNC_STATE.get("niches_map", {}).get(cname)
+            is_empty = len(GRAPH_SYNC_STATE.get("niches_map", {})) == 0
 
-        has_videos = niche_obj and (niche_obj["videos"]["feed"] or niche_obj["videos"]["reels"])
-        if not has_videos:
-            fetch_single_niche_videos_from_graph(cname)
+        if force_refresh or is_empty:
+            tok, _ = get_graph_access_token()
+            if tok:
+                _, _, videos_id = _find_work_folder_ids(tok)
+                if videos_id:
+                    for ch in _graph_list_all_children(videos_id, tok):
+                        if "folder" in ch:
+                            cname = (ch.get("name") or "").strip()
+                            if cname:
+                                with GRAPH_LOCK:
+                                    if cname not in GRAPH_SYNC_STATE["niches_map"]:
+                                        GRAPH_SYNC_STATE["niches_map"][cname] = {
+                                            "name": cname,
+                                            "audios": [],
+                                            "videos": {"feed": [], "reels": []},
+                                            "status": "pending",
+                                            "source": "graph",
+                                        }
+
+        candidate_names = []
+        with GRAPH_LOCK:
+            niches_map = GRAPH_SYNC_STATE.get("niches_map", {})
+            for nname in niches_map.keys():
+                n_norm = _norm(nname)
+                if target_norm in n_norm or (len(n_norm) >= 4 and n_norm in target_norm):
+                    candidate_names.append(nname)
+
+        any_refreshed = False
+        to_fetch = []
+        for cname in candidate_names:
             with GRAPH_LOCK:
                 niche_obj = GRAPH_SYNC_STATE.get("niches_map", {}).get(cname)
+                cached_vids = (
+                    (niche_obj or {}).get("videos", {}).get("feed", [])
+                    + (niche_obj or {}).get("videos", {}).get("reels", [])
+                )
+                already_deep = bool((niche_obj or {}).get("deep_synced")) and all("block" in v for v in cached_vids)
+                needs_fetch = force_refresh or (not already_deep)
+            if needs_fetch:
+                to_fetch.append(cname)
 
-        if niche_obj:
-            all_vids = niche_obj["videos"]["feed"] + niche_obj["videos"]["reels"]
-            langs = list(set(v.get("lang") for v in all_vids if v.get("lang")))
-            lang_priority = {"PORTUGUES": 1, "ESPANHOL": 2, "INGLES": 3, "FRANCES": 4}
-            langs.sort(key=lambda l: lang_priority.get(re.sub(r'[^A-Z]', '', l.upper()), 99))
+        if to_fetch:
+            tok, _ = get_graph_access_token()
+            videos_id = None
+            if tok:
+                _, _, videos_id = _find_work_folder_ids(tok)
+            with ThreadPoolExecutor(max_workers=4) as pool:
+                list(pool.map(lambda c: fetch_single_niche_videos_from_graph(c, videos_id=videos_id, tok=tok), to_fetch))
+            any_refreshed = True
 
+        with GRAPH_LOCK:
+            for cname in candidate_names:
+                niche_obj = GRAPH_SYNC_STATE.get("niches_map", {}).get(cname)
+                if niche_obj:
+                    source_niches.append(niche_obj)
+
+        if any_refreshed:
+            _save_graph_cache_to_disk()
+    else:
+        local_niches = scan_onedrive_folders(DEFAULT_WORK_DIR, force_reload=force_refresh)
+        for niche_obj in local_niches:
+            n_norm = _norm(niche_obj.get("name", ""))
+            if target_norm in n_norm or (len(n_norm) >= 4 and n_norm in target_norm):
+                source_niches.append(niche_obj)
+
+    lang_priority = {"PORTUGUES": 1, "ESPANHOL": 2, "INGLES": 3, "FRANCES": 4}
+    matched_packs = []
+
+    for niche_obj in source_niches:
+        folder_name = niche_obj["name"]
+        raw_vids = niche_obj["videos"]["feed"] + niche_obj["videos"]["reels"]
+        if not raw_vids:
+            continue
+
+        seen_keys = set()
+        blocks_map = {}
+        for v in raw_vids:
+            dedup_key = v.get("id") or v.get("url")
+            if dedup_key in seen_keys:
+                continue
+            seen_keys.add(dedup_key)
+            block_name = (v.get("block") or "").strip()
+            blocks_map.setdefault(block_name, []).append(v)
+
+        for block_name in sorted(blocks_map.keys()):
+            pack_vids = blocks_map[block_name]
+            by_lang = {}
+            for v in pack_vids:
+                lang_label = (v.get("lang") or "Sem Idioma").strip() or "Sem Idioma"
+                v_out = dict(v)
+                v_out["thumb_url"] = f"/api/graph/thumb/{v['id']}" if v.get("id") else ""
+                bucket = "feed" if 1 <= v_out.get("num", 0) <= 3 else "reels"
+                by_lang.setdefault(lang_label, {"feed": [], "reels": []})[bucket].append(v_out)
+
+            for lang_buckets in by_lang.values():
+                lang_buckets["feed"].sort(key=lambda x: (x.get("num", 0), x.get("name", "")))
+                lang_buckets["reels"].sort(key=lambda x: (x.get("num", 0), x.get("name", "")))
+
+            langs = sorted(
+                by_lang.keys(),
+                key=lambda l: (lang_priority.get(_norm(l).upper(), 99), l),
+            )
+
+            all_feed = []
+            all_reels = []
+            for l in langs:
+                all_feed.extend(by_lang[l]["feed"])
+                all_reels.extend(by_lang[l]["reels"])
+
+            pack_id = f"{folder_name} :: {block_name}" if block_name else folder_name
+            display_name = f"{folder_name} — {block_name}" if block_name else folder_name
             matched_packs.append({
-                "name": cname,
-                "status": niche_obj.get("status", "pending"),
+                "pack_id": pack_id,
+                "name": display_name,
+                "folder_name": folder_name,
+                "block": block_name,
+                "status": "completed" if len(pack_vids) >= 6 else "partial",
                 "languages": langs,
-                "videos_count": len(all_vids),
-                "feed": niche_obj["videos"]["feed"][:6],
-                "reels": niche_obj["videos"]["reels"][:6],
-                "sample_thumbs": [v["url"] for v in all_vids[:6] if "url" in v]
+                "videos_count": len(pack_vids),
+                "by_lang": by_lang,
+                "feed": all_feed,
+                "reels": all_reels,
+                "sample_thumbs": [v["thumb_url"] or v["url"] for v in (all_feed[:3] + all_reels[:3])],
             })
 
-    # Ordena pelo nome descendente (as datas mais novas primeiro)
-    matched_packs.sort(key=lambda p: p["name"], reverse=True)
+    # Primeiro ordena por pasta + bloco ascendente (Bloco A antes de Bloco B)
+    matched_packs.sort(key=lambda p: (p["folder_name"], p["block"]))
+    # Depois ordena por data mais nova primeiro (Timsort preserva Bloco A antes de Bloco B)
+    matched_packs.sort(key=lambda p: (_pack_date_key(p["folder_name"]), p["folder_name"]), reverse=True)
     return matched_packs
 
 
@@ -720,7 +936,8 @@ def scan_onedrive_folders(base_path=DEFAULT_WORK_DIR, force_reload=False):
                 niche = get_or_create(entry.name)
                 for root_dir, _, files in os.walk(entry.path):
                     rel_sub = os.path.relpath(root_dir, entry.path)
-                    lang_name = os.path.basename(root_dir) if rel_sub != "." else ""
+                    rel_parts = rel_sub.split(os.sep) if rel_sub != "." else []
+                    block_folder, lang_name = _extract_block_and_lang(rel_parts)
                     for fname in files:
                         if fname.lower().endswith(".mp4"):
                             m_num = re.match(r"^(\d+)", fname)
@@ -730,6 +947,7 @@ def scan_onedrive_folders(base_path=DEFAULT_WORK_DIR, force_reload=False):
                             item_data = {
                                 "name": fname,
                                 "num": num,
+                                "block": block_folder,
                                 "lang": lang_name,
                                 "size": os.path.getsize(fpath),
                                 "url": f"/api/video/{rel_url_path}",
@@ -992,7 +1210,8 @@ class APIHandler(BaseHTTPRequestHandler):
             if not niche:
                 self._send_json({"success": False, "error": "Parâmetro 'niche' obrigatório"}, 400)
                 return
-            packs = find_niche_candidate_packs(niche)
+            force_refresh = qs.get("refresh", ["false"])[0].lower() == "true"
+            packs = find_niche_candidate_packs(niche, force_refresh=force_refresh)
             self._send_json({"success": True, "niche": niche, "packs": packs})
 
         elif path == "/api/campaign-creatives":
@@ -1000,8 +1219,58 @@ class APIHandler(BaseHTTPRequestHandler):
             self._send_json({"success": True, "links": data})
 
         # --------------------------------------------------------
-        # 4. STREAM / DOWNLOAD DIRETO VIA MICROSOFT GRAPH CDN
+        # 4. STREAM / DOWNLOAD DIRETO & MINIATURA VIA MICROSOFT GRAPH CDN
         # --------------------------------------------------------
+        elif path.startswith("/api/graph/thumb/"):
+            parts = [p for p in path.replace("/api/graph/thumb/", "").split("/") if p]
+            item_id = parts[0] if parts else ""
+            if not item_id:
+                self._send_json({"error": "ID do item inválido"}, 400)
+                return
+
+            size_pref = (qs.get("size", ["medium"])[0] or "medium").lower()
+            if size_pref not in ("small", "medium", "large"):
+                size_pref = "medium"
+
+            cache_key = f"{item_id}:{size_pref}"
+            now_ts = time.time()
+            thumb_url = None
+            with GRAPH_LOCK:
+                cached = GRAPH_THUMB_CACHE.get(cache_key)
+                if cached and cached[1] > now_ts:
+                    thumb_url = cached[0]
+
+            if not thumb_url:
+                tok, err = get_graph_access_token()
+                if not tok:
+                    self._send_json({"error": err or "Não autenticado"}, 401)
+                    return
+                res = _graph_get(f"https://graph.microsoft.com/v1.0/me/drive/items/{item_id}/thumbnails", tok)
+                sets = res.get("value", []) if isinstance(res, dict) else []
+                if sets:
+                    first_set = sets[0]
+                    thumb_url = (
+                        (first_set.get(size_pref) or {}).get("url")
+                        or (first_set.get("medium") or {}).get("url")
+                        or (first_set.get("large") or {}).get("url")
+                        or (first_set.get("small") or {}).get("url")
+                    )
+                if not thumb_url:
+                    self._send_json({"error": "Miniatura indisponível", "detail": res}, 404)
+                    return
+                with GRAPH_LOCK:
+                    GRAPH_THUMB_CACHE[cache_key] = (thumb_url, now_ts + 900)
+
+            if qs.get("format", [""])[0] == "json":
+                self._send_json({"success": True, "id": item_id, "size": size_pref, "thumb_url": thumb_url})
+                return
+
+            self.send_response(302)
+            self.send_header("Location", thumb_url)
+            self.send_header("Cache-Control", "public, max-age=600")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+
         elif path.startswith("/api/graph/file/"):
             parts = path.replace("/api/graph/file/", "").split("/")
             item_id = parts[0] if parts else ""
@@ -1203,32 +1472,7 @@ class APIHandler(BaseHTTPRequestHandler):
                 tl_map = {"iw": "he", "tl": "fil"}
                 tl_code = tl_map.get(target_lang, target_lang)
 
-                translated = []
-                for txt in texts:
-                    if not txt or not isinstance(txt, str):
-                        translated.append(txt)
-                        continue
-                    stripped = txt.strip()
-                    if tl_code.lower() == source_lang.lower() or not any(c.isalpha() for c in stripped):
-                        translated.append(txt)
-                        continue
-                    try:
-                        q_url = "https://translate.googleapis.com/translate_a/single?" + urllib.parse.urlencode({
-                            "client": "gtx",
-                            "sl": source_lang,
-                            "tl": tl_code,
-                            "dt": "t",
-                            "q": txt,
-                        })
-                        req = urllib.request.Request(q_url, headers={"User-Agent": "Mozilla/5.0"})
-                        with urllib.request.urlopen(req, timeout=10) as resp:
-                            raw = json.loads(resp.read().decode("utf-8"))
-                            joined = "".join(seg[0] for seg in raw[0] if seg and seg[0])
-                            if stripped == stripped.upper() and any(c.isalpha() for c in stripped):
-                                joined = joined.upper()
-                            translated.append(joined)
-                    except Exception:
-                        translated.append(txt)
+                translated = [_translate_single_text(txt, source_lang, tl_code) for txt in texts]
 
                 self._send_json({"success": True, "target_lang": target_lang, "translations": translated})
             except Exception as e:
@@ -1254,7 +1498,10 @@ class APIHandler(BaseHTTPRequestHandler):
                 current[camp_id] = {
                     "campaign_id": camp_id,
                     "campaign_name": payload.get("campaign_name", ""),
+                    "pack_id": payload.get("pack_id", "") or payload.get("niche_pack", ""),
                     "niche_pack": payload.get("niche_pack", ""),
+                    "folder_name": payload.get("folder_name", ""),
+                    "block": payload.get("block", ""),
                     "niche_slug": payload.get("niche_slug", ""),
                     "account_id": payload.get("account_id", ""),
                     "thumbs": payload.get("thumbs", []),

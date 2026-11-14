@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>TwoD Hub — Central de Automações</title>
-    <link rel="stylesheet" href="styles.css?v=2.1">
+    <link rel="stylesheet" href="styles.css?v=2.2">
 </head>
 <body>
 
@@ -892,9 +892,9 @@
                                         <strong style="font-size:13px; color:#e2e8f0;">Vínculo com Pacote do OneDrive</strong>
                                         <span id="campaign-creative-badge" class="badge-tag" style="background:#3b82f620; color:#60a5fa; border:1px solid #3b82f640;">Não vinculado</span>
                                     </div>
-                                    <div id="campaign-link-actions" style="display:flex; gap:8px;">
-                                        <button type="button" class="btn btn-secondary btn-sm" id="btn-search-niche-packs" onclick="loadNicheCandidatePacks()" style="padding:4px 10px; font-size:11px;">🔍 Buscar Pastas no OneDrive</button>
-                                        <button type="button" class="btn btn-secondary btn-sm twod-hidden" id="btn-change-niche-pack" onclick="openPackSelectorView()" style="padding:4px 10px; font-size:11px;">✏️ Trocar Pacote</button>
+                                    <div id="campaign-link-actions" style="display:flex; gap:8px; flex-wrap:wrap;">
+                                        <button type="button" class="btn btn-secondary btn-sm" id="btn-search-niche-packs" onclick="loadNicheCandidatePacks(true, false)" style="padding:4px 10px; font-size:11px;">🔍 Buscar Pastas no OneDrive</button>
+                                        <button type="button" class="btn btn-secondary btn-sm" id="btn-sync-niche-packs" onclick="loadNicheCandidatePacks(true, true)" style="padding:4px 10px; font-size:11px;">🔄 Sincronizar OneDrive</button>
                                     </div>
                                 </div>
                                 <div id="campaign-creative-summary" class="text-muted" style="font-size:12px; margin-top:4px;">
@@ -1315,7 +1315,18 @@
         </div>
     </div>
 
-    <script src="app.js?v=7.6"></script>
+    <div id="dup-thumb-zoom-modal" class="thumb-zoom-backdrop twod-hidden" onclick="if(event.target===this) closeThumbZoomModal()">
+        <div class="thumb-zoom-card">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                <strong id="dup-thumb-zoom-title" style="color:#f8fafc; font-size:14px;">Prévia do Criativo</strong>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="closeThumbZoomModal()">Fechar ✕</button>
+            </div>
+            <img id="dup-thumb-zoom-img" src="" alt="Prévia ampliada">
+            <div id="dup-thumb-zoom-sub" class="text-muted" style="font-size:12px; margin-top:8px;"></div>
+        </div>
+    </div>
+
+    <script src="app.js?v=7.7"></script>
     <script src="campaign_builder.js?v=1.4"></script>
 </body>
 </html>

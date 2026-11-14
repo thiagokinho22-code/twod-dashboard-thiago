@@ -1980,6 +1980,7 @@ async function onMetaCampaignSelected() {
     metaState.selectedAdSet = null;
     metaState.adsets = [];
     metaState.checkedCountries = {};
+    duplicatorManualFilesByLang = {};
 
     renderCampaignCreativeLinkBadge();
     updateDuplicatorLanguageNotice();
@@ -2069,6 +2070,8 @@ function onMetaAdSetSelected() {
         showBaseAdSetPreview(adset);
         loadBaseAdSetMetaThumbnails(adset.id);
         renderCampaignCreativeLinkBadge();
+        renderBlockNav();
+        renderCountriesGrid();
         updateDuplicatorLanguageNotice();
     } else {
         hideBaseAdSetPreview();
@@ -2125,6 +2128,282 @@ function hideBaseAdSetPreview() {
 let metaBaseAdsCache = [];
 let campaignCreativesMap = {};
 let _metaThumbReqSeq = 0;
+let loadedNichePacksMap = {};
+let loadedPacksByNicheSlug = {};
+let duplicatorManualFilesByLang = {};
+let duplicatorSelectedSlots = new Set([1, 2, 3, 4, 5, 6]);
+
+function escHtml(str = '') {
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function openThumbZoomModal(imgUrl, title = 'Prévia do Criativo', subtitle = '') {
+    const modal = document.getElementById('dup-thumb-zoom-modal');
+    const imgEl = document.getElementById('dup-thumb-zoom-img');
+    const titleEl = document.getElementById('dup-thumb-zoom-title');
+    const subEl = document.getElementById('dup-thumb-zoom-sub');
+    if (!modal || !imgEl) return;
+
+    let finalUrl = imgUrl || '';
+    if (finalUrl.includes('/api/graph/thumb/') && !finalUrl.includes('size=')) {
+        finalUrl += (finalUrl.includes('?') ? '&' : '?') + 'size=large';
+    }
+    imgEl.src = finalUrl;
+    if (titleEl) titleEl.innerText = title || 'Prévia do Criativo';
+    if (subEl) subEl.innerText = subtitle || '';
+    modal.classList.remove('twod-hidden');
+}
+
+function closeThumbZoomModal() {
+    const modal = document.getElementById('dup-thumb-zoom-modal');
+    if (modal) modal.classList.add('twod-hidden');
+}
+
+// Detecta o idioma real de um conjunto base de origem
+function detectAdSetLanguage(adsetObj) {
+    if (!adsetObj) return 'pt';
+    const normName = normalizeText(adsetObj.name || '');
+
+    // 1º Prioridade: marcador explícito no nome (ex: "Estados Unidos (Espanhol)", "Suíça (Francês)")
+    if (normName.includes('espanhol') || normName.includes('spanish')) return 'es';
+    if (normName.includes('ingles') || normName.includes('english')) return 'en';
+    if (normName.includes('frances') || normName.includes('french')) return 'fr';
+    if (normName.includes('russo') || normName.includes('russian')) return 'ru';
+    if (normName.includes('arabe') || normName.includes('arabic')) return 'ar';
+    if (normName.includes('portugues') || normName.includes('brasil') || normName.includes('portugal')) return 'pt';
+    if (normName.includes('alema') || normName.includes('german')) return 'de';
+    if (normName.includes('italian')) return 'it';
+    if (normName.includes('holand') || normName.includes('dutch')) return 'nl';
+    if (normName.includes('polon') || normName.includes('polish')) return 'pl';
+    if (normName.includes('romen') || normName.includes('romanian')) return 'ro';
+
+    // 2º Prioridade: tabela de blocos do Duplicador
+    if (typeof META_COUNTRY_BLOCKS !== 'undefined') {
+        for (const blk of Object.values(META_COUNTRY_BLOCKS)) {
+            for (const c of (blk.countries || [])) {
+                const cNorm = normalizeText(c.adSetName);
+                if (cNorm && (normName === cNorm || normName.includes(cNorm))) {
+                    return (c.langCode || 'pt').toLowerCase();
+                }
+            }
+        }
+    }
+
+    // 3º Prioridade: locales & países na segmentação
+    if (adsetObj.targeting?.locales?.includes(6)) return 'es';
+    const countries = adsetObj.targeting?.geo_locations?.countries || [];
+    if (countries.some(c => ['ES', 'MX', 'CO', 'AR', 'CL', 'PE', 'VE', 'EC', 'GT', 'CR', 'PA', 'DO', 'HN', 'PY', 'BO', 'UY', 'SV', 'NI'].includes(c))) return 'es';
+    if (countries.includes('BR') || countries.includes('PT')) return 'pt';
+    if (countries.includes('FR')) return 'fr';
+    if (countries.includes('US') || countries.includes('GB') || countries.includes('AU')) return 'en';
+    return 'pt';
+}
+
+const DUP_EXTRA_LANG_ALIASES = {
+    vi: ['VI', 'VIETNAMITA', 'VIETNAM', 'VIETNAMESE'],
+    th: ['TH', 'TAILANDES', 'TAILANDIA', 'THAI'],
+    no: ['NO', 'NORUEGUES', 'NORUEGA', 'NORWEGIAN'],
+    fi: ['FI', 'FINLANDES', 'FINLANDIA', 'FINNISH'],
+    sv: ['SV', 'SUECO', 'SUECIA', 'SWEDISH'],
+    iw: ['IW', 'HE', 'HEBRAICO', 'ISRAEL', 'HEBREW'],
+    ms: ['MS', 'MALAIO', 'MALASIA', 'MALAY'],
+    sl: ['SL', 'ESLOVENO', 'ESLOVENIA', 'SLOVENIAN'],
+    lt: ['LT', 'LITUANO', 'LITUANIA', 'LITHUANIAN'],
+    ca: ['CA', 'CATALAO', 'CATALAN'],
+    fa: ['FA', 'PERSA', 'IRA', 'PERSIAN'],
+    et: ['ET', 'ESTONIANO', 'ESTONIA', 'ESTONIAN'],
+    lv: ['LV', 'LETAO', 'LETONIA', 'LATVIAN']
+};
+
+// Encontra a pasta de idioma correspondente no pacote do OneDrive sem fallback silencioso errado
+function findMatchingPackFolderLang(availableLangs = [], langCode = 'pt') {
+    if (!Array.isArray(availableLangs) || availableLangs.length === 0) return null;
+    const codeKey = (langCode || 'pt').toLowerCase();
+    const baseAliases = (typeof ONEDRIVE_LANG_ALIASES !== 'undefined' && ONEDRIVE_LANG_ALIASES[codeKey])
+        ? ONEDRIVE_LANG_ALIASES[codeKey]
+        : (DUP_EXTRA_LANG_ALIASES[codeKey] || [codeKey.toUpperCase()]);
+
+    const normPack = s => normalizeText(s || '').toUpperCase().replace(/\s+/g, '');
+    const candidates = availableLangs.map(raw => ({ raw, norm: normPack(raw) }));
+
+    // Match exato (com e sem espaço), depois substring segura para nomes de idioma
+    for (const alias of baseAliases) {
+        const normAlias = normPack(alias);
+        if (!normAlias) continue;
+        const exact = candidates.find(c => c.norm === normAlias);
+        if (exact) return exact.raw;
+    }
+    for (const alias of baseAliases) {
+        if (alias === 'CANADA') continue; // ambíguo entre EN e FR
+        const normAlias = normPack(alias);
+        if (normAlias.length >= 4) {
+            const partial = candidates.find(c => c.norm.includes(normAlias));
+            if (partial) return partial.raw;
+        }
+    }
+    return null;
+}
+
+// Extrai os vídeos (slots 1..6) de um pacote do OneDrive para um idioma específico
+function getVideosForPackLang(packObj, langCode) {
+    if (!packObj) return { matchedLang: null, slots: [] };
+    const byLang = packObj.by_lang || {};
+    const langKeys = Object.keys(byLang);
+
+    let matchedLang = null;
+    let pool = [];
+
+    if (langKeys.length > 0) {
+        matchedLang = findMatchingPackFolderLang(langKeys, langCode);
+        if (matchedLang) {
+            pool = [...(byLang[matchedLang].feed || []), ...(byLang[matchedLang].reels || [])];
+        }
+    } else {
+        const allVids = [...(packObj.feed || []), ...(packObj.reels || [])];
+        const langs = Array.from(new Set(allVids.map(v => v.lang).filter(Boolean)));
+        matchedLang = findMatchingPackFolderLang(langs, langCode);
+        if (matchedLang) {
+            pool = allVids.filter(v => v.lang === matchedLang);
+        }
+    }
+
+    if (!matchedLang || pool.length === 0) {
+        return { matchedLang: null, slots: [] };
+    }
+
+    const slots = [];
+    for (let slot = 1; slot <= 6; slot++) {
+        const video = pool.find(v => Number(v.num) === slot || (v.name && v.name.startsWith(`${slot}.`)));
+        if (video) {
+            slots.push({
+                slot,
+                adName: String(slot).padStart(2, '0'),
+                formatLabel: slot <= 3 ? 'Quadrado (Feed)' : 'Vertical (Reels)',
+                video
+            });
+        }
+    }
+    if (slots.length === 0) {
+        pool.slice(0, 6).forEach((v, idx) => {
+            const slot = idx + 1;
+            slots.push({
+                slot,
+                adName: String(slot).padStart(2, '0'),
+                formatLabel: slot <= 3 ? 'Quadrado (Feed)' : 'Vertical (Reels)',
+                video: v
+            });
+        });
+    }
+    return { matchedLang, slots };
+}
+
+function getCachedLinkedPackObj(campaignId) {
+    const link = campaignCreativesMap[campaignId];
+    if (!link) return null;
+    const key = link.pack_id || link.niche_pack;
+    return loadedNichePacksMap[key] || loadedNichePacksMap[link.niche_pack] || null;
+}
+
+// Verifica se há criativos prontos (Conjunto Base, OneDrive vinculado ou MP4 Manual) para um idioma
+function isCreativeReadyForLang(campaignId, adsetObj, langCode) {
+    const target = (langCode || 'pt').toLowerCase();
+    if (adsetObj && detectAdSetLanguage(adsetObj) === target) {
+        return { ready: true, source: 'base', label: 'Conjunto Base' };
+    }
+    if (Array.isArray(duplicatorManualFilesByLang[target]) && duplicatorManualFilesByLang[target].length > 0) {
+        return { ready: true, source: 'manual', label: `MP4 Manual (${duplicatorManualFilesByLang[target].length})` };
+    }
+    const packObj = getCachedLinkedPackObj(campaignId);
+    const link = campaignCreativesMap[campaignId];
+    const langs = packObj ? (packObj.languages || Object.keys(packObj.by_lang || {})) : (link?.languages || []);
+    const matched = findMatchingPackFolderLang(langs, target);
+    if (matched) {
+        return { ready: true, source: 'onedrive', label: matched };
+    }
+    return { ready: false, source: 'none', label: '' };
+}
+
+// Constroi URL localizada mantendo o padrão TranslateX do conjunto base (/es/, /pt/...)
+function buildDuplicatorLocalizedUrl(rawUrl, targetLang, baseLang = 'pt') {
+    const trimmed = (rawUrl || '').trim();
+    if (!trimmed) return '';
+    try {
+        const u = new URL(trimmed);
+        const parts = u.pathname.split('/').filter(Boolean);
+        const langSet = (typeof TRANSLATEX_LANGS !== 'undefined')
+            ? TRANSLATEX_LANGS
+            : new Set(['pt', 'es', 'en', 'fr', 'de', 'it', 'nl', 'ru', 'ar', 'ro', 'hu', 'cs', 'sk', 'hi', 'id', 'ur', 'pl', 'uk', 'tl', 'sr']);
+        let hadPrefix = false;
+        if (parts.length > 0) {
+            const firstLower = parts[0].toLowerCase();
+            for (const code of langSet) {
+                if (code.toLowerCase() === firstLower) {
+                    hadPrefix = true;
+                    parts.shift();
+                    break;
+                }
+            }
+        }
+        const cleanPath = '/' + parts.join('/') + (u.pathname.endsWith('/') && parts.length > 0 ? '/' : '');
+        const target = (targetLang || 'pt').trim();
+        if (!hadPrefix && target.toLowerCase() === (baseLang || '').toLowerCase()) {
+            u.pathname = cleanPath;
+        } else {
+            u.pathname = `/${target}${cleanPath.startsWith('/') ? '' : '/'}${cleanPath}`;
+        }
+        return u.toString();
+    } catch (e) {
+        return trimmed;
+    }
+}
+
+// Hidrata o pacote completo (by_lang + thumbs) de uma campanha vinculada sob demanda
+async function ensureLinkedPackHydrated(campaignId, forceRefresh = false) {
+    const link = campaignCreativesMap[campaignId];
+    if (!link || !link.niche_pack) return null;
+    if (!forceRefresh) {
+        const cached = getCachedLinkedPackObj(campaignId);
+        if (cached) return cached;
+    }
+    const campObj = (metaState.campaigns || []).find(c => c.id === campaignId);
+    const nicheSlug = link.niche_slug || extractNicheFromCampaign(campObj?.name || link.campaign_name || '');
+    if (!nicheSlug) return null;
+
+    try {
+        const q = `niche=${encodeURIComponent(nicheSlug)}${forceRefresh ? '&refresh=true' : ''}`;
+        const resp = await fetch(`${API_BASE_URL}/api/onedrive/niche-packs?${q}`);
+        const data = await resp.json();
+        if (data.success && Array.isArray(data.packs)) {
+            data.packs.forEach(p => {
+                loadedNichePacksMap[p.pack_id || p.name] = p;
+                loadedNichePacksMap[p.name] = p;
+            });
+            loadedPacksByNicheSlug[normalizeText(nicheSlug)] = data.packs;
+
+            const found = data.packs.find(p =>
+                (link.pack_id && p.pack_id === link.pack_id)
+                || p.name === link.niche_pack
+                || (link.folder_name && p.folder_name === link.folder_name && (link.block || '') === (p.block || ''))
+            );
+            if (found) {
+                link.pack_id = found.pack_id || found.name;
+                link.folder_name = found.folder_name || found.name;
+                link.block = found.block || '';
+                link.languages = found.languages || link.languages || [];
+                localStorage.setItem('twod_campaign_creatives_v1', JSON.stringify(campaignCreativesMap));
+                return found;
+            }
+        }
+    } catch (e) {
+        console.warn('Falha ao hidratar pacote vinculado:', e);
+    }
+    return null;
+}
 
 // Extrai o nome/slug do nicho da campanha (ex: '24944,RastrearOnibus,MON-TWODCOMPANY-09...' -> 'RastrearOnibus')
 function extractNicheFromCampaign(campName = '') {
@@ -2167,10 +2446,16 @@ async function linkCampaignToPack(campaignId, pack) {
     const campName = campObj ? campObj.name : campaignId;
     const nicheSlug = extractNicheFromCampaign(campName);
 
+    loadedNichePacksMap[pack.pack_id || pack.name] = pack;
+    loadedNichePacksMap[pack.name] = pack;
+
     const payload = {
         campaign_id: campaignId,
         campaign_name: campName,
+        pack_id: pack.pack_id || pack.name,
         niche_pack: pack.name,
+        folder_name: pack.folder_name || pack.name,
+        block: pack.block || '',
         niche_slug: nicheSlug,
         account_id: metaState.selectedAccountId,
         thumbs: pack.sample_thumbs || [],
@@ -2194,6 +2479,8 @@ async function linkCampaignToPack(campaignId, pack) {
     }
 
     renderCampaignCreativeLinkBadge();
+    renderBlockNav();
+    renderCountriesGrid();
     updateDuplicatorLanguageNotice();
 }
 
@@ -2214,10 +2501,12 @@ async function unlinkCampaignFromPack(campaignId) {
     }
 
     renderCampaignCreativeLinkBadge();
+    renderBlockNav();
+    renderCountriesGrid();
     updateDuplicatorLanguageNotice();
 }
 
-// Carrega as miniaturas dos anúncios do Facebook para o conjunto base
+// Carrega as miniaturas em alta resolução dos anúncios do Facebook para o conjunto base
 async function loadBaseAdSetMetaThumbnails(adsetId) {
     const thumbsRow = document.getElementById('fb-ads-thumbs-row');
     const statusEl = document.getElementById('fb-ads-thumb-status');
@@ -2234,45 +2523,72 @@ async function loadBaseAdSetMetaThumbnails(adsetId) {
     metaBaseAdsCache = [];
 
     try {
-        const url = `https://graph.facebook.com/${META_GRAPH_VERSION}/${adsetId}/ads?access_token=${encodeURIComponent(token)}&fields=id,name,status,creative{id,name,thumbnail_url,image_url,video_id,object_story_spec}&limit=50`;
+        const url = `https://graph.facebook.com/${META_GRAPH_VERSION}/${adsetId}/ads?access_token=${encodeURIComponent(token)}&fields=id,name,status,url_tags,creative{id,name,thumbnail_url,image_url,video_id,object_story_spec,asset_feed_spec}&limit=50`;
         const resp = await fetch(url);
         const data = await resp.json();
 
         if (currentSeq !== _metaThumbReqSeq) return;
 
         if (data.data && Array.isArray(data.data) && data.data.length > 0) {
+            // Upgrade paralelo de qualquer miniatura que veio em p64x64 para 320px/original
+            await Promise.all(data.data.map(async ad => {
+                const cr = ad.creative || {};
+                let bestThumb = cr.image_url || cr.object_story_spec?.video_data?.image_url || cr.thumbnail_url || '';
+                if ((!bestThumb || bestThumb.includes('p64x64')) && cr.id) {
+                    try {
+                        const r320 = await fetch(`https://graph.facebook.com/${META_GRAPH_VERSION}/${cr.id}?fields=id,thumbnail_url&thumbnail_width=320&thumbnail_height=320&access_token=${encodeURIComponent(token)}`);
+                        const d320 = await r320.json();
+                        if (d320.thumbnail_url) bestThumb = d320.thumbnail_url;
+                    } catch (e) {}
+                }
+                ad._resolvedThumb = bestThumb;
+            }));
+
+            if (currentSeq !== _metaThumbReqSeq) return;
             metaBaseAdsCache = data.data;
             thumbsRow.innerHTML = '';
 
             data.data.forEach((ad, idx) => {
-                const cr = ad.creative || {};
-                const thumbUrl = cr.thumbnail_url || cr.image_url || cr.object_story_spec?.video_data?.image_url || '';
+                const thumbUrl = ad._resolvedThumb || '';
                 const adName = ad.name || `0${idx + 1}`;
                 const isActive = ad.status === 'ACTIVE';
 
                 const card = document.createElement('div');
                 card.className = 'creative-thumb-card';
-                card.title = `Anúncio: ${adName} (ID: ${ad.id})`;
+                card.title = `Clique para ampliar • Anúncio: ${adName} (ID: ${ad.id})`;
 
-                let mediaHtml = '';
                 if (thumbUrl) {
-                    mediaHtml = `<img src="${thumbUrl}" class="creative-thumb-preview" alt="${adName}" loading="lazy" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=\\'http://www.w3.org/2000/svg\\' width=\\'100\\' height=\\'100\\' viewBox=\\'0 0 24 24\\' fill=\\'none\\' stroke=\\'%2364748b\\' stroke-width=\\'2\\'><rect width=\\'18\\' height=\\'18\\' x=\\'3\\' y=\\'3\\' rx=\\'2\\'/><circle cx=\\'9\\' cy=\\'9\\' r=\\'2\\'/><path d=\\'m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21\\'/></svg>';">`;
+                    const img = document.createElement('img');
+                    img.src = thumbUrl;
+                    img.className = 'creative-thumb-preview zoomable';
+                    img.alt = adName;
+                    img.loading = 'lazy';
+                    img.addEventListener('click', () => openThumbZoomModal(thumbUrl, `Facebook Ads: ${adName}`, `Creative ID: ${ad.creative?.id || '-'}`));
+                    card.appendChild(img);
                 } else {
-                    mediaHtml = `<div class="creative-thumb-preview" style="display:flex;align-items:center;justify-content:center;color:#64748b;font-size:20px;">🎬</div>`;
+                    const placeholder = document.createElement('div');
+                    placeholder.className = 'creative-thumb-preview';
+                    placeholder.style.cssText = 'display:flex;align-items:center;justify-content:center;color:#64748b;font-size:20px;';
+                    placeholder.innerText = '🎬';
+                    card.appendChild(placeholder);
                 }
 
-                card.innerHTML = `
-                    ${mediaHtml}
-                    <div class="creative-thumb-title">${adName}</div>
-                    <span class="creative-thumb-badge" style="background:${isActive ? '#10b98120' : '#f59e0b20'};color:${isActive ? '#34d399' : '#fbbf24'};border:1px solid ${isActive ? '#10b98140' : '#f59e0b40'};">
-                        ${isActive ? '🟢 Ativo' : '⏸️ Pausado'}
-                    </span>
-                `;
+                const titleDiv = document.createElement('div');
+                titleDiv.className = 'creative-thumb-title';
+                titleDiv.innerText = adName;
+                card.appendChild(titleDiv);
+
+                const statusSpan = document.createElement('span');
+                statusSpan.className = 'creative-thumb-badge';
+                statusSpan.style.cssText = `background:${isActive ? '#10b98120' : '#f59e0b20'};color:${isActive ? '#34d399' : '#fbbf24'};border:1px solid ${isActive ? '#10b98140' : '#f59e0b40'};`;
+                statusSpan.innerText = isActive ? '🟢 Ativo' : '⏸️ Pausado';
+                card.appendChild(statusSpan);
+
                 thumbsRow.appendChild(card);
             });
 
             if (countBadge) countBadge.innerText = `${data.data.length} anúncio(s)`;
-            if (statusEl) statusEl.innerText = `Pronto: ${data.data.length} anúncios ativos identificados no Facebook`;
+            if (statusEl) statusEl.innerText = `Pronto: ${data.data.length} criativo(s) em alta resolução carregados`;
         } else {
             thumbsRow.innerHTML = '<div class="text-muted" style="font-size:12px; padding:8px;">Nenhum anúncio encontrado neste conjunto base.</div>';
             if (countBadge) countBadge.innerText = '0 anúncios';
@@ -2281,7 +2597,7 @@ async function loadBaseAdSetMetaThumbnails(adsetId) {
     } catch (e) {
         if (currentSeq !== _metaThumbReqSeq) return;
         console.warn('Erro ao buscar miniaturas do Facebook:', e);
-        thumbsRow.innerHTML = `<div class="text-muted" style="font-size:12px; padding:8px;">⚠️ Não foi possível carregar miniaturas: ${e.message}</div>`;
+        thumbsRow.innerHTML = `<div class="text-muted" style="font-size:12px; padding:8px;">⚠️ Não foi possível carregar miniaturas: ${escHtml(e.message)}</div>`;
         if (countBadge) countBadge.innerText = 'Erro';
         if (statusEl) statusEl.innerText = 'Falha ao consultar API';
     }
@@ -2314,13 +2630,13 @@ function renderCampaignCreativeLinkBadge() {
         badge.style.color = '#34d399';
         badge.style.borderColor = 'rgba(16, 185, 129, 0.4)';
 
-        const langs = (link.languages || []).map(l => `<span class="lang-pill ready">🟢 ${l}</span>`).join(' ') || '<span class="text-muted">Idiomas detectados automaticamente</span>';
+        const langs = (link.languages || []).map(l => `<span class="lang-pill ready">🟢 ${escHtml(l)}</span>`).join(' ') || '<span class="text-muted">Idiomas detectados automaticamente</span>';
         if (summary) {
             summary.innerHTML = `
                 <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
                     <div>
-                        <strong>Pacote de Mídias Vinculado:</strong> <code>${link.niche_pack}</code>
-                        <div style="margin-top:4px;">Idiomas disponíveis no pacote: ${langs}</div>
+                        <strong>Pacote de Mídias Vinculado:</strong> <code>${escHtml(link.niche_pack)}</code>
+                        <div style="margin-top:4px; display:flex; gap:5px; flex-wrap:wrap; align-items:center;">Idiomas disponíveis no pacote: ${langs}</div>
                     </div>
                     <button type="button" class="btn btn-secondary btn-sm" onclick="unlinkCampaignFromPack('${campaignId}')" style="padding:3px 8px; font-size:11px; color:#ef4444; border-color:#ef444440;">Desvincular ❌</button>
                 </div>
@@ -2329,10 +2645,22 @@ function renderCampaignCreativeLinkBadge() {
 
         if (actionsBox) {
             actionsBox.innerHTML = `
-                <button type="button" class="btn btn-secondary btn-sm" onclick="loadNicheCandidatePacks(true)" style="padding:4px 10px; font-size:11px;">✏️ Trocar Pacote</button>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="loadNicheCandidatePacks(true, false)" style="padding:4px 10px; font-size:11px;">✏️ Trocar Pacote</button>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="loadNicheCandidatePacks(true, true)" style="padding:4px 10px; font-size:11px;">🔄 Sincronizar OneDrive</button>
             `;
         }
         if (candidateContainer) candidateContainer.classList.add('twod-hidden');
+
+        // Hidrata silenciosamente em segundo plano para ter by_lang e thumbs no Passo 2
+        if (!getCachedLinkedPackObj(campaignId)) {
+            ensureLinkedPackHydrated(campaignId, false).then(hydrated => {
+                if (hydrated && metaState.selectedCampaignId === campaignId) {
+                    renderBlockNav();
+                    renderCountriesGrid();
+                    updateDuplicatorLanguageNotice();
+                }
+            });
+        }
     } else {
         badge.innerText = '🟡 Não vinculado';
         badge.style.background = 'rgba(245, 158, 11, 0.15)';
@@ -2344,25 +2672,86 @@ function renderCampaignCreativeLinkBadge() {
 
         if (summary) {
             summary.innerHTML = `
-                <span>Esta campanha ainda não está vinculada a um pacote de criativos do OneDrive. Nicho detectado: <strong>${nicheSlug}</strong>.</span>
+                <span>Esta campanha ainda não está vinculada a um pacote de criativos do OneDrive. Nicho detectado: <strong>${escHtml(nicheSlug)}</strong>.</span>
             `;
         }
 
         if (actionsBox) {
             actionsBox.innerHTML = `
-                <button type="button" class="btn btn-secondary btn-sm" onclick="loadNicheCandidatePacks(true)" style="padding:4px 10px; font-size:11px;">🔍 Localizar no OneDrive</button>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="loadNicheCandidatePacks(true, false)" style="padding:4px 10px; font-size:11px;">🔍 Localizar no OneDrive</button>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="loadNicheCandidatePacks(true, true)" style="padding:4px 10px; font-size:11px;">🔄 Sincronizar</button>
             `;
         }
 
-        // Se houver conjunto base carregado, busca automaticamente os pacotes candidatos
         if (metaState.selectedAdSetId) {
-            loadNicheCandidatePacks(false);
+            loadNicheCandidatePacks(false, false);
         }
     }
 }
 
-// Busca e exibe os pacotes candidatos do nicho no OneDrive com thumbnails
-async function loadNicheCandidatePacks(forceOpen = true) {
+// Renderiza as miniaturas de um pacote em um idioma selecionado dentro do card
+function renderPackCardThumbs(thumbsWrapEl, pack, selectedLang) {
+    if (!thumbsWrapEl) return;
+    thumbsWrapEl.innerHTML = '';
+
+    let videos = [];
+    if (pack.by_lang && selectedLang && pack.by_lang[selectedLang]) {
+        videos = [...(pack.by_lang[selectedLang].feed || []), ...(pack.by_lang[selectedLang].reels || [])];
+    } else {
+        const all = [...(pack.feed || []), ...(pack.reels || [])];
+        videos = selectedLang ? all.filter(v => v.lang === selectedLang) : all;
+    }
+
+    if (videos.length === 0) {
+        thumbsWrapEl.innerHTML = '<div class="text-muted" style="font-size:11px; padding:8px;">Nenhum .mp4 encontrado neste idioma.</div>';
+        return;
+    }
+
+    videos.slice(0, 9).forEach(v => {
+        const slotWrap = document.createElement('div');
+        slotWrap.style.cssText = 'display:flex; flex-direction:column; align-items:center; gap:3px;';
+
+        const thumbPath = v.thumb_url || '';
+        const vUrl = v.url || '';
+        const fullVidUrl = vUrl.startsWith('http') ? vUrl : `${API_BASE_URL}${vUrl}`;
+        const fullThumbUrl = thumbPath ? (thumbPath.startsWith('http') ? thumbPath : `${API_BASE_URL}${thumbPath}`) : '';
+
+        if (fullThumbUrl) {
+            const img = document.createElement('img');
+            img.src = fullThumbUrl;
+            img.loading = 'lazy';
+            img.className = 'candidate-pack-thumb-item zoomable';
+            img.alt = v.name || 'Vídeo';
+            img.title = `Clique para ampliar • ${v.name || 'Vídeo'} (${v.lang || selectedLang || ''})`;
+            img.addEventListener('error', () => {
+                img.style.display = 'none';
+            });
+            img.addEventListener('click', () => openThumbZoomModal(fullThumbUrl, `${pack.name} (${v.lang || selectedLang || ''})`, v.name || ''));
+            slotWrap.appendChild(img);
+        } else {
+            const vid = document.createElement('video');
+            vid.src = `${fullVidUrl}#t=0.5`;
+            vid.preload = 'metadata';
+            vid.muted = true;
+            vid.playsInline = true;
+            vid.className = 'candidate-pack-thumb-item';
+            vid.title = `${v.name || 'Vídeo'} (${v.lang || ''})`;
+            slotWrap.appendChild(vid);
+        }
+
+        const labelSpan = document.createElement('span');
+        labelSpan.style.cssText = 'font-size:10px; color:#94a3b8;';
+        const slotNum = v.num ? String(v.num).padStart(2, '0') : (v.name || '');
+        const kindTag = (v.num >= 1 && v.num <= 3) ? 'Feed' : (v.num >= 4 && v.num <= 6 ? 'Reels' : '');
+        labelSpan.innerText = kindTag ? `${slotNum} (${kindTag})` : slotNum;
+        slotWrap.appendChild(labelSpan);
+
+        thumbsWrapEl.appendChild(slotWrap);
+    });
+}
+
+// Busca e exibe os pacotes candidatos do nicho no OneDrive com thumbnails por idioma + Bloco A/B
+async function loadNicheCandidatePacks(forceOpen = true, forceRefresh = false) {
     const container = document.getElementById('onedrive-candidate-packs-container');
     if (!container) return;
 
@@ -2383,37 +2772,70 @@ async function loadNicheCandidatePacks(forceOpen = true) {
     }
 
     container.classList.remove('twod-hidden');
-    container.innerHTML = `<div class="text-muted" style="font-size:12px; padding:8px;">⏳ Buscando pastas para o nicho "<strong>${nicheSlug}</strong>" no OneDrive Nuvem...</div>`;
+    container.innerHTML = `<div class="text-muted" style="font-size:12px; padding:8px;">${forceRefresh ? '🔄 Sincronizando pastas e novos idiomas direto do OneDrive...' : '⏳ Buscando pacotes para'} "<strong>${escHtml(nicheSlug)}</strong>"...</div>`;
 
     let packs = [];
-    try {
-        const resp = await fetch(`${API_BASE_URL}/api/onedrive/niche-packs?niche=${encodeURIComponent(nicheSlug)}`);
-        const data = await resp.json();
-        if (data.success && data.packs) {
-            packs = data.packs;
+    const normSlug = normalizeText(nicheSlug);
+    if (!forceRefresh && Array.isArray(loadedPacksByNicheSlug[normSlug]) && loadedPacksByNicheSlug[normSlug].length > 0) {
+        packs = loadedPacksByNicheSlug[normSlug];
+    } else {
+        try {
+            const q = `niche=${encodeURIComponent(nicheSlug)}${forceRefresh ? '&refresh=true' : ''}`;
+            const resp = await fetch(`${API_BASE_URL}/api/onedrive/niche-packs?${q}`);
+            const data = await resp.json();
+            if (data.success && Array.isArray(data.packs)) {
+                packs = data.packs;
+                loadedPacksByNicheSlug[normSlug] = packs;
+                packs.forEach(p => {
+                    loadedNichePacksMap[p.pack_id || p.name] = p;
+                    loadedNichePacksMap[p.name] = p;
+                });
+            }
+        } catch (e) {
+            console.warn('Erro ao consultar /api/onedrive/niche-packs:', e);
         }
-    } catch (e) {
-        console.warn('Erro ao consultar /api/onedrive/niche-packs:', e);
     }
 
-    // Fallback: busca em oneDriveData.niches (se o usuário conectou via navegador)
+    // Fallback para oneDriveData.niches caso conectado via pasta local no navegador
     if (packs.length === 0 && Array.isArray(oneDriveData.niches)) {
-        const normTarget = normalizeText(nicheSlug);
         const localMatches = oneDriveData.niches.filter(n => {
             const nNorm = normalizeText(n.name);
-            return nNorm.includes(normTarget) || normTarget.includes(nNorm);
+            return nNorm.includes(normSlug) || (nNorm.length >= 4 && normSlug.includes(nNorm));
         });
         localMatches.forEach(lm => {
             const allV = [...(lm.videos?.feed || []), ...(lm.videos?.reels || [])];
-            const langs = Array.from(new Set(allV.map(v => v.lang).filter(Boolean)));
-            packs.push({
-                name: lm.name,
-                status: lm.status || 'completed',
-                languages: langs,
-                videos_count: allV.length,
-                feed: lm.videos?.feed || [],
-                reels: lm.videos?.reels || [],
-                sample_thumbs: allV.slice(0, 6).map(v => v.url || '')
+            const blocks = {};
+            allV.forEach(v => {
+                const b = (v.block || '').trim();
+                if (!blocks[b]) blocks[b] = [];
+                blocks[b].push(v);
+            });
+            Object.entries(blocks).forEach(([blockName, vList]) => {
+                const byLang = {};
+                vList.forEach(v => {
+                    const l = v.lang || 'Sem Idioma';
+                    if (!byLang[l]) byLang[l] = { feed: [], reels: [] };
+                    byLang[l][v.num >= 1 && v.num <= 3 ? 'feed' : 'reels'].push(v);
+                });
+                const langs = Object.keys(byLang);
+                const disp = blockName ? `${lm.name} — ${blockName}` : lm.name;
+                const pid = blockName ? `${lm.name} :: ${blockName}` : lm.name;
+                const pObj = {
+                    pack_id: pid,
+                    name: disp,
+                    folder_name: lm.name,
+                    block: blockName,
+                    status: lm.status || 'completed',
+                    languages: langs,
+                    videos_count: vList.length,
+                    by_lang: byLang,
+                    feed: vList.filter(v => v.num >= 1 && v.num <= 3),
+                    reels: vList.filter(v => v.num >= 4 && v.num <= 9),
+                    sample_thumbs: vList.slice(0, 6).map(v => v.thumb_url || v.url || '')
+                };
+                packs.push(pObj);
+                loadedNichePacksMap[pid] = pObj;
+                loadedNichePacksMap[disp] = pObj;
             });
         });
     }
@@ -2421,73 +2843,152 @@ async function loadNicheCandidatePacks(forceOpen = true) {
     if (packs.length === 0) {
         container.innerHTML = `
             <div style="font-size:12px; color:#cbd5e1; padding:10px; background:rgba(255,255,255,0.03); border-radius:6px;">
-                🔍 Nenhuma pasta encontrada no OneDrive para o nicho "<strong>${nicheSlug}</strong>".<br>
-                <span class="text-muted" style="font-size:11px;">Verifique se a pasta com o nome do nicho e data (ex: <code>${nicheSlug} 04.11.26</code>) está na pasta Vídeos do OneDrive.</span>
+                🔍 Nenhuma pasta encontrada no OneDrive para o nicho "<strong>${escHtml(nicheSlug)}</strong>".<br>
+                <span class="text-muted" style="font-size:11px;">Verifique se a pasta com o nome do nicho e data (ex: <code>${escHtml(nicheSlug)} 04.11.26</code>) está na pasta Vídeos do OneDrive.</span>
             </div>
         `;
         return;
     }
 
     const currentLink = campaignCreativesMap[campaignId];
-    container.innerHTML = `
-        <div style="font-size:12px; margin-bottom:8px; color:#cbd5e1; display:flex; justify-content:space-between; align-items:center;">
-            <span><strong>${packs.length} pacote(s) encontrado(s)</strong> no OneDrive para o nicho "${nicheSlug}":</span>
-            <span class="text-muted" style="font-size:11px;">Compare as miniaturas com os anúncios do Facebook acima</span>
-        </div>
+    const baseLang = detectAdSetLanguage(metaState.selectedAdSet);
+
+    container.innerHTML = '';
+    const topBar = document.createElement('div');
+    topBar.style.cssText = 'font-size:12px; margin-bottom:8px; color:#cbd5e1; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;';
+    topBar.innerHTML = `
+        <span><strong>${packs.length} pacote(s) encontrado(s)</strong> para "${escHtml(nicheSlug)}" (Bloco A / B separados • clique nos idiomas para comparar as miniaturas):</span>
     `;
+    const refreshBtn = document.createElement('button');
+    refreshBtn.type = 'button';
+    refreshBtn.className = 'btn btn-secondary btn-sm';
+    refreshBtn.style.cssText = 'padding:3px 10px; font-size:11px;';
+    refreshBtn.innerText = '🔄 Atualizar OneDrive';
+    refreshBtn.addEventListener('click', () => loadNicheCandidatePacks(true, true));
+    topBar.appendChild(refreshBtn);
+    container.appendChild(topBar);
 
     packs.forEach(pack => {
-        const isCurrent = currentLink && currentLink.niche_pack === pack.name;
+        const isCurrent = currentLink && (
+            (currentLink.pack_id && pack.pack_id && currentLink.pack_id === pack.pack_id)
+            || currentLink.niche_pack === pack.name
+        );
+
         const card = document.createElement('div');
         card.className = `candidate-pack-card ${isCurrent ? 'active-pack' : ''}`;
 
-        const langPills = (pack.languages || []).map(l => `<span class="lang-pill ready">🟢 ${l}</span>`).join(' ') || '<span class="text-muted" style="font-size:11px;">Sem subpastas de idioma</span>';
+        const head = document.createElement('div');
+        head.className = 'candidate-pack-head';
 
-        let thumbsHtml = '';
-        const allVideos = [...(pack.feed || []), ...(pack.reels || [])];
-        if (allVideos.length > 0) {
-            allVideos.slice(0, 6).forEach(v => {
-                const vUrl = v.url || '';
-                const fullUrl = vUrl.startsWith('http') ? vUrl : `${API_BASE_URL}${vUrl}`;
-                thumbsHtml += `
-                    <div style="display:flex; flex-direction:column; align-items:center; gap:2px;">
-                        <video src="${fullUrl}#t=0.5" preload="metadata" muted playsinline class="candidate-pack-thumb-item" title="${v.name || 'Vídeo'} (${v.lang || ''})"></video>
-                        <span style="font-size:10px; color:#94a3b8;">${v.num ? '0' + v.num : v.name}</span>
-                    </div>
-                `;
+        const leftInfo = document.createElement('div');
+        leftInfo.innerHTML = `<strong style="font-size:13px; color:#f8fafc;">📁 ${escHtml(pack.name)}</strong> <span class="text-muted" style="font-size:11px;">(${pack.videos_count} vídeos)</span>`;
+
+        const langsRow = document.createElement('div');
+        langsRow.className = 'candidate-pack-langs';
+        langsRow.style.marginTop = '6px';
+
+        const thumbsRow = document.createElement('div');
+        thumbsRow.className = 'candidate-pack-thumbs';
+
+        const langsList = pack.languages || [];
+        const matchedBaseLang = findMatchingPackFolderLang(langsList, baseLang);
+        let activePreviewLang = matchedBaseLang || langsList[0] || '';
+
+        if (langsList.length > 0) {
+            langsList.forEach(l => {
+                const pill = document.createElement('span');
+                pill.className = `lang-pill ready clickable ${l === activePreviewLang ? 'selected' : ''}`;
+                pill.innerText = l === matchedBaseLang ? `🎯 ${l}` : `🟢 ${l}`;
+                pill.title = `Visualizar miniaturas em ${l}`;
+                pill.addEventListener('click', () => {
+                    langsRow.querySelectorAll('.lang-pill').forEach(p => p.classList.remove('selected'));
+                    pill.classList.add('selected');
+                    renderPackCardThumbs(thumbsRow, pack, l);
+                });
+                langsRow.appendChild(pill);
             });
         } else {
-            thumbsHtml = '<div class="text-muted" style="font-size:11px; padding:8px;">Nenhum arquivo .mp4 encontrado nesta pasta.</div>';
+            langsRow.innerHTML = '<span class="text-muted" style="font-size:11px;">Sem subpastas de idioma</span>';
+        }
+        leftInfo.appendChild(langsRow);
+
+        const rightAction = document.createElement('div');
+        if (isCurrent) {
+            rightAction.innerHTML = `<span class="badge-tag" style="background:#10b98125; color:#34d399; border:1px solid #10b98150; font-size:11px;">✅ Pacote Atual</span>`;
+        } else {
+            const linkBtn = document.createElement('button');
+            linkBtn.type = 'button';
+            linkBtn.className = 'btn btn-primary btn-sm btn-link-pack';
+            linkBtn.style.cssText = 'padding:5px 12px; font-size:12px;';
+            linkBtn.innerText = '📌 Vincular a esta Campanha';
+            linkBtn.addEventListener('click', () => linkCampaignToPack(campaignId, pack));
+            rightAction.appendChild(linkBtn);
         }
 
-        card.innerHTML = `
-            <div class="candidate-pack-head">
-                <div>
-                    <strong style="font-size:13px; color:#f8fafc;">📁 ${pack.name}</strong>
-                    <div style="margin-top:4px;" class="candidate-pack-langs">${langPills}</div>
-                </div>
-                <div>
-                    ${isCurrent 
-                        ? `<span class="badge-tag" style="background:#10b98125; color:#34d399; border:1px solid #10b98150; font-size:11px;">✅ Pacote Atual</span>`
-                        : `<button type="button" class="btn btn-primary btn-sm btn-link-pack" style="padding:5px 12px; font-size:12px;">📌 Vincular a esta Campanha</button>`
-                    }
-                </div>
-            </div>
-            <div class="candidate-pack-thumbs">
-                ${thumbsHtml}
-            </div>
-        `;
-
-        const btn = card.querySelector('.btn-link-pack');
-        if (btn) {
-            btn.onclick = () => linkCampaignToPack(campaignId, pack);
-        }
+        head.appendChild(leftInfo);
+        head.appendChild(rightAction);
+        card.appendChild(head);
+        card.appendChild(thumbsRow);
+        renderPackCardThumbs(thumbsRow, pack, activePreviewLang);
 
         container.appendChild(card);
     });
+
+    if (isCurrentInSync(packs, currentLink)) {
+        renderBlockNav();
+        renderCountriesGrid();
+        updateDuplicatorLanguageNotice();
+    }
 }
 
-// Alerta dinâmico de diferença de idioma e status de criativos no Passo 2
+function isCurrentInSync(packs, currentLink) {
+    if (!currentLink || !Array.isArray(packs)) return false;
+    return packs.some(p => (currentLink.pack_id && p.pack_id === currentLink.pack_id) || p.name === currentLink.niche_pack);
+}
+
+async function refreshLinkedPackAndNotice() {
+    const campaignId = metaState.selectedCampaignId;
+    if (!campaignId) return;
+    const btn = document.getElementById('btn-dup-sync-notice');
+    if (btn) {
+        btn.disabled = true;
+        btn.innerText = '⏳ Verificando OneDrive...';
+    }
+    try {
+        await ensureLinkedPackHydrated(campaignId, true);
+        renderCampaignCreativeLinkBadge();
+        renderBlockNav();
+        renderCountriesGrid();
+        updateDuplicatorLanguageNotice();
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerText = '🔄 Verificar OneDrive Agora';
+        }
+    }
+}
+
+function handleManualDuplicatorVideos(langCode, fileList) {
+    const code = (langCode || '').toLowerCase();
+    const files = Array.from(fileList || []).filter(f => /\.(mp4|mov|m4v)$/i.test(f.name || ''));
+    files.sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { numeric: true }));
+    if (files.length > 0) {
+        duplicatorManualFilesByLang[code] = files.slice(0, 6);
+    } else {
+        delete duplicatorManualFilesByLang[code];
+    }
+    renderBlockNav();
+    renderCountriesGrid();
+    updateDuplicatorLanguageNotice();
+}
+
+function toggleDuplicatorSlot(slotNum, isChecked) {
+    const num = Number(slotNum);
+    if (isChecked) duplicatorSelectedSlots.add(num);
+    else duplicatorSelectedSlots.delete(num);
+}
+
+// Alerta dinâmico de diferença de idioma, criativos prontos e upload manual no Passo 2
 function updateDuplicatorLanguageNotice() {
     const noticeEl = document.getElementById('duplicator-lang-notice');
     if (!noticeEl) return;
@@ -2501,34 +3002,28 @@ function updateDuplicatorLanguageNotice() {
         return;
     }
 
-    let baseLang = 'pt';
-    const normAdSetName = (adset.name || '').toLowerCase();
-    if (normAdSetName.includes('espanhol') || normAdSetName.includes('spanish')) {
-        baseLang = 'es';
-    } else if (normAdSetName.includes('inglês') || normAdSetName.includes('ingles') || normAdSetName.includes('english')) {
-        baseLang = 'en';
-    } else if (normAdSetName.includes('francês') || normAdSetName.includes('frances') || normAdSetName.includes('french')) {
-        baseLang = 'fr';
-    } else if (adset.targeting?.locales?.includes(6)) {
-        baseLang = 'es';
-    } else if (adset.targeting?.geo_locations?.countries?.includes('ES') || adset.targeting?.geo_locations?.countries?.includes('MX') || adset.targeting?.geo_locations?.countries?.includes('CO')) {
-        baseLang = 'es';
-    } else if (adset.targeting?.geo_locations?.countries?.includes('FR')) {
-        baseLang = 'fr';
-    }
+    const baseLang = detectAdSetLanguage(adset);
+    const checks = metaState.checkedCountries[metaState.activeBlockId] || {};
+    const selectedCountries = block.countries.filter(c => checks[c.adSetName]);
+    const scopeCountries = selectedCountries.length > 0 ? selectedCountries : block.countries;
 
-    const targetLang = (block.langCode || 'es').toLowerCase();
-    const isSameLang = baseLang === targetLang;
+    const neededLangsMap = new Map();
+    scopeCountries.forEach(c => {
+        const l = (c.langCode || (block.langCode && block.langCode !== 'multi' ? block.langCode : baseLang) || baseLang).toLowerCase();
+        if (!neededLangsMap.has(l)) neededLangsMap.set(l, c.langName || l.toUpperCase());
+    });
 
-    if (isSameLang) {
+    const diffLangs = Array.from(neededLangsMap.keys()).filter(l => l !== baseLang);
+
+    if (diffLangs.length === 0) {
         noticeEl.className = 'duplicator-lang-notice notice-success';
         noticeEl.innerHTML = `
             <div style="display:flex; align-items:center; gap:8px;">
                 <span>✅</span>
-                <strong>Mesmo Idioma da Origem (${block.title})</strong>
+                <strong>OK — Mesmo Idioma da Origem (${escHtml(block.title)})</strong>
             </div>
             <div style="font-size:12px; color:#d1fae5;">
-                O conjunto base e o bloco selecionado compartilham o mesmo idioma (${baseLang.toUpperCase()}). Todos os anúncios, criativos e UTMs serão clonados com precisão instantânea.
+                O conjunto base e os países selecionados compartilham o mesmo idioma (${baseLang.toUpperCase()}). Os anúncios, criativos e UTMs serão clonados com precisão instantânea.
             </div>
         `;
         noticeEl.classList.remove('twod-hidden');
@@ -2536,57 +3031,138 @@ function updateDuplicatorLanguageNotice() {
     }
 
     const link = campaignCreativesMap[campaignId];
-    noticeEl.className = 'duplicator-lang-notice';
+    const packObj = getCachedLinkedPackObj(campaignId);
+    const readyLangs = [];
+    const missingLangs = [];
 
-    if (link && link.niche_pack) {
-        const hasTargetLang = (link.languages || []).some(l => {
-            const normL = normalizeText(l);
-            if (targetLang === 'fr') return normL.includes('franc') || normL.includes('french');
-            if (targetLang === 'es') return normL.includes('espanh') || normL.includes('spanish');
-            if (targetLang === 'en') return normL.includes('ingl') || normL.includes('english');
-            if (targetLang === 'ru') return normL.includes('russ') || normL.includes('russian');
-            if (targetLang === 'ar') return normL.includes('arab') || normL.includes('arabic');
-            return normL.includes(targetLang);
-        });
+    diffLangs.forEach(l => {
+        const status = isCreativeReadyForLang(campaignId, adset, l);
+        if (status.ready) readyLangs.push({ code: l, name: neededLangsMap.get(l), status });
+        else missingLangs.push({ code: l, name: neededLangsMap.get(l) });
+    });
 
-        if (hasTargetLang) {
-            noticeEl.className = 'duplicator-lang-notice notice-success';
-            noticeEl.innerHTML = `
-                <div style="display:flex; align-items:center; gap:8px;">
-                    <span>✨</span>
-                    <strong>Idioma Internacional Detectado: ${block.title}</strong>
-                </div>
-                <div style="font-size:12px;">
-                    O pacote vinculado <strong>"${link.niche_pack}"</strong> possui a pasta em <strong>${block.title}</strong> no OneDrive!
-                    Ao clicar em Duplicar, o TwoD Hub traduzirá os textos para ${block.langCode.toUpperCase()}, aplicará a tag de URL TranslateX (<code>/${block.langCode}/</code>) e carregará os criativos correspondentes.
-                </div>
-            `;
-        } else {
-            noticeEl.innerHTML = `
-                <div style="display:flex; align-items:center; gap:8px;">
-                    <span style="font-size:16px;">⚠️</span>
-                    <strong>Criativo em ${block.title} Pendente no Pacote "${link.niche_pack}"</strong>
-                </div>
-                <div style="font-size:12px; line-height:1.5;">
-                    O conjunto base está em <strong>${baseLang.toUpperCase()}</strong>, mas o pacote vinculado <code>${link.niche_pack}</code> ainda <strong>NÃO</strong> possui a subpasta em <strong>${block.title}</strong> no OneDrive.<br>
-                    <div style="margin-top:6px; display:flex; gap:10px; flex-wrap:wrap;">
-                        <span>💡 <strong>Opção 1:</strong> Duplicar apenas a estrutura dos conjuntos ($1.00 USD/dia em PAUSED) para subir os anúncios depois no Gerenciador.</span>
-                        <span>💡 <strong>Opção 2:</strong> Subir os vídeos em ${block.title} no OneDrive e clicar em <em>"🔍 Buscar Pastas no OneDrive"</em> acima.</span>
-                    </div>
-                </div>
-            `;
+    noticeEl.innerHTML = '';
+
+    if (missingLangs.length === 0) {
+        noticeEl.className = 'duplicator-lang-notice notice-success';
+        const header = document.createElement('div');
+        header.style.cssText = 'display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;';
+        header.innerHTML = `
+            <div style="display:flex; align-items:center; gap:8px;">
+                <span>✅</span>
+                <strong>Criativo OK + Tradução Automática (${escHtml(block.title)})</strong>
+            </div>
+            <span class="lang-pill ready">🎬 OK (${readyLangs.map(r => r.code.toUpperCase()).join(', ')})</span>
+        `;
+        noticeEl.appendChild(header);
+
+        const desc = document.createElement('div');
+        desc.style.fontSize = '12px';
+        desc.innerHTML = `
+            Origem em <strong>${baseLang.toUpperCase()}</strong> ➔ Duplicando para <strong>${diffLangs.map(l => l.toUpperCase()).join(', ')}</strong>.<br>
+            Ao clicar em Duplicar, o TwoD Hub subirá os vídeos do pacote <strong>"${escHtml(link?.niche_pack || 'MP4 Manual')}"</strong>, traduzirá os textos (2-3-2) e atualizará a URL TranslateX (<code>/${diffLangs[0]}/</code>).
+        `;
+        noticeEl.appendChild(desc);
+
+        // Prévia clicável dos vídeos do idioma destino quando for um idioma ou pacote hidratado
+        if (diffLangs.length === 1 && packObj) {
+            const { slots } = getVideosForPackLang(packObj, diffLangs[0]);
+            if (slots.length > 0) {
+                const stripTitle = document.createElement('div');
+                stripTitle.style.cssText = 'font-size:11px; color:#a7f3d0; margin-top:4px;';
+                stripTitle.innerText = `🎬 Criativos encontrados na pasta "${slots[0].video.lang}" (${slots.length} vídeos — marque os slots que deseja publicar):`;
+                noticeEl.appendChild(stripTitle);
+
+                const strip = document.createElement('div');
+                strip.className = 'dup-notice-thumbs-strip';
+                slots.forEach(s => {
+                    const chip = document.createElement('label');
+                    chip.className = 'dup-notice-thumb-chip';
+                    chip.style.cursor = 'pointer';
+
+                    const fullThumb = s.video.thumb_url
+                        ? (s.video.thumb_url.startsWith('http') ? s.video.thumb_url : `${API_BASE_URL}${s.video.thumb_url}`)
+                        : '';
+                    if (fullThumb) {
+                        const img = document.createElement('img');
+                        img.src = fullThumb;
+                        img.alt = s.adName;
+                        img.loading = 'lazy';
+                        img.addEventListener('click', (ev) => {
+                            ev.preventDefault();
+                            openThumbZoomModal(fullThumb, `${packObj.name} — ${s.video.lang} #${s.adName}`, s.video.name);
+                        });
+                        chip.appendChild(img);
+                    }
+
+                    const checkRow = document.createElement('span');
+                    checkRow.style.cssText = 'display:flex; align-items:center; gap:4px;';
+                    const cb = document.createElement('input');
+                    cb.type = 'checkbox';
+                    cb.checked = duplicatorSelectedSlots.has(s.slot);
+                    cb.addEventListener('change', (ev) => toggleDuplicatorSlot(s.slot, ev.target.checked));
+                    checkRow.appendChild(cb);
+                    const lbl = document.createElement('span');
+                    lbl.innerText = `${s.adName} (${s.slot <= 3 ? 'Feed' : 'Reels'})`;
+                    checkRow.appendChild(lbl);
+                    chip.appendChild(checkRow);
+
+                    strip.appendChild(chip);
+                });
+                noticeEl.appendChild(strip);
+            }
         }
     } else {
-        noticeEl.innerHTML = `
+        noticeEl.className = 'duplicator-lang-notice';
+        const header = document.createElement('div');
+        header.style.cssText = 'display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;';
+        header.innerHTML = `
             <div style="display:flex; align-items:center; gap:8px;">
                 <span style="font-size:16px;">⚠️</span>
-                <strong>Atenção: Mudança de Idioma (${baseLang.toUpperCase()} ➔ ${targetLang.toUpperCase()})</strong>
+                <strong>${link?.niche_pack ? `Criativo Pendente para ${missingLangs.map(m => m.code.toUpperCase()).join(', ')}` : `Mudança de Idioma (${baseLang.toUpperCase()} ➔ ${diffLangs.map(l => l.toUpperCase()).join(', ')})`}</strong>
             </div>
-            <div style="font-size:12px; line-height:1.5;">
-                O conjunto base está em <strong>${baseLang.toUpperCase()}</strong>, mas o bloco selecionado é <strong>${block.title}</strong>.<br>
-                Para carregar automaticamente os vídeos e traduzir os anúncios, vincule a campanha a um pacote de criativos no <strong>Passo 1</strong> acima.
-            </div>
+            ${readyLangs.length > 0 ? `<span class="lang-pill ready">🎬 OK: ${readyLangs.map(r => r.code.toUpperCase()).join(', ')}</span>` : ''}
         `;
+        noticeEl.appendChild(header);
+
+        const body = document.createElement('div');
+        body.style.cssText = 'font-size:12px; line-height:1.5;';
+        body.innerHTML = link?.niche_pack
+            ? `O pacote vinculado <code>${escHtml(link.niche_pack)}</code> não possui subpasta em <strong>${missingLangs.map(m => `${m.name} (${m.code.toUpperCase()})`).join(', ')}</strong>. Você pode sincronizar o OneDrive após subir a pasta, anexar os <code>.mp4</code> aqui abaixo agora, ou duplicar com segurança apenas a estrutura (<code>PAUSED</code>, $1.00 USD, sem anúncios errados).`
+            : `O conjunto base está em <strong>${baseLang.toUpperCase()}</strong>. Vincule um pacote do OneDrive no <strong>Passo 1</strong> acima, ou anexe os vídeos <code>.mp4</code> no idioma destino abaixo.`;
+        noticeEl.appendChild(body);
+
+        const actionsRow = document.createElement('div');
+        actionsRow.style.cssText = 'display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:4px;';
+
+        if (link?.niche_pack) {
+            const syncBtn = document.createElement('button');
+            syncBtn.type = 'button';
+            syncBtn.id = 'btn-dup-sync-notice';
+            syncBtn.className = 'btn btn-secondary btn-sm';
+            syncBtn.style.cssText = 'padding:4px 10px; font-size:11px;';
+            syncBtn.innerText = '🔄 Verificar OneDrive Agora';
+            syncBtn.addEventListener('click', refreshLinkedPackAndNotice);
+            actionsRow.appendChild(syncBtn);
+        }
+
+        // Upload manual opcional por idioma faltante
+        missingLangs.slice(0, 3).forEach(m => {
+            const labelBtn = document.createElement('label');
+            labelBtn.className = 'btn btn-secondary btn-sm';
+            labelBtn.style.cssText = 'padding:4px 10px; font-size:11px; cursor:pointer; display:inline-flex; align-items:center; gap:4px;';
+            labelBtn.innerText = `📤 Subir .mp4 (${m.code.toUpperCase()})`;
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = 'video/mp4,video/*';
+            input.multiple = true;
+            input.style.display = 'none';
+            input.addEventListener('change', (ev) => handleManualDuplicatorVideos(m.code, ev.target.files));
+            labelBtn.appendChild(input);
+            actionsRow.appendChild(labelBtn);
+        });
+
+        noticeEl.appendChild(actionsRow);
     }
 
     noticeEl.classList.remove('twod-hidden');
@@ -2682,7 +3258,25 @@ function getBlockStats(blockId) {
     };
 }
 
-// Renderiza a barra de navegação dos blocos com badges de progresso
+function getBlockCreativeSummary(blockId) {
+    const block = META_COUNTRY_BLOCKS[blockId];
+    if (!block || !metaState.selectedCampaignId) {
+        return { readyCount: 0, total: block?.countries?.length || 0, status: 'none' };
+    }
+    const countries = block.countries || [];
+    let readyCount = 0;
+    countries.forEach(c => {
+        const lang = (c.langCode || 'es').toLowerCase();
+        if (isCreativeReadyForLang(metaState.selectedCampaignId, metaState.selectedAdSet, lang).ready) {
+            readyCount++;
+        }
+    });
+    const total = countries.length;
+    const status = (total > 0 && readyCount >= total) ? 'ok' : (readyCount > 0 ? 'partial' : 'pending');
+    return { readyCount, total, status };
+}
+
+// Renderiza a barra de navegação dos blocos com badges de progresso + status OK de criativos
 function renderBlockNav() {
     const nav = document.getElementById('blocks-tab-nav');
     if (!nav) return;
@@ -2691,6 +3285,7 @@ function renderBlockNav() {
     Object.keys(META_COUNTRY_BLOCKS).forEach(blockId => {
         const block = META_COUNTRY_BLOCKS[blockId];
         const stats = getBlockStats(blockId);
+        const creativeStats = getBlockCreativeSummary(blockId);
 
         const btn = document.createElement('button');
         btn.type = 'button';
@@ -2706,7 +3301,18 @@ function renderBlockNav() {
             badgeHtml = `<span class="block-tab-badge badge-empty">⏳ 0/${stats.total}</span>`;
         }
 
-        btn.innerHTML = `<span>${block.title}</span> ${badgeHtml}`;
+        let creativeBadgeHtml = '';
+        if (metaState.selectedCampaignId && metaState.selectedAdSet) {
+            if (creativeStats.status === 'ok') {
+                creativeBadgeHtml = `<span class="block-tab-badge badge-creative-ok" title="Criativo disponível no idioma deste bloco">🎬 OK</span>`;
+            } else if (creativeStats.status === 'partial') {
+                creativeBadgeHtml = `<span class="block-tab-badge badge-creative-partial" title="${creativeStats.readyCount} de ${creativeStats.total} países têm criativo disponível">🎬 OK (${creativeStats.readyCount}/${creativeStats.total})</span>`;
+            } else {
+                creativeBadgeHtml = `<span class="block-tab-badge badge-creative-pending" title="Criativo pendente neste idioma">⏳ Criativo</span>`;
+            }
+        }
+
+        btn.innerHTML = `<span>${block.title}</span> ${badgeHtml} ${creativeBadgeHtml}`;
         btn.onclick = () => selectCountryBlock(blockId);
         nav.appendChild(btn);
     });
@@ -2793,12 +3399,18 @@ function renderCountriesGrid() {
         subDiv.className = 'country-sub';
         subDiv.innerText = `${country.langName}${country.note ? ' • ' + country.note : ''}`;
 
+        const cLang = (country.langCode || 'es').toLowerCase();
+        const cCreativeStatus = isCreativeReadyForLang(metaState.selectedCampaignId, metaState.selectedAdSet, cLang);
+        const creativePillHtml = (metaState.selectedCampaignId && metaState.selectedAdSet)
+            ? `<span class="country-creative-pill ${cCreativeStatus.ready ? 'ok' : 'missing'}" title="${cCreativeStatus.ready ? `Criativo disponível: ${escHtml(cCreativeStatus.label)}` : `Sem pasta em ${cLang.toUpperCase()} vinculada`}">${cCreativeStatus.ready ? '🎬 Criativo OK' : '⏳ Sem criativo'}</span>`
+            : '';
+
         const statusDiv = document.createElement('div');
         if (existingAdSet) {
             const statusLabel = existingAdSet.status === 'ACTIVE' ? 'Ativo 🟢' : 'Pausado ⏸️';
-            statusDiv.innerHTML = `<span class="country-status-pill pill-exists" title="Conjunto existente: ${existingAdSet.name} (ID: ${existingAdSet.id})">✅ Já na Campanha (${statusLabel})</span>`;
+            statusDiv.innerHTML = `<span class="country-status-pill pill-exists" title="Conjunto existente: ${escHtml(existingAdSet.name)} (ID: ${existingAdSet.id})">✅ Já na Campanha (${statusLabel})</span> ${creativePillHtml}`;
         } else {
-            statusDiv.innerHTML = `<span class="country-status-pill pill-pending">⏳ Pendente</span>`;
+            statusDiv.innerHTML = `<span class="country-status-pill pill-pending">⏳ Pendente</span> ${creativePillHtml}`;
         }
 
         info.appendChild(nameDiv);
@@ -2849,6 +3461,8 @@ function updateBlockCounter() {
             `;
         }
     }
+
+    updateDuplicatorLanguageNotice();
 }
 
 function toggleAllCountriesInBlock(checked) {
@@ -2994,52 +3608,78 @@ async function startBatchDuplication() {
     const initialStatus = document.getElementById('select-initial-status').value || 'PAUSED';
     const nameFormat = document.getElementById('select-name-format').value || 'country_only';
 
-    // Detecta divergência de idioma entre o conjunto base e o bloco
-    let baseLang = 'pt';
-    const normAdSetName = (adsetObj.name || '').toLowerCase();
-    if (normAdSetName.includes('espanhol') || normAdSetName.includes('spanish')) baseLang = 'es';
-    else if (normAdSetName.includes('inglês') || normAdSetName.includes('ingles') || normAdSetName.includes('english')) baseLang = 'en';
-    else if (normAdSetName.includes('francês') || normAdSetName.includes('frances') || normAdSetName.includes('french')) baseLang = 'fr';
-    else if (adsetObj.targeting?.locales?.includes(6)) baseLang = 'es';
-    else if (adsetObj.targeting?.geo_locations?.countries?.includes('ES') || adsetObj.targeting?.geo_locations?.countries?.includes('MX') || adsetObj.targeting?.geo_locations?.countries?.includes('CO')) baseLang = 'es';
-    else if (adsetObj.targeting?.geo_locations?.countries?.includes('FR')) baseLang = 'fr';
+    const baseLang = detectAdSetLanguage(adsetObj);
+    const campNicheSlug = extractNicheFromCampaign(campObj.name || '');
 
-    const targetLang = (block.langCode || 'es').toLowerCase();
-    const isLangMismatch = baseLang !== targetLang;
+    // Hidrata pacote vinculado (se existir) para resolver vídeos por idioma (incluindo Bloco A/B e Multi-Idiomas)
+    const link = campaignCreativesMap[campaignId];
+    let linkedPackObj = getCachedLinkedPackObj(campaignId);
+    if (link && link.niche_pack && !linkedPackObj) {
+        linkedPackObj = await ensureLinkedPackHydrated(campaignId, false);
+    }
 
-    const currentLink = campaignCreativesMap[campaignId];
-    const hasPackTargetLang = currentLink && (currentLink.languages || []).some(l => {
-        const nL = normalizeText(l);
-        if (targetLang === 'fr') return nL.includes('franc') || nL.includes('french');
-        if (targetLang === 'es') return nL.includes('espanh') || nL.includes('spanish');
-        if (targetLang === 'en') return nL.includes('ingl') || nL.includes('english');
-        return nL.includes(targetLang);
+    const uniqueDiffLangs = Array.from(new Set(
+        countriesToDuplicate
+            .map(c => (c.langCode || (block.langCode && block.langCode !== 'multi' ? block.langCode : baseLang) || baseLang).toLowerCase())
+            .filter(l => l !== baseLang)
+    ));
+
+    const langMediaSources = {};
+    const readyDiffLangs = [];
+    const missingDiffLangs = [];
+
+    uniqueDiffLangs.forEach(langCode => {
+        const manualFiles = duplicatorManualFilesByLang[langCode];
+        if (Array.isArray(manualFiles) && manualFiles.length > 0) {
+            langMediaSources[langCode] = { mode: 'manual', files: manualFiles };
+            readyDiffLangs.push(langCode);
+            return;
+        }
+        const packRes = linkedPackObj ? getVideosForPackLang(linkedPackObj, langCode) : { matchedLang: null, slots: [] };
+        if (packRes.slots && packRes.slots.length > 0) {
+            const filteredSlots = packRes.slots.filter(s => duplicatorSelectedSlots.has(s.slot));
+            langMediaSources[langCode] = {
+                mode: 'onedrive',
+                matchedLang: packRes.matchedLang,
+                slots: filteredSlots.length > 0 ? filteredSlots : packRes.slots
+            };
+            readyDiffLangs.push(langCode);
+            return;
+        }
+        langMediaSources[langCode] = { mode: 'missing' };
+        missingDiffLangs.push(langCode);
     });
 
-    let duplicateStructureOnly = false;
-    if (isLangMismatch && !hasPackTargetLang) {
-        const langWarn = `⚠️ DIVERGÊNCIA DE IDIOMA & CRIATIVOS PENDENTES:\n\n` +
+    if (missingDiffLangs.length > 0) {
+        const missingWarn = `⚠️ DIVERGÊNCIA DE IDIOMA & CRIATIVOS PENDENTES:\n\n` +
             `• Idioma do Conjunto Base: ${baseLang.toUpperCase()}\n` +
-            `• Idioma do Bloco Selecionado: ${block.title} (${targetLang.toUpperCase()})\n` +
-            `• Pacote OneDrive Vinculado: ${currentLink ? currentLink.niche_pack : 'Nenhum'}\n\n` +
-            `Não foram encontrados criativos em ${block.title} para esta campanha.\n\n` +
-            `Deseja DUPLICAR APENAS A ESTRUTURA DOS CONJUNTOS?\n` +
-            `(Cria os ${countriesToDuplicate.length} conjuntos com orçamento de $1.00 USD, segmentação do país e DSA em status PAUSED, sem anúncios, para você anexar os criativos depois)\n\n` +
-            `• OK = Duplicar apenas a estrutura com segurança (sem anúncios errados)\n` +
-            `• Cancelar = Cancelar para vincular ou subir os criativos primeiro.`;
-        if (!confirm(langWarn)) return;
-        duplicateStructureOnly = true;
+            `• Pacote OneDrive Vinculado: ${link ? link.niche_pack : 'Nenhum'}\n` +
+            (readyDiffLangs.length > 0 ? `• Idiomas COM criativo pronto (serão traduzidos e publicados): ${readyDiffLangs.map(l => l.toUpperCase()).join(', ')}\n` : '') +
+            `• Idiomas SEM criativo disponível: ${missingDiffLangs.map(l => l.toUpperCase()).join(', ')}\n\n` +
+            `Para os países sem criativo no idioma certo, deseja DUPLICAR APENAS A ESTRUTURA DOS CONJUNTOS?\n` +
+            `(Cria em PAUSED com orçamento $1.00 USD/dia e segmentação do país, SEM copiar anúncios no idioma errado).\n\n` +
+            `• OK = Continuar com segurança (sem anúncios errados onde faltar criativo)\n` +
+            `• Cancelar = Voltar para vincular pacote, sincronizar OneDrive ou subir MP4 manualmente.`;
+        if (!confirm(missingWarn)) return;
     }
+
+    const modeSummary = uniqueDiffLangs.length === 0
+        ? 'Clonagem Direta (Mesmo Idioma)'
+        : (readyDiffLangs.length === uniqueDiffLangs.length
+            ? `Tradução 2-3-2 + URL TranslateX + Upload Criativos (${link?.niche_pack || 'MP4 Manual'})`
+            : (readyDiffLangs.length > 0
+                ? `Misto: Tradução onde há criativo (${readyDiffLangs.map(l => l.toUpperCase()).join(',')}) + Apenas Estrutura onde falta (${missingDiffLangs.map(l => l.toUpperCase()).join(',')})`
+                : 'Apenas Estrutura Segura (Sem Anúncios)'));
 
     const confirmMsg = `Confirmar duplicação de ${countriesToDuplicate.length} conjuntos no Meta Ads?\n\n` +
         `🎯 CAMPANHA DE DESTINO:\n` +
         `   ${campObj.name}\n` +
         `   (ID: ${campObj.id})\n\n` +
         `📦 CONJUNTO BASE (ORIGEM):\n` +
-        `   ${adsetObj.name}\n` +
+        `   ${adsetObj.name} [${baseLang.toUpperCase()}]\n` +
         `   (ID: ${adsetObj.id})\n\n` +
         `• Bloco: ${block.title}\n` +
-        `• Modo de Anúncios: ${duplicateStructureOnly ? 'Apenas Estrutura (Sem Anúncios)' : 'Clonagem Completa de Anúncios'}\n` +
+        `• Modo de Anúncios: ${modeSummary}\n` +
         `• Orçamento por conjunto: $1.00 USD (fixo)\n` +
         `• Status Inicial: ${initialStatus === 'PAUSED' ? 'Pausado (Seguro)' : 'Ativo (Imediato)'}\n` +
         `• Total de novos conjuntos: ${countriesToDuplicate.length}\n\n` +
@@ -3068,14 +3708,14 @@ async function startBatchDuplication() {
 
     logMetaTerminal(`🚀 Iniciando processo de duplicação para ${countriesToDuplicate.length} países no bloco ${block.title}...`, 'info');
     logMetaTerminal(`🎯 Campanha de Destino: '${campObj.name}' (ID: ${campObj.id})`, 'info');
-    logMetaTerminal(`📦 Conjunto base: '${adsetObj.name}' (ID: ${adsetObj.id})`, 'info');
+    logMetaTerminal(`📦 Conjunto base: '${adsetObj.name}' (${baseLang.toUpperCase()} | ID: ${adsetObj.id})`, 'info');
 
     const budgetInCents = 100; // Sempre 1 dólar ($1.00 USD = 100 centavos)
 
-    // Busca previamente todos os anúncios e criativos (incluindo url_tags/UTMs) do conjunto base
+    // Busca previamente todos os anúncios e criativos completos (incluindo asset_feed_spec, object_story_spec e url_tags)
     let baseAds = [];
     try {
-        const adsUrl = `https://graph.facebook.com/${META_GRAPH_VERSION}/${adsetId}/ads?access_token=${encodeURIComponent(token)}&fields=id,name,status,url_tags,creative&limit=50`;
+        const adsUrl = `https://graph.facebook.com/${META_GRAPH_VERSION}/${adsetId}/ads?access_token=${encodeURIComponent(token)}&fields=id,name,status,url_tags,creative{id,name,object_story_spec,asset_feed_spec}&limit=50`;
         const adsResp = await fetch(adsUrl);
         const adsData = await adsResp.json();
         if (adsData.data && Array.isArray(adsData.data)) {
@@ -3084,6 +3724,197 @@ async function startBatchDuplication() {
         logMetaTerminal(`📋 Anúncios identificados no conjunto base: ${baseAds.length} anúncio(s)`, 'info');
     } catch (e) {
         console.warn('Não foi possível ler anúncios prévios do conjunto:', e);
+    }
+
+    // Pré-prepara vídeos + textos traduzidos + URLs TranslateX + AdCreatives por idioma destino pronto
+    const preparedCreativesByLang = {};
+    const videoUploadCache = {};
+
+    const uploadLocalBrowserFileToMeta = async (accountId, fileObj) => {
+        const form = new FormData();
+        form.append('access_token', token);
+        form.append('title', fileObj.name || 'video.mp4');
+        form.append('source', fileObj);
+        const upResp = await fetch(`https://graph.facebook.com/${META_GRAPH_VERSION}/${accountId}/advideos`, {
+            method: 'POST',
+            body: form
+        });
+        const upRes = await upResp.json();
+        if (!upRes.id) {
+            throw new Error(`Falha ao subir ${fileObj.name}: ${upRes.error?.message || JSON.stringify(upRes)}`);
+        }
+        let thumbnailUrl = '';
+        for (let attempt = 0; attempt < 20; attempt++) {
+            await new Promise(r => setTimeout(r, 3000));
+            const stResp = await fetch(`https://graph.facebook.com/${META_GRAPH_VERSION}/${upRes.id}?access_token=${encodeURIComponent(token)}&fields=status,picture,thumbnails`);
+            const stData = await stResp.json();
+            const thumbUri = stData.thumbnails?.data?.[0]?.uri || stData.picture || '';
+            if (thumbUri) thumbnailUrl = thumbUri;
+            if (stData.status?.video_status === 'ready') break;
+        }
+        return { video_id: upRes.id, thumbnail_url: thumbnailUrl };
+    };
+
+    if (baseAds.length > 0 && readyDiffLangs.length > 0) {
+        for (const tLang of readyDiffLangs) {
+            const mediaSrc = langMediaSources[tLang];
+            if (!mediaSrc || mediaSrc.mode === 'missing') continue;
+
+            try {
+                if (progressStatus) progressStatus.innerText = `🎬 Preparando criativos e tradução para ${tLang.toUpperCase()}...`;
+                logMetaTerminal(`🌐 Preparando pacote de vídeos e tradução (${baseLang.toUpperCase()} ➔ ${tLang.toUpperCase()})...`, 'info');
+
+                // 1. Upload dos vídeos de destino (OneDrive ou MP4 manual) para a conta de anúncios Meta
+                const uploadedList = [];
+                if (mediaSrc.mode === 'onedrive') {
+                    for (const slotObj of mediaSrc.slots) {
+                        logMetaTerminal(`☁️ Subindo criativo ${slotObj.adName} (${slotObj.video.lang} / ${slotObj.video.name}) para Meta Ads...`, 'info');
+                        const up = await uploadOneDriveVideoToMeta(metaState.selectedAccountId, slotObj.video, token, videoUploadCache);
+                        uploadedList.push({ adName: slotObj.adName, ...up });
+                    }
+                } else if (mediaSrc.mode === 'manual') {
+                    for (let fIdx = 0; fIdx < mediaSrc.files.length; fIdx++) {
+                        const fObj = mediaSrc.files[fIdx];
+                        const adName = String(fIdx + 1).padStart(2, '0');
+                        logMetaTerminal(`📤 Enviando MP4 manual ${adName} (${fObj.name}) para Meta Ads...`, 'info');
+                        const up = await uploadLocalBrowserFileToMeta(metaState.selectedAccountId, fObj);
+                        uploadedList.push({ adName, ...up });
+                    }
+                }
+
+                if (uploadedList.length === 0) continue;
+
+                // 2. Mapeia cada ativo enviado a um template de baseAd (1..N ou replicando baseAds[0])
+                const usePaired = (baseAds.length > 1 && baseAds.length === uploadedList.length);
+                const createdItems = [];
+
+                for (let uIdx = 0; uIdx < uploadedList.length; uIdx++) {
+                    const asset = uploadedList[uIdx];
+                    const templateAd = usePaired ? baseAds[uIdx] : baseAds[0];
+                    const cr = templateAd.creative || {};
+                    const oss = cr.object_story_spec || {};
+                    const afs = cr.asset_feed_spec || {};
+                    const vd = oss.video_data || {};
+                    const ld = oss.link_data || {};
+
+                    const pageId = oss.page_id;
+                    if (!pageId) {
+                        logMetaTerminal(`⚠️ Anúncio base '${templateAd.name}' não possui page_id em object_story_spec.`, 'warn');
+                        continue;
+                    }
+
+                    const ctaObj = vd.call_to_action || ld.call_to_action || { type: 'DOWNLOAD', value: { link: '' } };
+                    const rawLink = ctaObj.value?.link || ld.link || '';
+                    const localizedLink = buildDuplicatorLocalizedUrl(rawLink, tLang, baseLang);
+
+                    const rawBodies = (afs.bodies || []).map(b => b?.text || '');
+                    const rawTitles = (afs.titles || []).map(t => t?.text || '');
+                    const rawDescs = (afs.descriptions || []).map(d => d?.text || '');
+                    const rawVdMsg = vd.message || '';
+                    const rawVdTitle = vd.title || '';
+                    const rawVdDesc = vd.link_description || '';
+
+                    const batchIn = [...rawBodies, ...rawTitles, ...rawDescs, rawVdMsg, rawVdTitle, rawVdDesc];
+                    const batchOut = (typeof translateTextsBatch === 'function')
+                        ? await translateTextsBatch(batchIn, tLang, baseLang)
+                        : batchIn;
+
+                    let cursor = 0;
+                    const tBodies = batchOut.slice(cursor, cursor + rawBodies.length); cursor += rawBodies.length;
+                    const tTitles = batchOut.slice(cursor, cursor + rawTitles.length); cursor += rawTitles.length;
+                    const tDescs = batchOut.slice(cursor, cursor + rawDescs.length); cursor += rawDescs.length;
+                    const tVdMsg = batchOut[cursor++] || '';
+                    const tVdTitle = batchOut[cursor++] || '';
+                    const tVdDesc = batchOut[cursor++] || '';
+
+                    const videoData = {
+                        video_id: asset.video_id,
+                        call_to_action: {
+                            type: ctaObj.type || 'DOWNLOAD',
+                            value: { link: localizedLink }
+                        }
+                    };
+                    if (asset.thumbnail_url) {
+                        videoData.image_url = asset.thumbnail_url;
+                    }
+                    const hasAfs = rawBodies.length > 0 || rawTitles.length > 0 || rawDescs.length > 0;
+                    if (!hasAfs) {
+                        if (tVdMsg) videoData.message = tVdMsg;
+                        if (tVdTitle) videoData.title = tVdTitle;
+                        if (tVdDesc) videoData.link_description = tVdDesc;
+                    }
+
+                    const creativePayload = {
+                        name: `${campNicheSlug || 'Ad'} - ${tLang.toUpperCase()} - ${asset.adName}`,
+                        object_story_spec: {
+                            page_id: pageId,
+                            video_data: videoData
+                        }
+                    };
+                    if (oss.instagram_user_id) {
+                        creativePayload.object_story_spec.instagram_user_id = oss.instagram_user_id;
+                    }
+                    if (hasAfs) {
+                        creativePayload.asset_feed_spec = {
+                            bodies: tBodies.map(text => ({ text })),
+                            titles: tTitles.map(text => ({ text })),
+                            descriptions: tDescs.map(text => ({ text })),
+                            optimization_type: afs.optimization_type || 'DEGREES_OF_FREEDOM'
+                        };
+                        creativePayload.degrees_of_freedom_spec = {
+                            creative_features_spec: {
+                                standard_enhancements: { enroll_status: 'OPT_OUT' }
+                            }
+                        };
+                    }
+
+                    const postCreative = async (pObj) => {
+                        if (typeof metaFormPost === 'function') {
+                            return metaFormPost(`/${metaState.selectedAccountId}/adcreatives`, pObj, token);
+                        }
+                        const form = new URLSearchParams();
+                        form.append('access_token', token);
+                        Object.entries(pObj).forEach(([k, v]) => {
+                            if (v !== undefined && v !== null) form.append(k, typeof v === 'object' ? JSON.stringify(v) : String(v));
+                        });
+                        const r = await fetch(`https://graph.facebook.com/${META_GRAPH_VERSION}/${metaState.selectedAccountId}/adcreatives`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                            body: form.toString()
+                        });
+                        return r.json();
+                    };
+
+                    let crRes = await postCreative(creativePayload);
+                    if (crRes.error && /degrees_of_freedom_spec|standard_enhancements/i.test(crRes.error.message || '')) {
+                        delete creativePayload.degrees_of_freedom_spec;
+                        crRes = await postCreative(creativePayload);
+                    }
+                    if (crRes.error && /instagram_user_id/i.test(crRes.error.message || '')) {
+                        delete creativePayload.object_story_spec.instagram_user_id;
+                        crRes = await postCreative(creativePayload);
+                    }
+
+                    if (crRes.id) {
+                        createdItems.push({
+                            adName: usePaired ? (templateAd.name || asset.adName) : asset.adName,
+                            creativeId: crRes.id,
+                            urlTags: templateAd.url_tags || ''
+                        });
+                    } else {
+                        logMetaTerminal(`⚠️ Falha ao criar AdCreative ${asset.adName} (${tLang.toUpperCase()}): ${crRes.error?.message || JSON.stringify(crRes)}`, 'warn');
+                    }
+                }
+
+                if (createdItems.length > 0) {
+                    preparedCreativesByLang[tLang] = createdItems;
+                    logMetaTerminal(`✨ ${createdItems.length} AdCreative(s) prontos para ${tLang.toUpperCase()} (URL TranslateX: /${tLang}/)`, 'success');
+                }
+            } catch (prepErr) {
+                console.error(`Erro preparando idioma ${tLang}:`, prepErr);
+                logMetaTerminal(`❌ Erro ao preparar criativos em ${tLang.toUpperCase()}: ${prepErr.message}`, 'error');
+            }
+        }
     }
 
     const EU_DSA_SET = new Set([
@@ -3216,9 +4047,12 @@ async function startBatchDuplication() {
                 throw new Error(updateData.error.message || 'Erro ao configurar conjunto clonado');
             }
 
-            // PASSO 5: Clona anúncios apenas se NÃO for modo estrutura exclusiva
+            // PASSO 5: Publica anúncios clonados (mesmo idioma), traduzidos (idioma com criativo) ou omite se estrutura exclusiva
+            const countryLang = (country.langCode || (block.langCode && block.langCode !== 'multi' ? block.langCode : baseLang) || baseLang).toLowerCase();
             let adsCreated = 0;
-            if (!duplicateStructureOnly) {
+            let countryModeMsg = '';
+
+            if (countryLang === baseLang) {
                 for (const baseAd of baseAds) {
                     if (baseAd.creative && baseAd.creative.id) {
                         const createAdUrl = `https://graph.facebook.com/${META_GRAPH_VERSION}/${metaState.selectedAccountId}/ads`;
@@ -3228,9 +4062,7 @@ async function startBatchDuplication() {
                         adData.append('adset_id', copiedAdSetId);
                         adData.append('creative', JSON.stringify({ creative_id: baseAd.creative.id }));
                         adData.append('status', initialStatus);
-                        if (baseAd.url_tags) {
-                            adData.append('url_tags', baseAd.url_tags);
-                        }
+                        if (baseAd.url_tags) adData.append('url_tags', baseAd.url_tags);
 
                         const adResp = await fetch(createAdUrl, {
                             method: 'POST',
@@ -3245,13 +4077,37 @@ async function startBatchDuplication() {
                         }
                     }
                 }
+                countryModeMsg = adsCreated > 0 ? `com ${adsCreated} anúncio(s) clonado(s)` : 'sem anúncios';
+            } else if (Array.isArray(preparedCreativesByLang[countryLang]) && preparedCreativesByLang[countryLang].length > 0) {
+                for (const item of preparedCreativesByLang[countryLang]) {
+                    const createAdUrl = `https://graph.facebook.com/${META_GRAPH_VERSION}/${metaState.selectedAccountId}/ads`;
+                    const adData = new URLSearchParams();
+                    adData.append('access_token', token);
+                    adData.append('name', item.adName);
+                    adData.append('adset_id', copiedAdSetId);
+                    adData.append('creative', JSON.stringify({ creative_id: item.creativeId }));
+                    adData.append('status', initialStatus);
+                    if (item.urlTags) adData.append('url_tags', item.urlTags);
+
+                    const adResp = await fetch(createAdUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                        body: adData.toString()
+                    });
+                    const adResult = await adResp.json();
+                    if (adResult.id) {
+                        adsCreated++;
+                    } else if (adResult.error) {
+                        logMetaTerminal(`⚠️ Anúncio traduzido '${item.adName}' em ${finalName} falhou: ${adResult.error.message}`, 'warn');
+                    }
+                }
+                countryModeMsg = adsCreated > 0 ? `com ${adsCreated} anúncio(s) traduzido(s) (${countryLang.toUpperCase()})` : 'sem anúncios';
+            } else {
+                countryModeMsg = `apenas estrutura (sem anúncios — aguardando criativos em ${countryLang.toUpperCase()})`;
             }
 
             successCount++;
-            const adsMsg = duplicateStructureOnly 
-                ? 'apenas estrutura (sem anúncios - aguardando criativos no idioma)'
-                : (adsCreated > 0 ? `com ${adsCreated} anúncio(s)` : 'sem anúncios');
-            logMetaTerminal(`✅ [${currentIdx}/${total}] Conjunto '${finalName}' criado ${adsMsg}! (ID: ${copiedAdSetId})`, 'success');
+            logMetaTerminal(`✅ [${currentIdx}/${total}] Conjunto '${finalName}' criado ${countryModeMsg}! (ID: ${copiedAdSetId})`, 'success');
 
             // Registra o novo conjunto no estado local e atualiza os cards/badges em tempo real
             metaState.adsets.push({
@@ -3463,6 +4319,10 @@ window.linkCampaignToPack = linkCampaignToPack;
 window.unlinkCampaignFromPack = unlinkCampaignFromPack;
 window.loadNicheCandidatePacks = loadNicheCandidatePacks;
 window.updateDuplicatorLanguageNotice = updateDuplicatorLanguageNotice;
+window.openThumbZoomModal = openThumbZoomModal;
+window.closeThumbZoomModal = closeThumbZoomModal;
+window.refreshLinkedPackAndNotice = refreshLinkedPackAndNotice;
+window.handleManualDuplicatorVideos = handleManualDuplicatorVideos;
 
 // ========================================================
 // INICIALIZAÇÃO INFALÍVEL (EXECUTA IMEDIATO SE DOM JÁ CARREGADO)
