@@ -45,6 +45,7 @@ ONEDRIVE_USERS_REMOTE_PATH = ".twod_hub/users.json"
 # Caches em memória e sincronização em segundo plano
 NICHES_CACHE = None
 GRAPH_LOCK = threading.Lock()
+GRAPH_TOKEN_LOCK = threading.Lock()
 GRAPH_SYNC_STATE = {
     "running": False,
     "completed": False,
@@ -247,96 +248,134 @@ def _build_default_users():
 
 
 def _load_users_from_onedrive():
-    tok, _ = get_graph_access_token()
-    if not tok:
-        return None
+    """Retorna ('found', data), ('not_found', None) ou ('error', msg) sem jamais confundir erro transitório com 404."""
     encoded = urllib.parse.quote(ONEDRIVE_USERS_REMOTE_PATH)
     url = f"https://graph.microsoft.com/v1.0/me/drive/root:/{encoded}:/content"
-    req = urllib.request.Request(url, headers={"Authorization": f"Bearer {tok}"}, method="GET")
-    try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-            if isinstance(data, dict) and isinstance(data.get("users"), list):
-                return data
-    except urllib.error.HTTPError as e:
-        if e.code != 404:
-            print(f"⚠️ Erro ao ler usuários no OneDrive: HTTP {e.code}")
-    except Exception as e:
-        print(f"⚠️ Erro ao sincronizar usuários do OneDrive: {e}")
-    return None
+    last_err = None
+
+    for attempt in range(3):
+        tok, err = get_graph_access_token()
+        if not tok:
+            return "error", err or "OneDrive não autenticado"
+        req = urllib.request.Request(url, headers={"Authorization": f"Bearer {tok}"}, method="GET")
+        try:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                if isinstance(data, dict) and isinstance(data.get("users"), list):
+                    return "found", data
+                return "error", "Formato inválido no users.json do OneDrive"
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                return "not_found", None
+            last_err = f"HTTP {e.code}"
+            if e.code == 401:
+                GRAPH_TOKEN_CACHE["access_token"] = None
+                GRAPH_TOKEN_CACHE["expires_at"] = 0
+            print(f"⚠️ Erro ao ler usuários no OneDrive (tentativa {attempt + 1}/3): HTTP {e.code}")
+        except Exception as e:
+            last_err = str(e)
+            print(f"⚠️ Erro ao sincronizar usuários do OneDrive (tentativa {attempt + 1}/3): {e}")
+        if attempt < 2:
+            time.sleep(0.8 * (attempt + 1))
+
+    return "error", last_err or "Falha ao ler OneDrive"
 
 
 def _save_users_to_onedrive(users_data):
-    tok, _ = get_graph_access_token()
-    if not tok:
-        return False
     encoded = urllib.parse.quote(ONEDRIVE_USERS_REMOTE_PATH)
     url = f"https://graph.microsoft.com/v1.0/me/drive/root:/{encoded}:/content"
     body = json.dumps(users_data, indent=2, ensure_ascii=False).encode("utf-8")
-    req = urllib.request.Request(
-        url,
-        data=body,
-        headers={
-            "Authorization": f"Bearer {tok}",
-            "Content-Type": "application/json; charset=utf-8",
-        },
-        method="PUT",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            return 200 <= resp.status < 300
-    except Exception as e:
-        print(f"⚠️ Aviso ao salvar usuários no OneDrive: {e}")
-        return False
+
+    for attempt in range(2):
+        tok, _ = get_graph_access_token()
+        if not tok:
+            return False
+        req = urllib.request.Request(
+            url,
+            data=body,
+            headers={
+                "Authorization": f"Bearer {tok}",
+                "Content-Type": "application/json; charset=utf-8",
+            },
+            method="PUT",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                if 200 <= resp.status < 300:
+                    return True
+        except urllib.error.HTTPError as e:
+            if e.code == 401:
+                GRAPH_TOKEN_CACHE["access_token"] = None
+                GRAPH_TOKEN_CACHE["expires_at"] = 0
+            print(f"⚠️ Aviso ao salvar usuários no OneDrive (tentativa {attempt + 1}/2): HTTP {e.code}")
+        except Exception as e:
+            print(f"⚠️ Aviso ao salvar usuários no OneDrive (tentativa {attempt + 1}/2): {e}")
+        if attempt == 0:
+            time.sleep(0.6)
+    return False
 
 
 def load_users_store(sync_remote=True):
-    """Carrega base de usuários com sincronização automática para nuvem (OneDrive) + disco local."""
+    """Carrega base de usuários com sincronização segura (nunca sobrescreve OneDrive em erro transitório)."""
     global USERS_MEM, _USERS_ONEDRIVE_SYNCED
     with USERS_LOCK:
         if USERS_MEM is not None and (_USERS_ONEDRIVE_SYNCED or not sync_remote):
             return USERS_MEM
 
+        disk_loaded = False
         if USERS_MEM is None and os.path.exists(USERS_PATH):
             try:
                 with open(USERS_PATH, "r", encoding="utf-8") as f:
                     disk_data = json.load(f)
                 if isinstance(disk_data, dict) and isinstance(disk_data.get("users"), list) and disk_data["users"]:
                     USERS_MEM = disk_data
+                    disk_loaded = True
             except Exception as e:
                 print(f"⚠️ Erro ao ler {USERS_PATH}: {e}")
 
         if sync_remote and not _USERS_ONEDRIVE_SYNCED:
             cfg = load_env_vars()
             if cfg.get("ONEDRIVE_REFRESH_TOKEN"):
-                remote_data = _load_users_from_onedrive()
-                _USERS_ONEDRIVE_SYNCED = True
-                if remote_data and remote_data.get("users"):
+                status, remote_data = _load_users_from_onedrive()
+                if status == "found" and remote_data and remote_data.get("users"):
                     USERS_MEM = remote_data
+                    _USERS_ONEDRIVE_SYNCED = True
                     try:
                         with open(USERS_PATH, "w", encoding="utf-8") as f:
                             json.dump(USERS_MEM, f, indent=2, ensure_ascii=False)
                     except Exception:
                         pass
+                elif status == "not_found":
+                    # Só confirma ausente quando o OneDrive responder HTTP 404 explícito
+                    _USERS_ONEDRIVE_SYNCED = True
+                    if USERS_MEM is None:
+                        USERS_MEM = _build_default_users()
+                        try:
+                            with open(USERS_PATH, "w", encoding="utf-8") as f:
+                                json.dump(USERS_MEM, f, indent=2, ensure_ascii=False)
+                        except Exception:
+                            pass
+                else:
+                    # Erro transitório: mantém _USERS_ONEDRIVE_SYNCED = False para tentar novamente e NUNCA sobrescreve a nuvem
+                    print(f"⚠️ Mantendo fallback temporário sem marcar sync remoto ({remote_data})")
             else:
                 _USERS_ONEDRIVE_SYNCED = True
 
         if USERS_MEM is None:
             USERS_MEM = _build_default_users()
-            try:
-                with open(USERS_PATH, "w", encoding="utf-8") as f:
-                    json.dump(USERS_MEM, f, indent=2, ensure_ascii=False)
-            except Exception:
-                pass
-            if sync_remote and load_env_vars().get("ONEDRIVE_REFRESH_TOKEN"):
-                threading.Thread(target=_save_users_to_onedrive, args=(json.loads(json.dumps(USERS_MEM)),), daemon=True).start()
+            if not disk_loaded and _USERS_ONEDRIVE_SYNCED:
+                try:
+                    with open(USERS_PATH, "w", encoding="utf-8") as f:
+                        json.dump(USERS_MEM, f, indent=2, ensure_ascii=False)
+                except Exception:
+                    pass
 
         return USERS_MEM
 
 
 def save_users_store(users_data, sync_remote=True, wait_remote=True):
     """Persiste base de usuários no disco local e na nuvem OneDrive."""
-    global USERS_MEM
+    global USERS_MEM, _USERS_ONEDRIVE_SYNCED
     with USERS_LOCK:
         USERS_MEM = users_data
         try:
@@ -348,9 +387,15 @@ def save_users_store(users_data, sync_remote=True, wait_remote=True):
         if sync_remote and load_env_vars().get("ONEDRIVE_REFRESH_TOKEN"):
             snapshot = json.loads(json.dumps(users_data))
             if wait_remote:
-                _save_users_to_onedrive(snapshot)
+                ok = _save_users_to_onedrive(snapshot)
+                if ok:
+                    _USERS_ONEDRIVE_SYNCED = True
+                return ok
             else:
-                threading.Thread(target=_save_users_to_onedrive, args=(snapshot,), daemon=True).start()
+                if _USERS_ONEDRIVE_SYNCED:
+                    threading.Thread(target=_save_users_to_onedrive, args=(snapshot,), daemon=True).start()
+                return True
+        return True
 
 
 def _issue_session_tokens(user):
@@ -607,36 +652,37 @@ def exchange_code_for_token(code, headers=None):
 
 
 def get_graph_access_token():
-    now = time.time()
-    if GRAPH_TOKEN_CACHE["access_token"] and now < GRAPH_TOKEN_CACHE["expires_at"]:
-        return GRAPH_TOKEN_CACHE["access_token"], None
+    with GRAPH_TOKEN_LOCK:
+        now = time.time()
+        if GRAPH_TOKEN_CACHE["access_token"] and now < GRAPH_TOKEN_CACHE["expires_at"]:
+            return GRAPH_TOKEN_CACHE["access_token"], None
 
-    cfg = load_env_vars()
-    refresh_token = cfg.get("ONEDRIVE_REFRESH_TOKEN", "").strip()
-    client_id = cfg.get("ONEDRIVE_CLIENT_ID", "").strip()
-    client_secret = cfg.get("ONEDRIVE_CLIENT_SECRET", "").strip()
-    tenant = cfg.get("ONEDRIVE_TENANT", "consumers").strip() or "consumers"
+        cfg = load_env_vars()
+        refresh_token = cfg.get("ONEDRIVE_REFRESH_TOKEN", "").strip()
+        client_id = cfg.get("ONEDRIVE_CLIENT_ID", "").strip()
+        client_secret = cfg.get("ONEDRIVE_CLIENT_SECRET", "").strip()
+        tenant = cfg.get("ONEDRIVE_TENANT", "consumers").strip() or "consumers"
 
-    if not refresh_token or not client_id or not client_secret:
-        return None, "OneDrive ainda não autorizado via OAuth2."
+        if not refresh_token or not client_id or not client_secret:
+            return None, "OneDrive ainda não autorizado via OAuth2."
 
-    token_url = f"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token"
-    res = _http_form_post(token_url, {
-        "client_id": client_id,
-        "client_secret": client_secret,
-        "refresh_token": refresh_token,
-        "grant_type": "refresh_token",
-        "scope": "Files.ReadWrite.All offline_access User.Read",
-    })
+        token_url = f"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token"
+        res = _http_form_post(token_url, {
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "refresh_token": refresh_token,
+            "grant_type": "refresh_token",
+            "scope": "Files.ReadWrite.All offline_access User.Read",
+        })
 
-    if "access_token" in res:
-        GRAPH_TOKEN_CACHE["access_token"] = res["access_token"]
-        GRAPH_TOKEN_CACHE["expires_at"] = now + int(res.get("expires_in", 3600)) - 120
-        if res.get("refresh_token") and res["refresh_token"] != refresh_token:
-            save_env_vars({"ONEDRIVE_REFRESH_TOKEN": res["refresh_token"]})
-        return res["access_token"], None
+        if "access_token" in res:
+            GRAPH_TOKEN_CACHE["access_token"] = res["access_token"]
+            GRAPH_TOKEN_CACHE["expires_at"] = now + int(res.get("expires_in", 3600)) - 120
+            if res.get("refresh_token") and res["refresh_token"] != refresh_token:
+                save_env_vars({"ONEDRIVE_REFRESH_TOKEN": res["refresh_token"]})
+            return res["access_token"], None
 
-    return None, res.get("error_description") or res.get("error") or "Falha ao renovar token."
+        return None, res.get("error_description") or res.get("error") or "Falha ao renovar token."
 
 
 def _graph_list_all_children(item_id, access_token):
@@ -1993,7 +2039,7 @@ class APIHandler(BaseHTTPRequestHandler):
                 user["password_hash"] = new_hash
                 user["must_change_password"] = False
                 user["pwd_version"] = int(user.get("pwd_version", 1)) + 1
-                save_users_store(store, sync_remote=True, wait_remote=True)
+                synced_cloud = save_users_store(store, sync_remote=True, wait_remote=True)
 
                 session_tok, media_tok = _issue_session_tokens(user)
                 self._send_json({
@@ -2001,6 +2047,7 @@ class APIHandler(BaseHTTPRequestHandler):
                     "token": session_tok,
                     "media_token": media_tok,
                     "must_change_password": False,
+                    "synced_cloud": bool(synced_cloud),
                     "user": safe_user_dict(user),
                 })
             except Exception as e:
@@ -2332,8 +2379,8 @@ def run():
     load_graph_cache_from_disk()
     cfg = load_env_vars()
     if cfg.get("ONEDRIVE_REFRESH_TOKEN"):
+        load_users_store(sync_remote=True)
         start_graph_sync_background(force_full=False)
-        threading.Thread(target=load_users_store, kwargs={"sync_remote": True}, daemon=True).start()
     else:
         load_users_store(sync_remote=False)
 

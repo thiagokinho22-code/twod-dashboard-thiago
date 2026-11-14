@@ -1803,8 +1803,8 @@ function refreshServerTokenBanner() {
     if (metaState.hasServerToken) {
         banner.classList.remove('twod-hidden');
         banner.innerHTML = metaState.token
-            ? `⚠️ <strong>Usando Token Manual temporário neste navegador.</strong> O servidor também possui <code>META_ACCESS_TOKEN</code> configurado — limpe o campo e clique em Salvar para voltar a usar o token protegido do servidor.`
-            : `🔒 <strong>Token definitivo ativo com segurança no Servidor (${metaState.isCloud ? 'Render' : '.env Local'}).</strong> Nenhuma chave da Meta está exposta no navegador ou no GitHub.`;
+            ? `⚠️ <strong>Usando Token Manual temporário apenas nesta sessão.</strong> O servidor já possui o token definitivo permanente ativo — limpe o campo e clique em Salvar para voltar ao padrão do servidor.`
+            : `🔒 <strong>Token definitivo permanente ativo com segurança no Servidor (${metaState.isCloud ? 'Render' : '.env Local'}).</strong> Padrão automático para toda a equipe sem expor a chave no navegador ou no GitHub.`;
     } else {
         banner.classList.add('twod-hidden');
     }
@@ -1818,6 +1818,15 @@ async function initMetaApi() {
             const data = await resp.json();
             metaState.hasServerToken = Boolean(data.has_server_token);
             metaState.isCloud = Boolean(data.is_cloud);
+            if (metaState.hasServerToken) {
+                // Garante por padrão que todos usem o token permanente seguro do servidor (limpa tokens antigos do navegador)
+                metaState.token = '';
+                try { localStorage.removeItem(STORAGE_KEYS.META_TOKEN); } catch (e) {}
+                ['meta-token-input', 'duplicador-token-input', 'cb-token-input'].forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el) el.value = '';
+                });
+            }
             if (data.default_account_id) {
                 metaState.defaultAccountId = data.default_account_id;
                 localStorage.setItem(STORAGE_KEYS.META_ACCOUNT, data.default_account_id);
