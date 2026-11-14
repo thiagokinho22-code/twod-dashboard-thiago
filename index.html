@@ -388,6 +388,9 @@
                             </div>
                         </div>
                         <div class="meta-banner-actions">
+                            <a href="https://developers.facebook.com/tools/explorer/" target="_blank" rel="noopener noreferrer" class="btn btn-outline btn-sm" style="text-decoration: none; display: inline-flex; align-items: center; gap: 4px;" title="Abrir Graph API Explorer para gerar um novo token da Meta">
+                                🌐 Gerar Token ↗
+                            </a>
                             <button type="button" class="btn btn-outline btn-sm" onclick="reloadMetaAccounts(true)">
                                 🔄 Recarregar Contas
                             </button>
@@ -411,6 +414,9 @@
                             <button type="button" class="btn btn-outline btn-sm" id="btn-toggle-cb-token-vis" onclick="toggleTokenVisibility('cb-token-input', 'btn-toggle-cb-token-vis')">👁️ Ver</button>
                             <button type="button" class="btn btn-primary btn-sm" onclick="saveMetaSettingsFromUI('campaign_builder')">💾 Conectar & Salvar</button>
                             <button type="button" class="btn btn-outline btn-sm" onclick="testMetaTokenFromUI('cb-token-input', 'cb-token-test-result')">🔍 Testar</button>
+                            <a href="https://developers.facebook.com/tools/explorer/" target="_blank" rel="noopener noreferrer" class="btn btn-outline btn-sm" style="text-decoration: none; display: inline-flex; align-items: center; gap: 4px;" title="Abrir Graph API Explorer no Meta Developers">
+                                🌐 Abrir Gerador de Token (Meta) ↗
+                            </a>
                         </div>
                         <div id="cb-token-test-result" class="twod-hidden" style="margin-top: 12px; padding: 12px 16px; border-radius: 8px; font-size: 13px; line-height: 1.5;"></div>
                     </div>
@@ -771,6 +777,9 @@
                             </div>
                         </div>
                         <div class="meta-banner-actions">
+                            <a href="https://developers.facebook.com/tools/explorer/" target="_blank" rel="noopener noreferrer" class="btn btn-outline btn-sm" style="text-decoration: none; display: inline-flex; align-items: center; gap: 4px;" title="Abrir Graph API Explorer para gerar um novo token da Meta">
+                                🌐 Gerar Token ↗
+                            </a>
                             <button type="button" class="btn btn-outline btn-sm" onclick="reloadMetaAccounts(true)">
                                 🔄 Recarregar Contas
                             </button>
@@ -794,6 +803,9 @@
                             <button type="button" class="btn btn-outline btn-sm" id="btn-toggle-dup-token-vis" onclick="toggleTokenVisibility('duplicador-token-input', 'btn-toggle-dup-token-vis')">👁️ Ver</button>
                             <button type="button" class="btn btn-primary btn-sm" onclick="saveMetaSettingsFromUI('duplicador')">💾 Conectar & Salvar</button>
                             <button type="button" class="btn btn-outline btn-sm" onclick="testMetaTokenFromUI('duplicador-token-input', 'duplicador-token-test-result')">🔍 Testar</button>
+                            <a href="https://developers.facebook.com/tools/explorer/" target="_blank" rel="noopener noreferrer" class="btn btn-outline btn-sm" style="text-decoration: none; display: inline-flex; align-items: center; gap: 4px;" title="Abrir Graph API Explorer no Meta Developers">
+                                🌐 Abrir Gerador de Token (Meta) ↗
+                            </a>
                         </div>
                         <div id="duplicador-token-test-result" class="twod-hidden" style="margin-top: 12px; padding: 12px 16px; border-radius: 8px; font-size: 13px; line-height: 1.5;"></div>
                     </div>
@@ -1131,9 +1143,14 @@
                             <p class="text-muted" style="margin-bottom: 16px;">Configure ou renove o seu Token de Acesso da Meta para alimentar o Duplicador de Conjuntos e a automação de campanhas.</p>
                             
                             <div class="form-group" style="margin-bottom: 14px;">
-                                <label for="meta-token-input">
-                                    <strong>Access Token (User Token / System User):</strong>
-                                </label>
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; flex-wrap: wrap; gap: 6px;">
+                                    <label for="meta-token-input" style="margin-bottom: 0;">
+                                        <strong>Access Token (User Token / System User):</strong>
+                                    </label>
+                                    <a href="https://developers.facebook.com/tools/explorer/" target="_blank" rel="noopener noreferrer" class="btn btn-outline btn-sm" style="text-decoration: none; display: inline-flex; align-items: center; gap: 4px; font-size: 11px; padding: 4px 10px;" title="Abrir Graph API Explorer no Meta Developers">
+                                        🌐 Abrir Graph API Explorer (Gerar Token) ↗
+                                    </a>
+                                </div>
                                 <div style="display: flex; gap: 8px;">
                                     <input type="password" id="meta-token-input" class="twod-input" placeholder="EAA..." style="flex: 1; font-family: monospace; font-size: 12px;">
                                     <button type="button" class="btn btn-outline" id="btn-toggle-token-vis" onclick="toggleTokenVisibility()">👁️ Ver</button>
@@ -1255,7 +1272,7 @@
         </div>
     </div>
 
-    <script src="app.js?v=7.3"></script>
+    <script src="app.js?v=7.4"></script>
     <script src="campaign_builder.js?v=1.4"></script>
 </body>
 </html>

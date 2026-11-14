@@ -81,5 +81,15 @@
      - Fallback automático de `destination_type`, `regional_regulation_identities`, `dsa_beneficiary`/`dsa_payor` (UE/BR/US) e `locales` (`Spanish (All)` -> `[1002]` com fallback `[7, 23]`).
   4. Validou ponta a ponta no Chrome headless CDP (`campaign_builder.js?v=1.1`): `Thiago DuploCanto`, 46 contas carregadas, Pixel `Pixel de TWODCOMPANY 01` auto-selecionado, 14 páginas da BM `MON Digital`, inspeção automática da campanha modelo `25143,SudokuDiario,MON-TWODCOMPANY-01,Alexandre,UTM-1`, resolução de 7 cards de criativos do nicho `5G 05.05.25` e `CHROME_JS_ERRORS: []`.
 
+### Sessão: 14/11/2026
+- **Thiago:** Perguntou sobre o andamento geral das modificações feitas no outro computador e solicitou o link para gerar o token da Meta, além de um botão direto dentro da dashboard para acessar a página sempre que precisar.
+- **Agente:**
+  1. Forneceu o link direto oficial do **Graph API Explorer** (`https://developers.facebook.com/tools/explorer/`) com as orientações de permissões (`ads_management`, `ads_read`, `business_management`).
+  2. Implementou botões de 1 clique **`🌐 Gerar Token ↗`** em todas as áreas estratégicas da dashboard:
+     - No cabeçalho e dentro do painel rápido de conexão do **Gerador de Campanhas** (`#cb-token-box`).
+     - No cabeçalho e dentro do painel rápido de conexão do **Duplicador Meta Ads** (`#duplicador-token-box`).
+     - Na aba **Configurações** logo acima do campo de Access Token da Meta.
+  3. Atualizou a versão do script para `app.js?v=7.4` em `index.html`.
+
 ---
 *(Este arquivo será atualizado continuamente conforme avançamos no desenvolvimento)*
