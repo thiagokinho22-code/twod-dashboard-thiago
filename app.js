@@ -66,6 +66,9 @@ try {
 } catch (e) { }
 
 let _servicesBootstrapped = false;
+let _prefetchedMetaConfig = null;
+let _warmupPromise = null;
+let _changelogShowAll = false;
 
 function getAuthToken() {
     try { return localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN) || ''; } catch (e) { return ''; }
@@ -83,6 +86,9 @@ function setAuthSession(data) {
     if (data.media_token) {
         try { localStorage.setItem(STORAGE_KEYS.MEDIA_TOKEN, data.media_token); } catch (e) { }
     }
+    if (data.meta_config && typeof data.meta_config === 'object') {
+        _prefetchedMetaConfig = data.meta_config;
+    }
     if (data.user) {
         const safeU = { ...data.user };
         delete safeU.password;
@@ -94,6 +100,7 @@ function setAuthSession(data) {
 function clearAuthSession() {
     currentUser = null;
     _servicesBootstrapped = false;
+    _prefetchedMetaConfig = null;
     try {
         localStorage.removeItem(STORAGE_KEYS.AUTH_TOKEN);
         localStorage.removeItem(STORAGE_KEYS.MEDIA_TOKEN);
@@ -154,13 +161,131 @@ function saveSites() {
 // SISTEMA DE AUTENTICAÇÃO E SESSÃO (VALIDADO NO BACKEND)
 // ========================================================
 
+function decodeTokenPayloadUnsafe(token) {
+    // Uso exclusivo para roteamento visual no cliente; toda rota protege via HMAC no servidor
+    if (!token || typeof token !== 'string' || !token.includes('.')) return null;
+    try {
+        const rawB64 = token.split('.')[0].replace(/-/g, '+').replace(/_/g, '/');
+        const pad = '='.repeat((4 - (rawB64.length % 4)) % 4);
+        const bin = atob(rawB64 + pad);
+        const bytes = Uint8Array.from(bin, ch => ch.charCodeAt(0));
+        const json = new TextDecoder().decode(bytes);
+        return JSON.parse(json);
+    } catch (e) {
+        return null;
+    }
+}
+
+function updateLoginServerPill(state, text) {
+    const el = document.getElementById('login-server-status');
+    if (!el) return;
+    el.className = `login-server-pill${state ? ' ' + state : ''}`;
+    el.innerText = text;
+}
+
+function warmupBackendServer(force = false) {
+    if (_warmupPromise && !force) return _warmupPromise;
+    updateLoginServerPill('', '⏳ Conectando ao servidor...');
+    const wakingTimer = setTimeout(() => {
+        updateLoginServerPill('waking', '🟡 Acordando servidor na nuvem...');
+    }, 1800);
+
+    _warmupPromise = fetch(`${API_BASE_URL}/api/status`, { method: 'GET', cache: 'no-store' })
+        .then(resp => {
+            clearTimeout(wakingTimer);
+            if (resp.ok) {
+                updateLoginServerPill('ready', '🟢 Servidor online e pronto');
+                return true;
+            }
+            updateLoginServerPill('waking', '🟡 Servidor respondendo com alerta');
+            return false;
+        })
+        .catch(() => {
+            clearTimeout(wakingTimer);
+            updateLoginServerPill('waking', '🟡 Servidor acordando — tente novamente se demorar');
+            _warmupPromise = null;
+            return false;
+        });
+    return _warmupPromise;
+}
+
+function syncAppUserHeader() {
+    if (!currentUser) return;
+    const nameEl = document.getElementById('current-user-name');
+    const roleEl = document.getElementById('current-user-role');
+    const avatarEl = document.getElementById('current-user-avatar');
+    if (nameEl) nameEl.innerText = currentUser.name || 'Usuário';
+    if (roleEl) roleEl.innerText = currentUser.role || 'Operador';
+    if (avatarEl) avatarEl.innerText = (currentUser.name || 'U').charAt(0).toUpperCase();
+
+    const isAdmin = currentUser.role === 'Administrador';
+    document.querySelectorAll('.admin-only').forEach(el => {
+        if (isAdmin) {
+            el.classList.remove('twod-hidden');
+        } else {
+            el.classList.add('twod-hidden');
+        }
+    });
+}
+
+async function verifySessionInBackground(authTok) {
+    try {
+        const prevTheme = currentUser ? currentUser.themeMode : null;
+        const resp = await fetch(`${API_BASE_URL}/api/auth/me`, {
+            headers: { 'Authorization': `Bearer ${authTok}` }
+        });
+        const data = await resp.json().catch(() => null);
+        if (!resp.ok || !data || !data.success || !data.user) {
+            if (data && data.code === 'PASSWORD_CHANGE_REQUIRED') {
+                showForcePasswordModal();
+                return;
+            }
+            if (resp.status === 401 || resp.status === 403) {
+                clearAuthSession();
+                showLogin((data && data.error) || 'Sessão expirada. Faça login novamente.');
+            }
+            return;
+        }
+        setAuthSession(data);
+        if (data.must_change_password) {
+            showForcePasswordModal();
+            return;
+        }
+        syncAppUserHeader();
+        if (data.user.themeMode && data.user.themeMode !== prevTheme) {
+            try { applyUserTheme(); } catch (e) { }
+        }
+    } catch (e) {
+        console.warn('Falha ao revalidar sessão em segundo plano:', e);
+    }
+}
+
 async function checkSession() {
     const authTok = getAuthToken();
     if (!authTok) {
         showLogin();
+        warmupBackendServer();
         return;
     }
 
+    const tokenPayload = decodeTokenPayloadUnsafe(authTok);
+    const hasLocalValidToken = Boolean(
+        tokenPayload &&
+        Number(tokenPayload.exp || 0) * 1000 > Date.now() + 30000 &&
+        !tokenPayload.mcp &&
+        currentUser &&
+        currentUser.username &&
+        !currentUser.must_change_password
+    );
+
+    if (hasLocalValidToken) {
+        showApp();
+        initAuthenticatedApp();
+        verifySessionInBackground(authTok);
+        return;
+    }
+
+    warmupBackendServer();
     const loginBtn = document.getElementById('btn-login-submit');
     if (loginBtn) {
         loginBtn.disabled = true;
@@ -227,6 +352,7 @@ function showLogin(errorMsg = '') {
         }
     }
     if (pwdInput) pwdInput.value = '';
+    warmupBackendServer();
 }
 
 function showForcePasswordModal() {
@@ -282,24 +408,12 @@ function showApp() {
         appEl.classList.remove('twod-hidden');
     }
 
-    const nameEl = document.getElementById('current-user-name');
-    const roleEl = document.getElementById('current-user-role');
-    const avatarEl = document.getElementById('current-user-avatar');
-    if (nameEl) nameEl.innerText = currentUser.name || 'Usuário';
-    if (roleEl) roleEl.innerText = currentUser.role || 'Operador';
-    if (avatarEl) avatarEl.innerText = (currentUser.name || 'U').charAt(0).toUpperCase();
-
-    const isAdmin = currentUser.role === 'Administrador';
-    document.querySelectorAll('.admin-only').forEach(el => {
-        if (isAdmin) {
-            el.classList.remove('twod-hidden');
-        } else {
-            el.classList.add('twod-hidden');
-        }
-    });
+    syncAppUserHeader();
 
     try { applyUserTheme(); } catch (e) { }
     try { renderSitesTable(); } catch (e) { }
+    try { renderChangelog(); } catch (e) { }
+    const isAdmin = currentUser.role === 'Administrador';
     if (isAdmin) {
         try { loadUsersFromBackend(); } catch (e) { }
     }
@@ -331,9 +445,15 @@ async function handleLogin(e) {
     }
 
     if (errBox) errBox.classList.add('twod-hidden');
+    let coldStartHintTimer = null;
     if (loginBtn) {
         loginBtn.disabled = true;
-        loginBtn.innerText = '⏳ Autenticando no servidor...';
+        loginBtn.innerText = '⏳ Entrando no painel...';
+        coldStartHintTimer = setTimeout(() => {
+            if (loginBtn && loginBtn.disabled) {
+                loginBtn.innerText = '⏳ Acordando servidor na nuvem...';
+            }
+        }, 2200);
     }
 
     try {
@@ -366,6 +486,7 @@ async function handleLogin(e) {
             errBox.classList.remove('twod-hidden');
         }
     } finally {
+        if (coldStartHintTimer) clearTimeout(coldStartHintTimer);
         if (loginBtn) {
             loginBtn.disabled = false;
             loginBtn.innerText = 'Acessar Painel';
@@ -563,6 +684,110 @@ const tabTitles = {
     'configuracoes': { title: 'Configurações & Tema', subtitle: 'Preferências pessoais, horários e segurança' }
 };
 
+// ========================================================
+// LOG DE ATUALIZAÇÕES DO PAINEL (VISÃO GERAL)
+// Para adicionar novas entregas, insira um item no topo abaixo.
+// ========================================================
+const PANEL_CHANGELOG = [
+    {
+        date: '14/11/2026',
+        type: 'perf',
+        badge: '⚡ Velocidade',
+        title: 'Otimização de velocidade, Tela inicial & Log de novidades',
+        summary: 'Login muito mais rápido e painel sempre abrindo na Visão Geral com histórico resumido de entregas.',
+        highlights: [
+            'Corrigido erro 401 ao baixar usuários no OneDrive + removida trava síncrona e DNS reverso no login.',
+            'Pré-aquecimento automático do Render na tela de login + entrada instantânea com sessão de 7 dias.',
+            'Painel passa a abrir sempre na Visão Geral com este Log de Atualizações.'
+        ]
+    },
+    {
+        date: '14/11/2026',
+        type: 'feat',
+        badge: '🚀 Recurso',
+        title: 'Suporte a Flexible Ads (1 criativo por anúncio) no Duplicador',
+        summary: 'Anúncios flexíveis da Meta agora expandem automaticamente em até 6 anúncios individuais ao duplicar.',
+        highlights: [
+            'Leitura de asset_feed_spec e creative_asset_groups_spec com hidratação direta de criativos.',
+            'Bloqueio preventivo caso falhe a leitura de criativos para não criar conjuntos vazios.'
+        ]
+    },
+    {
+        date: '14/11/2026',
+        type: 'sec',
+        badge: '🔒 Segurança',
+        title: 'Autenticação no Servidor & Proxy da Meta Graph API',
+        summary: 'Credenciais e token permanente da Meta agora ficam protegidos no backend em nuvem.',
+        highlights: [
+            'Sessões assinadas por HMAC-SHA256 e senhas em hash PBKDF2 sincronizadas no OneDrive.',
+            'Troca obrigatória de senha inicial no primeiro acesso.'
+        ]
+    },
+    {
+        date: '14/11/2026',
+        type: 'feat',
+        badge: '🚀 Recurso',
+        title: 'Miniaturas Meta, Pacotes OneDrive & Tradução em Lote',
+        summary: 'Duplicador conectado aos criativos na nuvem com pré-visualização, Bloco A/B e tradução automática.',
+        highlights: [
+            'Vínculo campanha ↔ pacote OneDrive, indicadores de criativos OK e zoom nas miniaturas.',
+            'Fallback de tradução direto no navegador quando o datacenter sofre limite.'
+        ]
+    },
+    {
+        date: '14/11/2026',
+        type: 'fix',
+        badge: '🔧 Correção',
+        title: 'Busca por PostID & Trava contra Duplicação Cruzada',
+        summary: 'Pesquisa instantânea de campanhas e proteção contra envio para campanha errada.',
+        highlights: [
+            'Filtro rápido por PostID ou nome no Duplicador e Gerador de Campanhas.',
+            'campaign_id forçado no /copies com confirmação exibindo a campanha de destino.'
+        ]
+    }
+];
+
+function renderChangelog() {
+    const listEl = document.getElementById('changelog-list');
+    const toggleBtn = document.getElementById('btn-changelog-toggle');
+    if (!listEl) return;
+
+    const DEFAULT_VISIBLE = 3;
+    const items = _changelogShowAll ? PANEL_CHANGELOG : PANEL_CHANGELOG.slice(0, DEFAULT_VISIBLE);
+    listEl.innerHTML = items.map(entry => {
+        const bullets = Array.isArray(entry.highlights) && entry.highlights.length
+            ? `<ul class="changelog-bullets">${entry.highlights.map(h => `<li>${escHtml(h)}</li>`).join('')}</ul>`
+            : '';
+        return `
+            <div class="changelog-item">
+                <div class="changelog-item-top">
+                    <span class="changelog-date">${escHtml(entry.date)}</span>
+                    <span class="changelog-badge ${escHtml(entry.type || 'feat')}">${escHtml(entry.badge || 'Atualização')}</span>
+                    <span class="changelog-title">${escHtml(entry.title)}</span>
+                </div>
+                <p class="changelog-summary">${escHtml(entry.summary)}</p>
+                ${bullets}
+            </div>
+        `;
+    }).join('');
+
+    if (toggleBtn) {
+        if (PANEL_CHANGELOG.length <= DEFAULT_VISIBLE) {
+            toggleBtn.style.display = 'none';
+        } else {
+            toggleBtn.style.display = '';
+            toggleBtn.innerText = _changelogShowAll
+                ? 'Mostrar recentes'
+                : `Ver tudo (${PANEL_CHANGELOG.length})`;
+        }
+    }
+}
+
+function toggleChangelogHistory() {
+    _changelogShowAll = !_changelogShowAll;
+    renderChangelog();
+}
+
 function initTabs() {
     document.querySelectorAll('.nav-item').forEach(btn => {
         if (!btn.dataset.tabBound && !btn.getAttribute('onclick')) {
@@ -575,8 +800,8 @@ function initTabs() {
         }
     });
 
-    const savedTab = localStorage.getItem(STORAGE_KEYS.ACTIVE_TAB) || 'visao-geral';
-    switchTab(savedTab);
+    // Sempre inicia o painel na tela inicial (Visão Geral)
+    switchTab('visao-geral');
 }
 
 function switchTab(tabId) {
@@ -1813,9 +2038,15 @@ function refreshServerTokenBanner() {
 // Inicializa a API do Meta
 async function initMetaApi() {
     try {
-        const resp = await apiFetch('/api/meta/config');
-        if (resp.ok) {
-            const data = await resp.json();
+        let data = _prefetchedMetaConfig;
+        _prefetchedMetaConfig = null;
+        if (!data) {
+            const resp = await apiFetch('/api/meta/config');
+            if (resp.ok) {
+                data = await resp.json();
+            }
+        }
+        if (data) {
             metaState.hasServerToken = Boolean(data.has_server_token);
             metaState.isCloud = Boolean(data.is_cloud);
             if (metaState.hasServerToken) {
@@ -5089,6 +5320,7 @@ window.handleLogin = handleLogin;
 window.submitForcedPasswordChange = submitForcedPasswordChange;
 window.showLogin = showLogin;
 window.showApp = showApp;
+window.toggleChangelogHistory = toggleChangelogHistory;
 
 // Funções Meta Ads & Duplicador
 window.reloadMetaAccounts = loadMetaAccounts;

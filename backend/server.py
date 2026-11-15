@@ -37,6 +37,12 @@ PORT = int(os.environ.get("PORT", 8000))
 USERS_LOCK = threading.Lock()
 USERS_MEM = None
 _USERS_ONEDRIVE_SYNCED = False
+_USERS_SYNC_LOCK = threading.Lock()
+_USERS_BOOT_EVENT = threading.Event()
+_USERS_REMOTE_COOLDOWN_UNTIL = 0.0
+_USERS_LAST_REFRESH_AT = 0.0
+_USERS_LOCAL_MUTATED_AT = 0.0
+_USERS_BG_REFRESHING = False
 _SESSION_SECRET_CACHE = None
 _LOGIN_FAILURES = {}
 SESSION_TTL_SECONDS = 7 * 24 * 3600
@@ -247,36 +253,50 @@ def _build_default_users():
     return {"users": out}
 
 
-def _load_users_from_onedrive():
+def _load_users_from_onedrive(max_attempts=1, timeout=6):
     """Retorna ('found', data), ('not_found', None) ou ('error', msg) sem jamais confundir erro transitório com 404."""
     encoded = urllib.parse.quote(ONEDRIVE_USERS_REMOTE_PATH)
-    url = f"https://graph.microsoft.com/v1.0/me/drive/root:/{encoded}:/content"
+    # Busca @microsoft.graph.downloadUrl para evitar 302 do :/content repassando Authorization ao CDN 1drv.com (HTTP 401)
+    meta_url = f"https://graph.microsoft.com/v1.0/me/drive/root:/{encoded}?select=id,name,@microsoft.graph.downloadUrl,@content.downloadUrl"
     last_err = None
+    refreshed_on_401 = False
+    attempts_left = max(1, int(max_attempts))
 
-    for attempt in range(3):
+    attempt_idx = 0
+    while attempts_left > 0:
+        attempts_left -= 1
+        attempt_idx += 1
         tok, err = get_graph_access_token()
         if not tok:
             return "error", err or "OneDrive não autenticado"
-        req = urllib.request.Request(url, headers={"Authorization": f"Bearer {tok}"}, method="GET")
+        req = urllib.request.Request(meta_url, headers={"Authorization": f"Bearer {tok}"}, method="GET")
         try:
-            with urllib.request.urlopen(req, timeout=15) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-                if isinstance(data, dict) and isinstance(data.get("users"), list):
-                    return "found", data
-                return "error", "Formato inválido no users.json do OneDrive"
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                meta = json.loads(resp.read().decode("utf-8"))
+            dl_url = meta.get("@microsoft.graph.downloadUrl") or meta.get("@content.downloadUrl")
+            if not dl_url:
+                return "error", "Link de download não retornado pelo OneDrive"
+            with urllib.request.urlopen(urllib.request.Request(dl_url, method="GET"), timeout=timeout) as dl_resp:
+                data = json.loads(dl_resp.read().decode("utf-8"))
+            if isinstance(data, dict) and isinstance(data.get("users"), list):
+                return "found", data
+            return "error", "Formato inválido no users.json do OneDrive"
         except urllib.error.HTTPError as e:
             if e.code == 404:
                 return "not_found", None
             last_err = f"HTTP {e.code}"
-            if e.code == 401:
+            if e.code == 401 and not refreshed_on_401:
+                refreshed_on_401 = True
                 GRAPH_TOKEN_CACHE["access_token"] = None
                 GRAPH_TOKEN_CACHE["expires_at"] = 0
-            print(f"⚠️ Erro ao ler usuários no OneDrive (tentativa {attempt + 1}/3): HTTP {e.code}")
+                attempts_left += 1
+                continue
+            print(f"⚠️ Erro ao ler usuários no OneDrive (tentativa {attempt_idx}): HTTP {e.code}")
         except Exception as e:
             last_err = str(e)
-            print(f"⚠️ Erro ao sincronizar usuários do OneDrive (tentativa {attempt + 1}/3): {e}")
-        if attempt < 2:
-            time.sleep(0.8 * (attempt + 1))
+            print(f"⚠️ Erro ao sincronizar usuários do OneDrive (tentativa {attempt_idx}): {e}")
+        if attempts_left > 0:
+            time.sleep(0.35 * attempt_idx)
 
     return "error", last_err or "Falha ao ler OneDrive"
 
@@ -315,13 +335,66 @@ def _save_users_to_onedrive(users_data):
     return False
 
 
-def load_users_store(sync_remote=True):
-    """Carrega base de usuários com sincronização segura (nunca sobrescreve OneDrive em erro transitório)."""
+def _sync_users_from_onedrive_once(max_attempts=1, timeout=6):
+    """Sincroniza base de usuários fora do USERS_LOCK para não bloquear logins concorrentes."""
+    global USERS_MEM, _USERS_ONEDRIVE_SYNCED, _USERS_REMOTE_COOLDOWN_UNTIL, _USERS_LAST_REFRESH_AT
+    with _USERS_SYNC_LOCK:
+        sync_started_at = time.time()
+        status, remote_data = _load_users_from_onedrive(max_attempts=max_attempts, timeout=timeout)
+        now = time.time()
+        with USERS_LOCK:
+            _USERS_LAST_REFRESH_AT = now
+            if _USERS_LOCAL_MUTATED_AT > sync_started_at and USERS_MEM is not None:
+                return "skipped_stale"
+            if status == "found" and remote_data and remote_data.get("users"):
+                USERS_MEM = remote_data
+                _USERS_ONEDRIVE_SYNCED = True
+                _USERS_REMOTE_COOLDOWN_UNTIL = 0.0
+                try:
+                    with open(USERS_PATH, "w", encoding="utf-8") as f:
+                        json.dump(USERS_MEM, f, indent=2, ensure_ascii=False)
+                except Exception:
+                    pass
+            elif status == "not_found":
+                # Só confirma ausente quando o OneDrive responder HTTP 404 explícito
+                _USERS_ONEDRIVE_SYNCED = True
+                _USERS_REMOTE_COOLDOWN_UNTIL = 0.0
+                if USERS_MEM is None:
+                    USERS_MEM = _build_default_users()
+                    try:
+                        with open(USERS_PATH, "w", encoding="utf-8") as f:
+                            json.dump(USERS_MEM, f, indent=2, ensure_ascii=False)
+                    except Exception:
+                        pass
+            else:
+                # Erro transitório: aplica cooldown de 45s para não travar logins seguintes
+                _USERS_REMOTE_COOLDOWN_UNTIL = now + 45.0
+                print(f"⚠️ Mantendo fallback temporário sem marcar sync remoto ({remote_data})")
+        return status
+
+
+def _schedule_users_background_refresh(max_attempts=1, timeout=6):
+    global _USERS_BG_REFRESHING
+    with USERS_LOCK:
+        if _USERS_BG_REFRESHING:
+            return
+        _USERS_BG_REFRESHING = True
+
+    def _worker():
+        global _USERS_BG_REFRESHING
+        try:
+            _sync_users_from_onedrive_once(max_attempts=max_attempts, timeout=timeout)
+        finally:
+            with USERS_LOCK:
+                _USERS_BG_REFRESHING = False
+
+    threading.Thread(target=_worker, daemon=True).start()
+
+
+def load_users_store(sync_remote=True, allow_seed_fallback=True):
+    """Carrega base de usuários com cache em RAM e sincronização não-bloqueante."""
     global USERS_MEM, _USERS_ONEDRIVE_SYNCED
     with USERS_LOCK:
-        if USERS_MEM is not None and (_USERS_ONEDRIVE_SYNCED or not sync_remote):
-            return USERS_MEM
-
         disk_loaded = False
         if USERS_MEM is None and os.path.exists(USERS_PATH):
             try:
@@ -333,35 +406,44 @@ def load_users_store(sync_remote=True):
             except Exception as e:
                 print(f"⚠️ Erro ao ler {USERS_PATH}: {e}")
 
-        if sync_remote and not _USERS_ONEDRIVE_SYNCED:
-            cfg = load_env_vars()
-            if cfg.get("ONEDRIVE_REFRESH_TOKEN"):
-                status, remote_data = _load_users_from_onedrive()
-                if status == "found" and remote_data and remote_data.get("users"):
-                    USERS_MEM = remote_data
-                    _USERS_ONEDRIVE_SYNCED = True
-                    try:
-                        with open(USERS_PATH, "w", encoding="utf-8") as f:
-                            json.dump(USERS_MEM, f, indent=2, ensure_ascii=False)
-                    except Exception:
-                        pass
-                elif status == "not_found":
-                    # Só confirma ausente quando o OneDrive responder HTTP 404 explícito
-                    _USERS_ONEDRIVE_SYNCED = True
-                    if USERS_MEM is None:
-                        USERS_MEM = _build_default_users()
-                        try:
-                            with open(USERS_PATH, "w", encoding="utf-8") as f:
-                                json.dump(USERS_MEM, f, indent=2, ensure_ascii=False)
-                        except Exception:
-                            pass
-                else:
-                    # Erro transitório: mantém _USERS_ONEDRIVE_SYNCED = False para tentar novamente e NUNCA sobrescreve a nuvem
-                    print(f"⚠️ Mantendo fallback temporário sem marcar sync remoto ({remote_data})")
+        now = time.time()
+        if USERS_MEM is not None and (_USERS_ONEDRIVE_SYNCED or not sync_remote):
+            if sync_remote and _USERS_ONEDRIVE_SYNCED and (now - _USERS_LAST_REFRESH_AT > 300) and load_env_vars().get("ONEDRIVE_REFRESH_TOKEN"):
+                pass  # Agendado fora do USERS_LOCK abaixo
             else:
+                return USERS_MEM
+
+        mem_snapshot = USERS_MEM
+        synced_now = _USERS_ONEDRIVE_SYNCED
+        cooldown_until = _USERS_REMOTE_COOLDOWN_UNTIL
+        last_refresh = _USERS_LAST_REFRESH_AT
+
+    if mem_snapshot is not None and synced_now and sync_remote and (now - last_refresh > 300):
+        if load_env_vars().get("ONEDRIVE_REFRESH_TOKEN"):
+            _schedule_users_background_refresh(max_attempts=1, timeout=6)
+        return mem_snapshot
+
+    if sync_remote and not synced_now:
+        cfg = load_env_vars()
+        if cfg.get("ONEDRIVE_REFRESH_TOKEN"):
+            if mem_snapshot is None and not _USERS_BOOT_EVENT.is_set():
+                _USERS_BOOT_EVENT.wait(timeout=6.0)
+                with USERS_LOCK:
+                    mem_snapshot = USERS_MEM
+                    synced_now = _USERS_ONEDRIVE_SYNCED
+                    cooldown_until = _USERS_REMOTE_COOLDOWN_UNTIL
+
+            if not synced_now and time.time() >= cooldown_until:
+                if mem_snapshot is None:
+                    _sync_users_from_onedrive_once(max_attempts=1, timeout=6)
+                else:
+                    _schedule_users_background_refresh(max_attempts=1, timeout=6)
+        else:
+            with USERS_LOCK:
                 _USERS_ONEDRIVE_SYNCED = True
 
-        if USERS_MEM is None:
+    with USERS_LOCK:
+        if USERS_MEM is None and allow_seed_fallback:
             USERS_MEM = _build_default_users()
             if not disk_loaded and _USERS_ONEDRIVE_SYNCED:
                 try:
@@ -369,33 +451,36 @@ def load_users_store(sync_remote=True):
                         json.dump(USERS_MEM, f, indent=2, ensure_ascii=False)
                 except Exception:
                     pass
-
         return USERS_MEM
 
 
 def save_users_store(users_data, sync_remote=True, wait_remote=True):
     """Persiste base de usuários no disco local e na nuvem OneDrive."""
-    global USERS_MEM, _USERS_ONEDRIVE_SYNCED
+    global USERS_MEM, _USERS_ONEDRIVE_SYNCED, _USERS_LOCAL_MUTATED_AT, _USERS_LAST_REFRESH_AT
     with USERS_LOCK:
         USERS_MEM = users_data
+        _USERS_LOCAL_MUTATED_AT = time.time()
         try:
             with open(USERS_PATH, "w", encoding="utf-8") as f:
                 json.dump(users_data, f, indent=2, ensure_ascii=False)
         except Exception as e:
             print(f"⚠️ Aviso ao salvar .users.json local: {e}")
+        snapshot = json.loads(json.dumps(users_data))
+        synced_flag = _USERS_ONEDRIVE_SYNCED
 
-        if sync_remote and load_env_vars().get("ONEDRIVE_REFRESH_TOKEN"):
-            snapshot = json.loads(json.dumps(users_data))
-            if wait_remote:
-                ok = _save_users_to_onedrive(snapshot)
-                if ok:
+    if sync_remote and load_env_vars().get("ONEDRIVE_REFRESH_TOKEN"):
+        if wait_remote:
+            ok = _save_users_to_onedrive(snapshot)
+            if ok:
+                with USERS_LOCK:
                     _USERS_ONEDRIVE_SYNCED = True
-                return ok
-            else:
-                if _USERS_ONEDRIVE_SYNCED:
-                    threading.Thread(target=_save_users_to_onedrive, args=(snapshot,), daemon=True).start()
-                return True
-        return True
+                    _USERS_LAST_REFRESH_AT = time.time()
+            return ok
+        else:
+            if synced_flag:
+                threading.Thread(target=_save_users_to_onedrive, args=(snapshot,), daemon=True).start()
+            return True
+    return True
 
 
 def _issue_session_tokens(user):
@@ -448,6 +533,15 @@ def resolve_meta_token(manual_token=""):
     if mt:
         return mt
     return load_env_vars().get("META_ACCESS_TOKEN", "").strip()
+
+
+def get_public_meta_config():
+    env_vars = load_env_vars()
+    return {
+        "has_server_token": bool(env_vars.get("META_ACCESS_TOKEN", "").strip()),
+        "default_account_id": env_vars.get("DEFAULT_AD_ACCOUNT_ID", "act_522793227047438"),
+        "is_cloud": bool(os.environ.get("RENDER") or os.environ.get("RAILWAY_ENVIRONMENT")),
+    }
 
 
 def _scrub_meta_secret(obj, secret_token=""):
@@ -1415,6 +1509,10 @@ def scan_onedrive_folders(base_path=DEFAULT_WORK_DIR, force_reload=False):
 # ============================================================
 
 class APIHandler(BaseHTTPRequestHandler):
+    def address_string(self):
+        # Evita reverse DNS blocking (socket.getfqdn) a cada resposta HTTP
+        return self.client_address[0] if self.client_address else "unknown"
+
     def _send_json(self, data, status=200):
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -1634,6 +1732,7 @@ class APIHandler(BaseHTTPRequestHandler):
                 "must_change_password": bool(user.get("must_change_password", False)),
                 "media_token": media_tok,
                 "user": safe_user_dict(user),
+                "meta_config": get_public_meta_config(),
             })
 
         elif path == "/api/users":
@@ -1911,13 +2010,10 @@ class APIHandler(BaseHTTPRequestHandler):
         elif path == "/api/meta/config":
             if not self._authenticate_request():
                 return
-            env_vars = load_env_vars()
-            has_server_token = bool(env_vars.get("META_ACCESS_TOKEN", "").strip())
+            cfg_meta = get_public_meta_config()
             self._send_json({
                 "success": True,
-                "has_server_token": has_server_token,
-                "default_account_id": env_vars.get("DEFAULT_AD_ACCOUNT_ID", "act_522793227047438"),
-                "is_cloud": bool(os.environ.get("RENDER") or os.environ.get("RAILWAY_ENVIRONMENT")),
+                **cfg_meta,
             })
 
         elif path.startswith("/api/audio/"):
@@ -1996,6 +2092,7 @@ class APIHandler(BaseHTTPRequestHandler):
                     "media_token": media_tok,
                     "must_change_password": bool(user.get("must_change_password", False)),
                     "user": safe_user_dict(user),
+                    "meta_config": get_public_meta_config(),
                 })
             except Exception as e:
                 self._send_json({"success": False, "error": str(e)}, 500)
@@ -2379,10 +2476,20 @@ def run():
     load_graph_cache_from_disk()
     cfg = load_env_vars()
     if cfg.get("ONEDRIVE_REFRESH_TOKEN"):
-        load_users_store(sync_remote=True)
-        start_graph_sync_background(force_full=False)
+        # Carrega disco local imediatamente sem bloquear a subida da porta HTTP
+        load_users_store(sync_remote=False, allow_seed_fallback=False)
+
+        def _boot_sync():
+            try:
+                _sync_users_from_onedrive_once(max_attempts=2, timeout=8)
+            finally:
+                _USERS_BOOT_EVENT.set()
+            start_graph_sync_background(force_full=False)
+
+        threading.Thread(target=_boot_sync, daemon=True).start()
     else:
-        load_users_store(sync_remote=False)
+        _USERS_BOOT_EVENT.set()
+        load_users_store(sync_remote=False, allow_seed_fallback=True)
 
     host = "0.0.0.0" if (os.environ.get("RENDER") or os.environ.get("RAILWAY_ENVIRONMENT") or os.environ.get("PORT")) else "127.0.0.1"
     server_address = (host, PORT)

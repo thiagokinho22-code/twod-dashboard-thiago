@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>TwoD Hub — Central de Automações</title>
-    <link rel="stylesheet" href="styles.css?v=2.2">
+    <link rel="stylesheet" href="styles.css?v=2.3">
 </head>
 <body>
 
@@ -37,6 +37,7 @@
                 <div id="login-error" class="login-error-msg twod-hidden">Usuário ou senha incorretos.</div>
 
                 <button type="submit" id="btn-login-submit" class="btn btn-primary btn-block">Acessar Painel</button>
+                <div id="login-server-status" class="login-server-pill">⏳ Conectando ao servidor...</div>
             </form>
         </div>
     </div>
@@ -256,10 +257,23 @@
                             <h2>Bem-vindo à nova central da TwoD! 🚀</h2>
                             <p>Este painel foi estruturado para substituir o uso de executáveis locais, automatizar as duplicações do Meta Ads em segundos e centralizar os comandos da equipe.</p>
                             <div class="action-buttons-row">
-                                <button class="btn btn-primary" onclick="switchTab('criativos')">Abrir Gerador de Criativos</button>
-                                <button class="btn btn-secondary" onclick="switchTab('fun-digital')">Ver Fila FUN Digital</button>
+                                <button class="btn btn-primary" onclick="switchTab('duplicador')">Abrir Duplicador Meta Ads</button>
+                                <button class="btn btn-secondary" onclick="switchTab('criativos')">Abrir Gerador de Criativos</button>
+                                <button class="btn btn-outline" onclick="switchTab('fun-digital')">Ver Fila FUN Digital</button>
                             </div>
                         </div>
+                    </div>
+
+                    <!-- Log de Atualizações do Painel -->
+                    <div class="panel-card changelog-card" id="changelog-panel">
+                        <div class="changelog-header">
+                            <div>
+                                <h2>📋 Log de Atualizações do Painel</h2>
+                                <p>Resumo rápido do que foi implementado ou ajustado recentemente.</p>
+                            </div>
+                            <button type="button" id="btn-changelog-toggle" class="btn btn-outline btn-sm" onclick="toggleChangelogHistory()">Ver tudo</button>
+                        </div>
+                        <div id="changelog-list" class="changelog-list"></div>
                     </div>
                 </section>
 
@@ -1357,7 +1371,7 @@
         </div>
     </div>
 
-    <script src="app.js?v=8.3"></script>
+    <script src="app.js?v=8.4"></script>
     <script src="campaign_builder.js?v=1.7"></script>
 </body>
 </html>
