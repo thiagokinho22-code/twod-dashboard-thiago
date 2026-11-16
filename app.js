@@ -2073,6 +2073,21 @@ function refreshServerTokenBanner() {
     }
 }
 
+function refreshGeminiServerBanner() {
+    const banner = document.getElementById('gemini-server-key-banner');
+    if (banner) {
+        if (metaState.hasGeminiKey) {
+            banner.classList.remove('twod-hidden');
+            banner.innerHTML = `🟢 <strong>Gemini API Key ativa com segurança no Servidor (${metaState.isCloud ? 'Render' : '.env Local'}).</strong> Toda a equipe pode gerar áudios direto para o OneDrive sem precisar colar a chave novamente.`;
+        } else {
+            banner.classList.add('twod-hidden');
+        }
+    }
+    if (typeof window.syncStudioGeminiBanner === 'function') {
+        window.syncStudioGeminiBanner();
+    }
+}
+
 // Inicializa a API do Meta
 async function initMetaApi() {
     try {
@@ -2086,6 +2101,7 @@ async function initMetaApi() {
         }
         if (data) {
             metaState.hasServerToken = Boolean(data.has_server_token);
+            metaState.hasGeminiKey = Boolean(data.has_gemini_key);
             metaState.isCloud = Boolean(data.is_cloud);
             if (metaState.hasServerToken) {
                 // Garante por padrão que todos usem o token permanente seguro do servidor (limpa tokens antigos do navegador)
@@ -2106,6 +2122,7 @@ async function initMetaApi() {
     }
 
     refreshServerTokenBanner();
+    refreshGeminiServerBanner();
 
     // Renderiza abas de blocos de países
     renderBlockNav();
@@ -5537,6 +5554,53 @@ async function saveMetaSettingsFromUI(source = 'configuracoes') {
     testAndReloadMetaApi(true);
 }
 
+async function saveGeminiSettingsFromUI() {
+    const keyInput = document.getElementById('gemini-api-key-input');
+    const statusEl = document.getElementById('gemini-key-save-status');
+    const keyVal = keyInput ? keyInput.value.trim() : '';
+
+    if (statusEl) {
+        statusEl.textContent = '⏳ Salvando chave Gemini...';
+        statusEl.style.color = '#93c5fd';
+    }
+
+    try {
+        if (!keyVal) {
+            if (!confirm('O campo da Gemini API Key está vazio. Deseja remover a chave salva no servidor?')) {
+                if (statusEl) statusEl.textContent = '';
+                return;
+            }
+        }
+        const resp = await apiFetch('/api/meta/config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ gemini_api_key: keyVal })
+        });
+        const data = await resp.json();
+        if (!resp.ok || !data.success) {
+            throw new Error(data.error || `Erro HTTP ${resp.status}`);
+        }
+        metaState.hasGeminiKey = Boolean(data.has_gemini_key);
+        if (keyInput) keyInput.value = '';
+        refreshGeminiServerBanner();
+        if (statusEl) {
+            statusEl.textContent = metaState.hasGeminiKey
+                ? (metaState.isCloud
+                    ? '✅ Salva na sessão do Render! (Para manter após redeploy, adicione GEMINI_API_KEY nas Environment Variables do Render).'
+                    : '✅ Gemini API Key salva no servidor (.env) com segurança!')
+                : '🗑️ Gemini API Key removida do servidor.';
+            statusEl.style.color = metaState.hasGeminiKey ? '#34d399' : '#fbbf24';
+        }
+    } catch (e) {
+        if (statusEl) {
+            statusEl.textContent = `❌ Erro ao salvar: ${e.message}`;
+            statusEl.style.color = '#f87171';
+        } else {
+            alert(`Erro ao salvar chave Gemini: ${e.message}`);
+        }
+    }
+}
+
 // Expõe funções globais para compatibilidade total com onclick
 window.switchTab = switchTab;
 window.setThemeMode = setThemeMode;
@@ -5581,6 +5645,9 @@ window.closeThumbZoomModal = closeThumbZoomModal;
 window.formatMetaApiError = formatMetaApiError;
 window.refreshLinkedPackAndNotice = refreshLinkedPackAndNotice;
 window.handleManualDuplicatorVideos = handleManualDuplicatorVideos;
+window.saveGeminiSettingsFromUI = saveGeminiSettingsFromUI;
+window.refreshGeminiServerBanner = refreshGeminiServerBanner;
+window.metaState = metaState;
 
 // ========================================================
 // INICIALIZAÇÃO INFALÍVEL (EXECUTA IMEDIATO SE DOM JÁ CARREGADO)

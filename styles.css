@@ -2775,3 +2775,98 @@ body {
     font-size: 12.5px;
 }
 
+.studio-tts-box {
+    margin-top: 16px;
+    padding: 16px;
+    border-radius: 12px;
+    border: 1px solid rgba(56, 189, 248, 0.35);
+    background: rgba(15, 23, 42, 0.55);
+}
+
+.studio-tts-textarea {
+    width: 100%;
+    min-height: 92px;
+    margin-top: 8px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    border: 1px solid rgba(148, 163, 184, 0.25);
+    background: rgba(2, 6, 23, 0.65);
+    color: #f8fafc;
+    font-family: inherit;
+    font-size: 13px;
+    line-height: 1.45;
+    resize: vertical;
+    box-sizing: border-box;
+}
+
+.studio-tts-textarea:focus {
+    outline: none;
+    border-color: #38bdf8;
+    box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.2);
+}
+
+.studio-tts-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: flex-end;
+    margin-top: 12px;
+}
+
+.studio-tts-langs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.studio-tts-langs label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 10px;
+    border-radius: 999px;
+    border: 1px solid rgba(148, 163, 184, 0.25);
+    background: rgba(30, 41, 59, 0.65);
+    color: #e2e8f0;
+    font-size: 12px;
+    cursor: pointer;
+    user-select: none;
+}
+
+.studio-tts-langs label:hover {
+    border-color: rgba(56, 189, 248, 0.5);
+}
+
+.studio-gemini-inline {
+    margin-top: 10px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    border: 1px dashed rgba(250, 204, 21, 0.45);
+    background: rgba(250, 204, 21, 0.06);
+}
+
+.studio-tts-results {
+    margin-top: 12px;
+    display: grid;
+    gap: 8px;
+}
+
+.studio-tts-item {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    border: 1px solid rgba(34, 197, 94, 0.35);
+    background: rgba(20, 83, 45, 0.2);
+    font-size: 12.5px;
+}
+
+.studio-tts-item audio {
+    height: 32px;
+    max-width: 280px;
+}
+

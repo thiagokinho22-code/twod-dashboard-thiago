@@ -121,6 +121,7 @@ def load_env_vars():
     # Variáveis de ambiente do sistema/nuvem têm prioridade
     keys = [
         "META_ACCESS_TOKEN",
+        "GEMINI_API_KEY",
         "DEFAULT_AD_ACCOUNT_ID",
         "PORT",
         "ONEDRIVE_CLIENT_ID",
@@ -573,6 +574,7 @@ def get_public_meta_config():
     env_vars = load_env_vars()
     return {
         "has_server_token": bool(env_vars.get("META_ACCESS_TOKEN", "").strip()),
+        "has_gemini_key": bool(env_vars.get("GEMINI_API_KEY", "").strip()),
         "default_account_id": env_vars.get("DEFAULT_AD_ACCOUNT_ID", "act_522793227047438"),
         "is_cloud": bool(os.environ.get("RENDER") or os.environ.get("RAILWAY_ENVIRONMENT")),
     }
@@ -2946,6 +2948,12 @@ class APIHandler(BaseHTTPRequestHandler):
                         updates["META_ACCESS_TOKEN"] = tok_val
                     elif not is_cloud:
                         updates["META_ACCESS_TOKEN"] = ""
+                if "gemini_api_key" in payload:
+                    g_val = str(payload["gemini_api_key"] or "").strip()
+                    if g_val:
+                        updates["GEMINI_API_KEY"] = g_val
+                    elif not is_cloud:
+                        updates["GEMINI_API_KEY"] = ""
 
                 if updates:
                     save_env_vars(updates)
@@ -2953,8 +2961,9 @@ class APIHandler(BaseHTTPRequestHandler):
                 self._send_json({
                     "success": True,
                     "has_server_token": bool(env_vars.get("META_ACCESS_TOKEN", "").strip()),
+                    "has_gemini_key": bool(env_vars.get("GEMINI_API_KEY", "").strip()),
                     "is_cloud": is_cloud,
-                    "message": "Salvo no ambiente em memória. Para fixar em nuvem definitivamente, configure META_ACCESS_TOKEN nas Environment Variables do Render." if is_cloud else "Configurações salvas no .env local.",
+                    "message": "Salvo no ambiente em memória. Para fixar em nuvem definitivamente, configure nas Environment Variables do Render." if is_cloud else "Configurações salvas no .env local.",
                 })
             except Exception as e:
                 self._send_json({"success": False, "error": str(e)}, 500)
@@ -3193,6 +3202,58 @@ class APIHandler(BaseHTTPRequestHandler):
                 res = studio_engine.create_campaign_folders_cloud(niche, date_str, use_blocks, tok, _find_work_folder_ids)
                 threading.Thread(target=start_graph_sync_background, kwargs={"force_full": False}, daemon=True).start()
                 self._send_json(res)
+            except Exception as e:
+                self._send_json({"success": False, "error": str(e)}, 400 if isinstance(e, ValueError) else 500)
+
+        elif path == "/api/studio/generate-audios":
+            if not self._authenticate_request():
+                return
+            try:
+                payload = self._read_json_body()
+                camp = str(payload.get("campaign") or "").strip()
+                date_str = str(payload.get("date") or "").strip()
+                script_pt = str(payload.get("script_pt") or "").strip()
+                langs = payload.get("languages") or ["pt", "es", "en"]
+                voice = str(payload.get("voice") or "Kore").strip()
+                style = str(payload.get("style") or "").strip()
+                gemini_key = str(payload.get("gemini_api_key") or "").strip() or load_env_vars().get("GEMINI_API_KEY", "").strip()
+
+                tok, err = get_graph_access_token()
+                if not tok:
+                    self._send_json({"success": False, "error": err or "OneDrive não autenticado"}, 401)
+                    return
+
+                res = studio_engine.generate_audios_to_onedrive_cloud(
+                    camp, date_str, script_pt, langs, voice, style, gemini_key,
+                    _translate_single_text, tok, _find_work_folder_ids,
+                )
+
+                # Atualiza cache local do OneDrive com os novos MP3s gerados
+                if res.get("generated"):
+                    camp_key = res["campaign_name"]
+                    with GRAPH_LOCK:
+                        nmap = GRAPH_SYNC_STATE["niches_map"]
+                        nobj = nmap.setdefault(camp_key, {
+                            "name": camp_key,
+                            "audios": [],
+                            "videos": {"feed": [], "reels": []},
+                            "status": "pending",
+                            "source": "graph",
+                        })
+                        for g in res["generated"]:
+                            lc = g["lang_code"].upper()
+                            nobj["audios"] = [a for a in nobj["audios"] if (a.get("lang") or "").upper() != lc]
+                            nobj["audios"].append({
+                                "id": g["item_id"],
+                                "name": g["filename"],
+                                "lang": lc,
+                                "size": 0,
+                                "url": g["url"],
+                            })
+                        _recompute_niche_status(nobj)
+                    _save_graph_cache_to_disk()
+
+                self._send_json(res, 200 if res.get("success") else 400)
             except Exception as e:
                 self._send_json({"success": False, "error": str(e)}, 400 if isinstance(e, ValueError) else 500)
 

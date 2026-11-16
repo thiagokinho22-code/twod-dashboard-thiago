@@ -1,3 +1,4 @@
+import base64
 import json
 import math
 import os
@@ -1509,4 +1510,212 @@ def start_render_job_async(campaigns, options, get_tok_fn, find_work_ids_fn, on_
         daemon=True,
     ).start()
     return get_render_status_snapshot()
+
+
+# ============================================================
+# GERAÇÃO DE ÁUDIOS VIA GOOGLE GEMINI TTS -> MP3 NO ONEDRIVE
+# ============================================================
+
+GEMINI_TTS_MODELS = ("gemini-3.8-flash-tts", "gemini-3.8-flash-lite-tts", "gemini-2.5-flash-preview-tts")
+
+
+def _extract_gemini_audio_bytes(resp_json):
+    """Extrai bytes de áudio (base64) da resposta Interactions API do Gemini TTS."""
+    if not isinstance(resp_json, dict):
+        return b"", ""
+    # Padrão Interactions API: steps[].content[].data
+    for step in (resp_json.get("steps") or []):
+        if not isinstance(step, dict):
+            continue
+        for item in (step.get("content") or []):
+            if isinstance(item, dict) and item.get("type") == "audio" and item.get("data"):
+                return base64.b64decode(item["data"]), str(item.get("mime_type") or "")
+    # Conveniência caso apareça outputs[].data
+    for out_item in (resp_json.get("outputs") or []):
+        if isinstance(out_item, dict) and out_item.get("type") == "audio" and out_item.get("data"):
+            return base64.b64decode(out_item["data"]), str(out_item.get("mime_type") or "")
+    return b"", ""
+
+
+def _gemini_tts_synthesize(text, voice, style, api_key):
+    """Sintetiza locução usando Gemini Interactions API (gemini-3.8-flash-tts)."""
+    clean_text = str(text or "").strip()
+    if not clean_text:
+        raise ValueError("Texto da locução vazio.")
+    if not api_key:
+        raise ValueError("Chave Gemini API (GEMINI_API_KEY) não configurada.")
+
+    chosen_voice = (voice or "Kore").strip() or "Kore"
+    chosen_style = (style or "Engaging, clear and natural Brazilian ad narrator").strip()
+
+    last_err = "Falha desconhecida ao gerar áudio no Gemini."
+    for model_id in GEMINI_TTS_MODELS:
+        payload = {
+            "model": model_id,
+            "input": [{
+                "type": "user_input",
+                "content": [{
+                    "type": "text",
+                    "text": clean_text,
+                    "annotations": [{
+                        "type": "speech_metadata",
+                        "style": chosen_style,
+                    }],
+                }],
+            }],
+            "response_format": {"type": "audio"},
+            "generation_config": {
+                "speech_config": [{"voice": chosen_voice}]
+            },
+        }
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        url = "https://generativelanguage.googleapis.com/v1beta/interactions"
+
+        for attempt in range(2):
+            req = urllib.request.Request(
+                url,
+                data=body,
+                headers={"x-goog-api-key": api_key, "Content-Type": "application/json"},
+                method="POST",
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=60) as resp:
+                    res_json = json.loads(resp.read().decode("utf-8"))
+                audio_bytes, mime = _extract_gemini_audio_bytes(res_json)
+                if audio_bytes:
+                    return audio_bytes, mime, model_id
+                last_err = f"Modelo {model_id} respondeu sem dados de áudio."
+                break
+            except urllib.error.HTTPError as e:
+                err_txt = e.read().decode("utf-8", errors="replace")
+                if api_key in err_txt:
+                    err_txt = err_txt.replace(api_key, "[REDACTED]")
+                try:
+                    err_j = json.loads(err_txt)
+                    msg = (err_j.get("error") or {}).get("message") or err_txt
+                except Exception:
+                    msg = err_txt
+                last_err = f"HTTP {e.code} ({model_id}): {msg[:240]}"
+                if e.code == 429 and attempt == 0:
+                    time.sleep(3.5)
+                    continue
+                if e.code in (400, 404):
+                    break  # tenta próximo modelo na lista
+                if e.code in (401, 403):
+                    raise RuntimeError(f"Chave Gemini inválida ou sem permissão: {msg[:200]}")
+            except Exception as e:
+                s = str(e)
+                if api_key in s:
+                    s = s.replace(api_key, "[REDACTED]")
+                last_err = s
+                break
+
+    raise RuntimeError(last_err)
+
+
+def _convert_audio_bytes_to_mp3(audio_bytes, mime_type, out_mp3_path, tmp_dir):
+    raw_in = os.path.join(tmp_dir, "tts_raw.bin")
+    with open(raw_in, "wb") as f:
+        f.write(audio_bytes)
+
+    is_wav = audio_bytes[:4] == b"RIFF"
+    is_mp3 = audio_bytes[:3] == b"ID3" or (len(audio_bytes) > 2 and audio_bytes[0] == 0xFF and (audio_bytes[1] & 0xE0) == 0xE0)
+    if is_mp3:
+        shutil.copy2(raw_in, out_mp3_path)
+        return out_mp3_path
+
+    if is_wav or "wav" in mime_type.lower():
+        cmd = [FFMPEG_PATH, "-i", raw_in, "-c:a", "libmp3lame", "-b:a", "192k", "-y", out_mp3_path]
+    else:
+        # PCM linear 24kHz mono 16-bit little-endian (padrão Gemini TTS)
+        cmd = [FFMPEG_PATH, "-f", "s16le", "-ar", "24000", "-ac", "1", "-i", raw_in, "-c:a", "libmp3lame", "-b:a", "192k", "-y", out_mp3_path]
+
+    rc, stderr = run_ffmpeg(cmd, timeout=45)
+    if rc != 0 or not os.path.exists(out_mp3_path) or os.path.getsize(out_mp3_path) < 512:
+        raise RuntimeError(f"Erro ao converter áudio para MP3: {stderr[-200:]}")
+    return out_mp3_path
+
+
+def generate_audios_to_onedrive_cloud(
+    campaign_name,
+    date_str,
+    script_pt,
+    target_langs,
+    voice,
+    style,
+    api_key,
+    translate_fn,
+    tok,
+    find_work_ids_fn,
+):
+    """Traduz locução PT-BR -> idiomas, gera voz natural via Gemini TTS, converte p/ MP3 e salva no OneDrive."""
+    folder_name = format_campaign_folder_name(campaign_name, date_str)
+    if not folder_name:
+        raise ValueError("Informe o Nicho e a Data da campanha.")
+    clean_script = str(script_pt or "").strip()
+    if not clean_script:
+        raise ValueError("Digite ou cole o texto da locução em Português.")
+    if not api_key:
+        raise ValueError("Configure GEMINI_API_KEY no servidor (Render / Configurações) ou informe sua chave gratuita do Google AI Studio.")
+
+    langs = [str(l).strip().lower() for l in (target_langs or ["pt", "es", "en"]) if str(l).strip()]
+    if not langs:
+        langs = ["pt", "es", "en"]
+
+    _, audios_root_id, _ = find_work_ids_fn(tok)
+    if not audios_root_id:
+        raise RuntimeError("Pasta 'Arquivos de Áudio' não encontrada no OneDrive.")
+
+    aud_folder = graph_ensure_folder(audios_root_id, folder_name, tok)
+    niche_slug = extract_clean_niche_slug(folder_name)
+
+    generated = []
+    errors = []
+    tmp_dir = tempfile.mkdtemp(prefix="twod_tts_")
+    try:
+        for idx, code in enumerate(langs):
+            if code not in LANGUAGES_DB:
+                errors.append({"lang_code": code, "error": f"Idioma desconhecido: {code}"})
+                continue
+
+            lang_name = LANGUAGES_DB[code]["name"]
+            try:
+                loc_text = clean_script if code == "pt" else translate_fn(clean_script, "pt", code)
+                style_hint = f"{style or 'Clear, natural, enthusiastic short ad voiceover'} — spoken naturally in {lang_name}"
+                audio_bytes, mime, model_used = _gemini_tts_synthesize(loc_text, voice, style_hint, api_key)
+
+                out_filename = f"{niche_slug}_{code}.mp3"
+                out_mp3 = os.path.join(tmp_dir, out_filename)
+                _convert_audio_bytes_to_mp3(audio_bytes, mime, out_mp3, tmp_dir)
+
+                dur = get_audio_duration(out_mp3)
+                up = graph_upload_file(aud_folder["id"], out_filename, out_mp3, tok)
+                item_id = up.get("id", "")
+                generated.append({
+                    "lang_code": code,
+                    "lang_name": lang_name,
+                    "filename": out_filename,
+                    "model": model_used,
+                    "duration": round(dur, 2),
+                    "duration_ceil": int(math.ceil(dur)),
+                    "translated_text": loc_text,
+                    "item_id": item_id,
+                    "url": f"/api/graph/file/{item_id}/{urllib.parse.quote(out_filename)}" if item_id else "",
+                })
+                # Pausa breve entre idiomas para respeitar RPM gratuito do AI Studio
+                if idx < len(langs) - 1:
+                    time.sleep(1.2)
+            except Exception as lang_err:
+                errors.append({"lang_code": code, "lang_name": lang_name, "error": str(lang_err)})
+
+        return {
+            "success": len(generated) > 0,
+            "campaign_name": folder_name,
+            "audio_folder": aud_folder["name"],
+            "generated": generated,
+            "errors": errors,
+        }
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
 

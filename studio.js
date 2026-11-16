@@ -550,6 +550,7 @@ async function onStudioTabOpened() {
     if (dateEl && !dateEl.value) dateEl.value = getTodayIsoDate();
     bindStudioDropZones();
     updateStudioNamingPreview();
+    syncStudioGeminiBanner();
     if (studioState.campaigns.length === 0) {
         await loadStudioCampaigns();
     }
@@ -561,6 +562,166 @@ async function onStudioTabOpened() {
             if (st.running) startStudioStatusPolling();
         }
     } catch (e) { }
+}
+
+function syncStudioGeminiBanner() {
+    const pill = document.getElementById('studio-gemini-status-pill');
+    const inlineWrap = document.getElementById('studio-gemini-key-inline-wrap');
+    const hasKey = Boolean(window.metaState && window.metaState.hasGeminiKey);
+
+    if (pill) {
+        if (hasKey) {
+            pill.textContent = '🟢 Gemini API no Servidor';
+            pill.classList.remove('status-off');
+            pill.classList.add('status-ok');
+        } else {
+            pill.textContent = '⚪ Informar Chave Grátis';
+            pill.classList.remove('status-ok');
+            pill.classList.add('status-off');
+        }
+    }
+    if (inlineWrap) {
+        if (hasKey) {
+            inlineWrap.classList.add('twod-hidden');
+        } else {
+            inlineWrap.classList.remove('twod-hidden');
+        }
+    }
+}
+
+async function generateStudioAudiosWithAI() {
+    const { niche, dateIso, fullName } = getStudioTargetCampaignAndDate();
+    const scriptEl = document.getElementById('studio-tts-script');
+    const voiceEl = document.getElementById('studio-tts-voice');
+    const styleEl = document.getElementById('studio-tts-style');
+    const keyInlineEl = document.getElementById('studio-gemini-key-inline');
+    const msgEl = document.getElementById('studio-tts-msg');
+    const resEl = document.getElementById('studio-tts-results');
+    const btnEl = document.getElementById('btn-studio-tts-generate');
+
+    const scriptPt = (scriptEl?.value || '').trim();
+    const voice = (voiceEl?.value || 'Kore').trim();
+    const style = (styleEl?.value || '').trim();
+    const inlineKey = (keyInlineEl?.value || '').trim();
+    const langs = Array.from(document.querySelectorAll('input[name="studio-tts-lang"]:checked'))
+        .map(cb => cb.value)
+        .filter(Boolean);
+
+    if (!niche) {
+        alert('Informe o Nicho/Campanha no topo do Studio antes de gerar os áudios.');
+        return;
+    }
+    if (!scriptPt) {
+        alert('Cole ou digite o roteiro em Português no campo de locução.');
+        return;
+    }
+    if (langs.length === 0) {
+        alert('Selecione pelo menos 1 idioma para gerar áudio.');
+        return;
+    }
+    const hasServerKey = Boolean(window.metaState && window.metaState.hasGeminiKey);
+    if (!hasServerKey && !inlineKey) {
+        syncStudioGeminiBanner();
+        alert('Informe sua Gemini API Key gratuita (ou peça para o Admin salvar nas Configurações do servidor).');
+        if (keyInlineEl) keyInlineEl.focus();
+        return;
+    }
+
+    if (btnEl) {
+        btnEl.disabled = true;
+        btnEl.textContent = `⏳ Gerando ${langs.length} áudio(s) no OneDrive...`;
+    }
+    if (msgEl) {
+        msgEl.classList.remove('twod-hidden');
+        msgEl.style.color = '#93c5fd';
+        msgEl.textContent = `⏳ Traduzindo roteiro, sintetizando vozes (Gemini TTS) e salvando MP3 direto em Arquivos de Áudio/${fullName || niche}...`;
+    }
+    if (resEl) resEl.innerHTML = '';
+
+    try {
+        const resp = await window.apiFetch('/api/studio/generate-audios', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                campaign: niche,
+                date: dateIso,
+                script_pt: scriptPt,
+                languages: langs,
+                voice,
+                style,
+                gemini_api_key: inlineKey
+            })
+        });
+        const data = await resp.json();
+        if (!resp.ok || !data.success) {
+            throw new Error(data.error || `Erro HTTP ${resp.status}`);
+        }
+
+        if (inlineKey && keyInlineEl) {
+            keyInlineEl.value = '';
+        }
+
+        const generated = Array.isArray(data.generated) ? data.generated : [];
+        const errors = Array.isArray(data.errors) ? data.errors : [];
+        const targetCamp = data.campaign_name || fullName || niche;
+
+        if (msgEl) {
+            msgEl.style.color = errors.length > 0 ? '#fbbf24' : '#34d399';
+            msgEl.textContent = errors.length > 0
+                ? `⚠️ ${generated.length} áudio(s) salvos no OneDrive (${targetCamp}), ${errors.length} idioma(s) falharam.`
+                : `✅ ${generated.length} áudio(s) MP3 gerados e salvos direto no OneDrive em Arquivos de Áudio/${targetCamp}!`;
+        }
+
+        if (resEl) {
+            const baseUrl = (typeof API_BASE_URL !== 'undefined' ? API_BASE_URL : (window.API_BASE_URL || ''));
+            const itemsHtml = generated.map(g => {
+                const rawUrl = g.url ? (g.url.startsWith('http') ? g.url : `${baseUrl}${g.url}`) : '';
+                const mediaUrl = (rawUrl && typeof window.withMediaAuth === 'function')
+                    ? window.withMediaAuth(rawUrl)
+                    : rawUrl;
+                const audioTag = mediaUrl
+                    ? `<audio controls preload="none" src="${_studioEsc(mediaUrl)}"></audio>`
+                    : '';
+                return `
+                    <div class="studio-tts-item">
+                        <div>
+                            <strong>✅ ${_studioEsc(g.filename)}</strong>
+                            <span class="text-muted"> (${_studioEsc(g.lang_name)} • ${g.duration}s ➔ vídeo ${g.duration_ceil}s)</span>
+                        </div>
+                        ${audioTag}
+                    </div>
+                `;
+            }).join('');
+
+            const errHtml = errors.map(er => `
+                <div class="studio-error-banner">
+                    ❌ <strong>${_studioEsc(er.lang_name || er.lang_code)}:</strong> ${_studioEsc(er.error)}
+                </div>
+            `).join('');
+
+            resEl.innerHTML = itemsHtml + errHtml;
+        }
+
+        if (targetCamp) {
+            studioState.selectedSet.add(targetCamp);
+            await loadStudioCampaigns();
+            await auditStudioCampaigns([targetCamp]);
+        }
+        if (typeof window.loadNichesFromAPI === 'function') {
+            window.loadNichesFromAPI(true);
+        }
+    } catch (e) {
+        if (msgEl) {
+            msgEl.classList.remove('twod-hidden');
+            msgEl.style.color = '#f87171';
+            msgEl.textContent = `❌ Erro ao gerar áudios com IA: ${e.message}`;
+        }
+    } finally {
+        if (btnEl) {
+            btnEl.disabled = false;
+            btnEl.textContent = '🎙️ Gerar Áudios com IA e Salvar MP3 no OneDrive';
+        }
+    }
 }
 
 window.onStudioTabOpened = onStudioTabOpened;
@@ -577,3 +738,5 @@ window.auditStudioCampaigns = auditStudioCampaigns;
 window.startStudioBatchRender = startStudioBatchRender;
 window.pauseStudioRender = pauseStudioRender;
 window.cancelStudioRender = cancelStudioRender;
+window.generateStudioAudiosWithAI = generateStudioAudiosWithAI;
+window.syncStudioGeminiBanner = syncStudioGeminiBanner;

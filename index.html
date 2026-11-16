@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>TwoD Hub — Central de Automações</title>
-    <link rel="stylesheet" href="styles.css?v=2.5">
+    <link rel="stylesheet" href="styles.css?v=2.6">
 </head>
 <body>
 
@@ -493,6 +493,56 @@
                                 </div>
 
                                 <div id="studio-upload-status" class="studio-upload-status twod-hidden"></div>
+
+                                <!-- Zona 4: Gerar Áudios por IA (Gemini TTS Grátis -> Direto no OneDrive) -->
+                                <div class="studio-tts-box">
+                                    <div class="studio-drop-head" style="margin-bottom:8px;">
+                                        <div>
+                                            <strong>🤖 Gerar Áudios (.mp3) por IA &amp; Salvar Direto no OneDrive</strong>
+                                            <span class="text-muted" style="font-size:11.5px; display:block;">Sem baixar pro PC! Cola o roteiro em Português, traduz e salva <code>&lt;Nicho&gt;_pt.mp3</code>, <code>_es.mp3</code>, <code>_en.mp3</code> direto na pasta do OneDrive.</span>
+                                        </div>
+                                        <span id="studio-gemini-status-pill" class="studio-mini-badge muted">🔑 Chave Gemini: Verificando...</span>
+                                    </div>
+
+                                    <textarea id="studio-tts-script" class="twod-input studio-tts-textarea" rows="3" placeholder="Cole ou digite aqui a locução (~18s) em Português. Ex: Foi tocar aquela música e o violão está totalmente desafinado? Baixe esse aplicativo grátis..."></textarea>
+
+                                    <div class="studio-tts-controls">
+                                        <div class="studio-tts-langs">
+                                            <span class="text-muted" style="font-size:11.5px; font-weight:700;">Idiomas:</span>
+                                            <label><input type="checkbox" name="studio-tts-lang" value="pt" checked> 🇧🇷 PT</label>
+                                            <label><input type="checkbox" name="studio-tts-lang" value="es" checked> 🇪🇸 ES</label>
+                                            <label><input type="checkbox" name="studio-tts-lang" value="en" checked> 🇺🇸 EN</label>
+                                            <label><input type="checkbox" name="studio-tts-lang" value="fr"> 🇫🇷 FR</label>
+                                            <label><input type="checkbox" name="studio-tts-lang" value="it"> 🇮🇹 IT</label>
+                                            <label><input type="checkbox" name="studio-tts-lang" value="de"> 🇩🇪 DE</label>
+                                        </div>
+
+                                        <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+                                            <select id="studio-tts-voice" class="twod-input studio-mini-select" title="Voz do Locutor (Gemini 3.8 TTS)">
+                                                <option value="Kore">🗣️ Kore (Firme / Natural)</option>
+                                                <option value="Puck">⚡ Puck (Animado / Dinâmico)</option>
+                                                <option value="Orus">🎙️ Orus (Grave / Autoridade)</option>
+                                                <option value="Aoede">🌤️ Aoede (Leve / Fluida)</option>
+                                                <option value="Leda">✨ Leda (Jovem / Clara)</option>
+                                                <option value="Sulafat">🤝 Sulafat (Acolhedora)</option>
+                                                <option value="Charon">📢 Charon (Informativa)</option>
+                                            </select>
+                                            <input type="text" id="studio-tts-style" class="twod-input" style="max-width:250px; padding:6px 10px; font-size:12px;" value="Locução publicitária dinâmica, clara e natural" placeholder="Estilo da locução...">
+                                        </div>
+                                    </div>
+
+                                    <div id="studio-gemini-key-inline-wrap" class="studio-gemini-inline twod-hidden">
+                                        <input type="password" id="studio-gemini-key-inline" class="twod-input" style="flex:1; min-width:220px; font-family:monospace; font-size:12px;" placeholder="Cole sua chave gratuita do Google AI Studio (AIza...) ou configure em Configurações">
+                                        <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener" class="btn btn-outline btn-sm" style="text-decoration:none;">🔑 Pegar Chave Grátis ↗</a>
+                                    </div>
+
+                                    <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:10px;">
+                                        <button type="button" id="btn-studio-tts-generate" class="btn btn-primary btn-sm" onclick="generateStudioAudiosWithAI()">🎙️ Gerar Áudios (.mp3) Direto no OneDrive</button>
+                                        <span id="studio-tts-msg" class="text-muted" style="font-size:12px;"></span>
+                                    </div>
+
+                                    <div id="studio-tts-results" class="studio-tts-results twod-hidden"></div>
+                                </div>
                             </div>
 
                             <!-- Card 2: Lote Automático + Auditoria Pré-Voo + Motor FFmpeg V2 -->
@@ -1447,6 +1497,18 @@
                         </div>
 
                         <div class="settings-section">
+                            <h3>🤖 Google Gemini API (Áudios TTS Grátis &amp; IA na Nuvem)</h3>
+                            <p class="text-muted" style="margin-bottom: 12px;">Chave gratuita do <strong>Google AI Studio</strong> para gerar locuções MP3 direto no OneDrive sem baixar arquivos no PC. Defina <code>GEMINI_API_KEY</code> no Render para persistir 24/7 ou salve abaixo para esta instância.</p>
+                            <div id="gemini-server-key-banner" class="twod-hidden" style="margin-bottom: 12px; padding: 10px 14px; border-radius: 8px; background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.35); color: #34d399; font-size: 12px;"></div>
+                            <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
+                                <input type="password" id="gemini-api-key-input" class="twod-input" placeholder="Cole sua Google Gemini API Key (AIza...)" style="flex: 1; min-width: 240px; font-family: monospace; font-size: 12px;">
+                                <button type="button" class="btn btn-primary" onclick="saveGeminiSettingsFromUI()">💾 Salvar Chave Gemini</button>
+                                <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer" class="btn btn-outline" style="text-decoration:none;">🌐 Criar Chave Grátis ↗</a>
+                            </div>
+                            <div id="gemini-key-save-status" class="text-muted" style="margin-top:8px; font-size:12px;"></div>
+                        </div>
+
+                        <div class="settings-section">
                             <h3>☁️ API Própria na Nuvem (OneDrive 24/7)</h3>
                             <p class="text-muted" style="margin-bottom: 16px;">Configure o endereço do servidor backend na nuvem (Render/Railway) para acessar seu OneDrive mesmo quando o PC estiver desligado.</p>
                             <div class="form-grid-2">
@@ -1558,8 +1620,8 @@
         </div>
     </div>
 
-    <script src="app.js?v=8.6"></script>
-    <script src="studio.js?v=1.1"></script>
+    <script src="app.js?v=8.7"></script>
+    <script src="studio.js?v=1.2"></script>
     <script src="campaign_builder.js?v=1.7"></script>
 </body>
 </html>
