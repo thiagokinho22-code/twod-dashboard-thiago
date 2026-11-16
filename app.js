@@ -691,6 +691,17 @@ const tabTitles = {
 const PANEL_CHANGELOG = [
     {
         date: '16/11/2026',
+        type: 'fix',
+        badge: '🌐 Tradução & TTS',
+        title: 'Tradução nativa via Gemini API nos áudios ES / EN / Europa',
+        summary: 'Corrigido bug em que áudios estrangeiros saíam em Português por bloqueio de IP no Render.',
+        highlights: [
+            'Roteiros agora são traduzidos via Gemini (gemini-2.5-flash-lite) + fallback do navegador antes de sintetizar a voz.',
+            'Trava anti-português impede salvar áudio em PT dentro de arquivos _es.mp3 / _en.mp3 e exibe o texto traduzido no player.'
+        ]
+    },
+    {
+        date: '16/11/2026',
         type: 'feat',
         badge: '📄 Importador PDF',
         title: 'Importador Temporário de Pacote da Semana (PDF) + Áudios em Lote',

@@ -1519,6 +1519,63 @@ def start_render_job_async(campaigns, options, get_tok_fn, find_work_ids_fn, on_
 # ============================================================
 
 GEMINI_TTS_MODELS = ("gemini-3.8-flash-tts", "gemini-3.8-flash-lite-tts", "gemini-2.5-flash-preview-tts")
+GEMINI_TEXT_MODELS = ("gemini-2.5-flash-lite", "gemini-2.5-flash")
+
+LANG_NATIVE_EN = {
+    "pt": "Brazilian Portuguese",
+    "es": "Spanish",
+    "en": "English",
+    "fr": "French",
+    "it": "Italian",
+    "de": "German",
+    "ro": "Romanian",
+    "pl": "Polish",
+    "nl": "Dutch",
+    "sr": "Serbian",
+    "ru": "Russian",
+    "ar": "Arabic",
+    "hi": "Hindi",
+    "bn": "Bengali",
+    "tl": "Tagalog",
+    "ms": "Malay",
+    "ko": "Korean",
+    "ja": "Japanese",
+    "tr": "Turkish",
+    "vi": "Vietnamese",
+}
+
+
+def gemini_translate_text(text_pt, target_code, target_lang_en="", api_key="", source_lang="pt"):
+    """Traduz roteiro/texto publicitário via Gemini API (não sofre bloqueio de IP de datacenter)."""
+    clean_text = str(text_pt or "").strip()
+    if not clean_text or not api_key or str(target_code).lower() == str(source_lang).lower():
+        return ""
+
+    lang_label = target_lang_en or LANG_NATIVE_EN.get(str(target_code).lower(), str(target_code))
+    src_label = LANG_NATIVE_EN.get(str(source_lang).lower(), str(source_lang))
+    prompt = (
+        f"Translate the following short {src_label} ad voiceover script (~18s) into natural, fluent, persuasive "
+        f"{lang_label} ({target_code}) suitable for native spoken narration. Preserve meaning and urgency. "
+        f"Return ONLY the translated text itself, with no quotes, markdown, or explanations.\n\n"
+        f"{clean_text}"
+    )
+
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"temperature": 0.2},
+    }
+    for model_id in GEMINI_TEXT_MODELS:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{urllib.parse.quote(model_id)}:generateContent"
+        res_json, _, _ = _post_gemini_json(url, payload, api_key)
+        if not res_json:
+            continue
+        for cand in (res_json.get("candidates") or []):
+            content = (cand or {}).get("content") or {}
+            parts = [str(p.get("text") or "") for p in (content.get("parts") or []) if isinstance(p, dict) and p.get("text")]
+            translated = " ".join(parts).strip().strip('"').strip("'").strip()
+            if translated and translated.lower() != clean_text.lower():
+                return translated
+    return ""
 
 
 def _extract_gemini_audio_bytes(resp_json):
@@ -1690,6 +1747,7 @@ def generate_audios_to_onedrive_cloud(
     translate_fn,
     tok,
     find_work_ids_fn,
+    pretranslated_map=None,
 ):
     """Traduz locução PT-BR -> idiomas, gera voz natural via Gemini TTS, converte p/ MP3 e salva no OneDrive."""
     folder_name = format_campaign_folder_name(campaign_name, date_str)
@@ -1704,6 +1762,7 @@ def generate_audios_to_onedrive_cloud(
     langs = [str(l).strip().lower() for l in (target_langs or ["pt", "es", "en"]) if str(l).strip()]
     if not langs:
         langs = ["pt", "es", "en"]
+    pre_map = {str(k).strip().lower(): str(v).strip() for k, v in (pretranslated_map or {}).items() if v}
 
     _, audios_root_id, _ = find_work_ids_fn(tok)
     if not audios_root_id:
@@ -1722,9 +1781,37 @@ def generate_audios_to_onedrive_cloud(
                 continue
 
             lang_name = LANGUAGES_DB[code]["name"]
+            lang_en = LANG_NATIVE_EN.get(code, lang_name)
             try:
-                loc_text = clean_script if code == "pt" else translate_fn(clean_script, "pt", code)
-                style_hint = f"{style or 'Clear, natural, enthusiastic short ad voiceover'} — spoken naturally in {lang_name}"
+                if code == "pt":
+                    loc_text = clean_script
+                else:
+                    loc_text = ""
+                    # 1. Tradução publicitária natural via Gemini API (imune a bloqueio 429 de datacenter)
+                    try:
+                        loc_text = gemini_translate_text(clean_script, code, lang_en, api_key, source_lang="pt")
+                    except Exception:
+                        loc_text = ""
+                    # 2. Backup: pré-tradução enviada pelo navegador do usuário
+                    if not loc_text or loc_text.strip().lower() == clean_script.lower():
+                        cand_pre = pre_map.get(code, "")
+                        if cand_pre and cand_pre.strip().lower() != clean_script.lower():
+                            loc_text = cand_pre
+                    # 3. Fallback: tradutores tradicionais do backend
+                    if (not loc_text or loc_text.strip().lower() == clean_script.lower()) and callable(translate_fn):
+                        cand_fn = str(translate_fn(clean_script, "pt", code) or "").strip()
+                        if cand_fn and cand_fn.lower() != clean_script.lower():
+                            loc_text = cand_fn
+                    # Guard: nunca sintetizar nem salvar áudio em Português sob código estrangeiro
+                    if not loc_text or loc_text.strip().lower() == clean_script.lower():
+                        raise RuntimeError(
+                            f"Falha ao traduzir o roteiro para {lang_name} ({code}); áudio cancelado para não gravar em Português."
+                        )
+
+                if code == "pt":
+                    style_hint = f"{style or 'Dynamic, clear and natural Brazilian Portuguese ad narrator'} — speak natively in Brazilian Portuguese"
+                else:
+                    style_hint = f"Dynamic, clear and enthusiastic native {lang_en} ad voiceover — speak naturally in {lang_en}"
                 audio_bytes, mime, model_used = _gemini_tts_synthesize(loc_text, voice, style_hint, api_key)
 
                 out_filename = f"{niche_slug}_{code}.mp3"

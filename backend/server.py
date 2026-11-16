@@ -1531,10 +1531,14 @@ def _translate_single_text(txt, source_lang, tl_code):
         with urllib.request.urlopen(req, timeout=10) as resp:
             raw = json.loads(resp.read().decode("utf-8"))
             if isinstance(raw, list) and raw:
-                if isinstance(raw[0], str):
+                if all(isinstance(x, str) for x in raw):
+                    joined = " ".join(x.strip() for x in raw if x and x.strip())
+                elif isinstance(raw[0], str):
                     joined = raw[0]
                 elif isinstance(raw[0], list) and raw[0] and isinstance(raw[0][0], str):
                     joined = raw[0][0]
+            elif isinstance(raw, dict) and isinstance(raw.get("sentences"), list):
+                joined = "".join(str(s.get("trans") or "") for s in raw["sentences"] if isinstance(s, dict))
     except Exception:
         joined = None
 
@@ -1572,6 +1576,16 @@ def _translate_single_text(txt, source_lang, tl_code):
                     joined = cand
         except Exception:
             joined = None
+
+    if not joined:
+        gemini_k = load_env_vars().get("GEMINI_API_KEY", "").strip()
+        if gemini_k:
+            try:
+                cand_gem = studio_engine.gemini_translate_text(txt, tl_code, "", gemini_k, source_lang=source_lang)
+                if cand_gem:
+                    joined = cand_gem
+            except Exception:
+                joined = None
 
     if not joined:
         return txt
@@ -3216,6 +3230,7 @@ class APIHandler(BaseHTTPRequestHandler):
                 langs = payload.get("languages") or ["pt", "es", "en"]
                 voice = str(payload.get("voice") or "Kore").strip()
                 style = str(payload.get("style") or "").strip()
+                pretranslated = payload.get("translations") if isinstance(payload.get("translations"), dict) else {}
                 gemini_key = str(payload.get("gemini_api_key") or "").strip() or load_env_vars().get("GEMINI_API_KEY", "").strip()
 
                 tok, err = get_graph_access_token()
@@ -3226,6 +3241,7 @@ class APIHandler(BaseHTTPRequestHandler):
                 res = studio_engine.generate_audios_to_onedrive_cloud(
                     camp, date_str, script_pt, langs, voice, style, gemini_key,
                     _translate_single_text, tok, _find_work_folder_ids,
+                    pretranslated_map=pretranslated,
                 )
 
                 # Atualiza cache local do OneDrive com os novos MP3s gerados

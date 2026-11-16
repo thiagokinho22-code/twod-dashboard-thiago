@@ -591,6 +591,44 @@ function syncStudioGeminiBanner() {
     }
 }
 
+async function buildBrowserPretranslations(scriptPt, langs) {
+    const out = {};
+    if (typeof translateSingleBrowserFallback !== 'function' || !scriptPt) return out;
+    const foreign = (langs || []).map(l => String(l || '').trim().toLowerCase()).filter(l => l && l !== 'pt');
+    await Promise.all(foreign.map(async (code) => {
+        try {
+            const tr = await translateSingleBrowserFallback(scriptPt, code, 'pt');
+            if (tr && tr.trim() && tr.trim().toLowerCase() !== scriptPt.trim().toLowerCase()) {
+                out[code] = tr.trim();
+            }
+        } catch (e) { }
+    }));
+    return out;
+}
+
+async function requestGenerateAudios({ campaign, date, scriptPt, languages, voice, style, geminiApiKey }) {
+    const translations = await buildBrowserPretranslations(scriptPt, languages);
+    const resp = await window.apiFetch('/api/studio/generate-audios', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            campaign,
+            date,
+            script_pt: scriptPt,
+            languages,
+            voice,
+            style,
+            translations,
+            gemini_api_key: geminiApiKey
+        })
+    });
+    const data = await resp.json();
+    if (!resp.ok || !data.success) {
+        throw new Error(data.error || `Erro HTTP ${resp.status}`);
+    }
+    return data;
+}
+
 async function generateStudioAudiosWithAI() {
     const { niche, dateIso, fullName } = getStudioTargetCampaignAndDate();
     const scriptEl = document.getElementById('studio-tts-script');
@@ -644,23 +682,15 @@ async function generateStudioAudiosWithAI() {
     }
 
     try {
-        const resp = await window.apiFetch('/api/studio/generate-audios', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                campaign: niche,
-                date: dateIso,
-                script_pt: scriptPt,
-                languages: langs,
-                voice,
-                style,
-                gemini_api_key: inlineKey
-            })
+        const data = await requestGenerateAudios({
+            campaign: niche,
+            date: dateIso,
+            scriptPt,
+            languages: langs,
+            voice,
+            style,
+            geminiApiKey: inlineKey
         });
-        const data = await resp.json();
-        if (!resp.ok || !data.success) {
-            throw new Error(data.error || `Erro HTTP ${resp.status}`);
-        }
 
         if (inlineKey && keyInlineEl) {
             keyInlineEl.value = '';
@@ -687,11 +717,15 @@ async function generateStudioAudiosWithAI() {
                 const audioTag = mediaUrl
                     ? `<audio controls preload="none" src="${_studioEsc(mediaUrl)}"></audio>`
                     : '';
+                const trPreview = g.translated_text
+                    ? `<div class="text-muted" style="font-size:11px; margin-top:2px;">“${_studioEsc(g.translated_text)}”</div>`
+                    : '';
                 return `
                     <div class="studio-tts-item">
-                        <div>
+                        <div style="flex:1; min-width:220px;">
                             <strong>✅ ${_studioEsc(g.filename)}</strong>
                             <span class="text-muted"> (${_studioEsc(g.lang_name)} • ${g.duration}s ➔ vídeo ${g.duration_ceil}s)</span>
+                            ${trPreview}
                         </div>
                         ${audioTag}
                     </div>
@@ -1321,9 +1355,15 @@ function renderWeeklyPdfPreview() {
             ? `<div class="weekly-niche-audios">${item.generatedAudios.map(g => {
                 const rawUrl = g.url ? (g.url.startsWith('http') ? g.url : `${baseUrl}${g.url}`) : '';
                 const mediaUrl = (rawUrl && typeof window.withMediaAuth === 'function') ? window.withMediaAuth(rawUrl) : rawUrl;
+                const trShort = g.translated_text
+                    ? `<div class="text-muted" style="font-size:10.5px; margin-top:2px;">“${_studioEsc(g.translated_text.slice(0, 120))}${g.translated_text.length > 120 ? '...' : ''}”</div>`
+                    : '';
                 return `
                     <div class="weekly-niche-audio-pill">
-                        <span><strong>${_studioEsc((g.lang_code || '').toUpperCase())}</strong> • ${_studioEsc(g.filename || '')} (${g.duration || '?'}s)</span>
+                        <div style="flex:1; min-width:140px;">
+                            <span><strong>${_studioEsc((g.lang_code || '').toUpperCase())}</strong> • ${_studioEsc(g.filename || '')} (${g.duration || '?'}s)</span>
+                            ${trShort}
+                        </div>
                         ${mediaUrl ? `<audio controls preload="none" src="${_studioEsc(mediaUrl)}"></audio>` : ''}
                     </div>
                 `;
@@ -1409,23 +1449,15 @@ async function processSingleWeeklyItem(item, options) {
         item.statusDetail = `Gerando (${languages.map(l => l.toUpperCase()).join(', ')})...`;
         renderWeeklyPdfPreview();
 
-        const ttsResp = await window.apiFetch('/api/studio/generate-audios', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                campaign: item.slug || item.title,
-                date: item.dateIso,
-                script_pt: item.audioScript,
-                languages,
-                voice,
-                style,
-                gemini_api_key: geminiApiKey
-            })
+        const ttsData = await requestGenerateAudios({
+            campaign: item.slug || item.title,
+            date: item.dateIso,
+            scriptPt: item.audioScript,
+            languages,
+            voice,
+            style,
+            geminiApiKey
         });
-        const ttsData = await ttsResp.json();
-        if (!ttsResp.ok || !ttsData.success) {
-            throw new Error(ttsData.error || `Erro HTTP ${ttsResp.status}`);
-        }
 
         const generated = Array.isArray(ttsData.generated) ? ttsData.generated : [];
         const errors = Array.isArray(ttsData.errors) ? ttsData.errors : [];
