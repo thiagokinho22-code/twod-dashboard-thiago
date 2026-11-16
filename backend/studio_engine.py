@@ -202,6 +202,8 @@ def run_ffmpeg(cmd, timeout=120, process_holder=None):
             _, stderr = proc.communicate()
             return -1, stderr.decode("utf-8", errors="replace") + f"\n[TIMEOUT] FFmpeg excedeu {timeout}s."
         return -1, f"[TIMEOUT] FFmpeg excedeu {timeout}s."
+    except FileNotFoundError:
+        return -1, "FFmpeg não encontrado. Instale 'imageio-ffmpeg' (pip install -r backend/requirements.txt) ou adicione ffmpeg ao PATH."
     except Exception as e:
         return -1, str(e)
     finally:
@@ -1520,7 +1522,7 @@ GEMINI_TTS_MODELS = ("gemini-3.8-flash-tts", "gemini-3.8-flash-lite-tts", "gemin
 
 
 def _extract_gemini_audio_bytes(resp_json):
-    """Extrai bytes de áudio (base64) da resposta Interactions API do Gemini TTS."""
+    """Extrai bytes de áudio (base64) da resposta Interactions API ou generateContent do Gemini TTS."""
     if not isinstance(resp_json, dict):
         return b"", ""
     # Padrão Interactions API: steps[].content[].data
@@ -1534,11 +1536,58 @@ def _extract_gemini_audio_bytes(resp_json):
     for out_item in (resp_json.get("outputs") or []):
         if isinstance(out_item, dict) and out_item.get("type") == "audio" and out_item.get("data"):
             return base64.b64decode(out_item["data"]), str(out_item.get("mime_type") or "")
+    # Padrão generateContent API: candidates[].content.parts[].inlineData
+    for cand in (resp_json.get("candidates") or []):
+        if not isinstance(cand, dict):
+            continue
+        content = cand.get("content") or {}
+        for part in (content.get("parts") or []):
+            if not isinstance(part, dict):
+                continue
+            inline = part.get("inlineData") or part.get("inline_data")
+            if isinstance(inline, dict) and inline.get("data"):
+                mime = str(inline.get("mimeType") or inline.get("mime_type") or "")
+                return base64.b64decode(inline["data"]), mime
     return b"", ""
 
 
+def _post_gemini_json(url, payload, api_key):
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    for attempt in range(2):
+        req = urllib.request.Request(
+            url,
+            data=body,
+            headers={"x-goog-api-key": api_key, "Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                return json.loads(resp.read().decode("utf-8")), None, 200
+        except urllib.error.HTTPError as e:
+            err_txt = e.read().decode("utf-8", errors="replace")
+            if api_key in err_txt:
+                err_txt = err_txt.replace(api_key, "[REDACTED]")
+            try:
+                err_j = json.loads(err_txt)
+                msg = (err_j.get("error") or {}).get("message") or err_txt
+            except Exception:
+                msg = err_txt
+            if e.code == 429 and attempt == 0:
+                time.sleep(3.5)
+                continue
+            if e.code in (401, 403):
+                raise RuntimeError(f"Chave Gemini inválida ou sem permissão: {msg[:200]}")
+            return None, msg[:240], e.code
+        except Exception as e:
+            s = str(e)
+            if api_key in s:
+                s = s.replace(api_key, "[REDACTED]")
+            return None, s, 0
+    return None, "Timeout na chamada Gemini.", 0
+
+
 def _gemini_tts_synthesize(text, voice, style, api_key):
-    """Sintetiza locução usando Gemini Interactions API (gemini-3.8-flash-tts)."""
+    """Sintetiza locução usando Gemini Interactions API com fallback automático para generateContent."""
     clean_text = str(text or "").strip()
     if not clean_text:
         raise ValueError("Texto da locução vazio.")
@@ -1550,7 +1599,8 @@ def _gemini_tts_synthesize(text, voice, style, api_key):
 
     last_err = "Falha desconhecida ao gerar áudio no Gemini."
     for model_id in GEMINI_TTS_MODELS:
-        payload = {
+        # 1) Interactions API (suporta speech_metadata/style direto)
+        inter_payload = {
             "model": model_id,
             "input": [{
                 "type": "user_input",
@@ -1568,47 +1618,40 @@ def _gemini_tts_synthesize(text, voice, style, api_key):
                 "speech_config": [{"voice": chosen_voice}]
             },
         }
-        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        url = "https://generativelanguage.googleapis.com/v1beta/interactions"
+        res_json, err_msg, code = _post_gemini_json(
+            "https://generativelanguage.googleapis.com/v1beta/interactions",
+            inter_payload,
+            api_key,
+        )
+        if res_json:
+            audio_bytes, mime = _extract_gemini_audio_bytes(res_json)
+            if audio_bytes:
+                return audio_bytes, mime, model_id
+            last_err = f"Modelo {model_id} (interactions) respondeu sem áudio."
+        elif err_msg:
+            last_err = f"HTTP {code} ({model_id}/interactions): {err_msg}"
 
-        for attempt in range(2):
-            req = urllib.request.Request(
-                url,
-                data=body,
-                headers={"x-goog-api-key": api_key, "Content-Type": "application/json"},
-                method="POST",
-            )
-            try:
-                with urllib.request.urlopen(req, timeout=60) as resp:
-                    res_json = json.loads(resp.read().decode("utf-8"))
-                audio_bytes, mime = _extract_gemini_audio_bytes(res_json)
-                if audio_bytes:
-                    return audio_bytes, mime, model_id
-                last_err = f"Modelo {model_id} respondeu sem dados de áudio."
-                break
-            except urllib.error.HTTPError as e:
-                err_txt = e.read().decode("utf-8", errors="replace")
-                if api_key in err_txt:
-                    err_txt = err_txt.replace(api_key, "[REDACTED]")
-                try:
-                    err_j = json.loads(err_txt)
-                    msg = (err_j.get("error") or {}).get("message") or err_txt
-                except Exception:
-                    msg = err_txt
-                last_err = f"HTTP {e.code} ({model_id}): {msg[:240]}"
-                if e.code == 429 and attempt == 0:
-                    time.sleep(3.5)
-                    continue
-                if e.code in (400, 404):
-                    break  # tenta próximo modelo na lista
-                if e.code in (401, 403):
-                    raise RuntimeError(f"Chave Gemini inválida ou sem permissão: {msg[:200]}")
-            except Exception as e:
-                s = str(e)
-                if api_key in s:
-                    s = s.replace(api_key, "[REDACTED]")
-                last_err = s
-                break
+        # 2) Fallback: generateContent padrão com responseModalities=["AUDIO"]
+        gc_payload = {
+            "contents": [{"parts": [{"text": clean_text}]}],
+            "generationConfig": {
+                "responseModalities": ["AUDIO"],
+                "speechConfig": {
+                    "voiceConfig": {
+                        "prebuiltVoiceConfig": {"voiceName": chosen_voice}
+                    }
+                },
+            },
+        }
+        gc_url = f"https://generativelanguage.googleapis.com/v1beta/models/{urllib.parse.quote(model_id)}:generateContent"
+        gc_json, gc_err, gc_code = _post_gemini_json(gc_url, gc_payload, api_key)
+        if gc_json:
+            audio_bytes, mime = _extract_gemini_audio_bytes(gc_json)
+            if audio_bytes:
+                return audio_bytes, mime, model_id
+            last_err = f"Modelo {model_id} (generateContent) respondeu sem áudio."
+        elif gc_err:
+            last_err = f"HTTP {gc_code} ({model_id}): {gc_err}"
 
     raise RuntimeError(last_err)
 

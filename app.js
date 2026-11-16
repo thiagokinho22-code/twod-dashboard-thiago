@@ -690,6 +690,28 @@ const tabTitles = {
 // ========================================================
 const PANEL_CHANGELOG = [
     {
+        date: '16/11/2026',
+        type: 'feat',
+        badge: '📄 Importador PDF',
+        title: 'Importador Temporário de Pacote da Semana (PDF) + Áudios em Lote',
+        summary: 'Suba o PDF da semana (Seg–Sex) para extrair os 10 nichos, criar as pastas e gerar todos os áudios por idioma direto no OneDrive.',
+        highlights: [
+            'Leitura em 2 colunas (Seg–Sex) com slugs, roteiros ~18s, links, tags, títulos SEO e políticas.',
+            'Corrigida exibição dos players de áudio no Studio, buildCommand do Render (imageio-ffmpeg) e fallback generateContent no Gemini TTS.'
+        ]
+    },
+    {
+        date: '16/11/2026',
+        type: 'feat',
+        badge: '🎙️ Áudios IA',
+        title: 'Locuções MP3 com Gemini TTS direto no OneDrive',
+        summary: 'Tradução automática e síntese de voz (PT, ES, EN, FR, IT, DE) com Google AI Studio salvando MP3 direto em Arquivos de Áudio.',
+        highlights: [
+            'Extração de ZIP multi-nicho criando pastas pareadas de Vídeo e Áudio automaticamente.',
+            'Configuração segura da GEMINI_API_KEY em Configurações ou inline no Studio V2.'
+        ]
+    },
+    {
         date: '15/11/2026',
         type: 'feat',
         badge: '🎬 Studio V2',

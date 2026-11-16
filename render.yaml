@@ -3,7 +3,7 @@ services:
     name: twod-hub-api
     env: python
     plan: free
-    buildCommand: ""
+    buildCommand: pip install -r backend/requirements.txt
     startCommand: python backend/server.py
     envVars:
       - key: ONEDRIVE_CLIENT_ID
@@ -14,3 +14,5 @@ services:
         sync: false
       - key: ONEDRIVE_TENANT
         value: consumers
+      - key: GEMINI_API_KEY
+        sync: false

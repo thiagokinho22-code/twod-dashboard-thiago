@@ -548,9 +548,11 @@ function bindStudioDropZones() {
 async function onStudioTabOpened() {
     const dateEl = document.getElementById('studio-date-input');
     if (dateEl && !dateEl.value) dateEl.value = getTodayIsoDate();
+    initWeeklyPdfImporter();
     bindStudioDropZones();
     updateStudioNamingPreview();
     syncStudioGeminiBanner();
+    syncWeeklyTtsMirrorBadge();
     if (studioState.campaigns.length === 0) {
         await loadStudioCampaigns();
     }
@@ -636,7 +638,10 @@ async function generateStudioAudiosWithAI() {
         msgEl.style.color = '#93c5fd';
         msgEl.textContent = `⏳ Traduzindo roteiro, sintetizando vozes (Gemini TTS) e salvando MP3 direto em Arquivos de Áudio/${fullName || niche}...`;
     }
-    if (resEl) resEl.innerHTML = '';
+    if (resEl) {
+        resEl.innerHTML = '';
+        resEl.classList.add('twod-hidden');
+    }
 
     try {
         const resp = await window.apiFetch('/api/studio/generate-audios', {
@@ -700,6 +705,7 @@ async function generateStudioAudiosWithAI() {
             `).join('');
 
             resEl.innerHTML = itemsHtml + errHtml;
+            resEl.classList.toggle('twod-hidden', !itemsHtml && !errHtml);
         }
 
         if (targetCamp) {
@@ -740,3 +746,859 @@ window.pauseStudioRender = pauseStudioRender;
 window.cancelStudioRender = cancelStudioRender;
 window.generateStudioAudiosWithAI = generateStudioAudiosWithAI;
 window.syncStudioGeminiBanner = syncStudioGeminiBanner;
+
+// ========================================================
+// IMPORTADOR TEMPORÁRIO — PACOTE DA SEMANA (.PDF)
+// (Extraí os 10 nichos + cria pastas + gera todos os áudios no OneDrive)
+// ========================================================
+
+const WEEKLY_PACK_STORAGE_KEY = 'twod_weekly_pdf_pack_v1';
+const PDFJS_CDN_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+const PDFJS_WORKER_CDN_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+const weeklyPackState = {
+    weekTitle: '',
+    fileName: '',
+    mondayIso: '',
+    items: [],
+    running: false,
+    stopRequested: false,
+    collapsed: false,
+    pdfJsPromise: null,
+    controlsBound: false,
+};
+
+function getDefaultWeekMondayIso() {
+    const now = new Date();
+    const dow = now.getDay(); // 0=Dom, 1=Seg ... 6=Sáb
+    let diff = 1 - dow;
+    if (dow === 0) diff = 1;       // Domingo -> próxima segunda
+    else if (dow === 6) diff = 2;  // Sábado -> próxima segunda
+    const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + diff);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function addDaysToIsoDate(isoStr, days) {
+    const m = String(isoStr || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!m) return getTodayIsoDate();
+    const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]) + Number(days || 0));
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function getSelectedStudioTtsOptions() {
+    const languages = Array.from(document.querySelectorAll('input[name="studio-tts-lang"]:checked'))
+        .map(cb => cb.value)
+        .filter(Boolean);
+    const voice = (document.getElementById('studio-tts-voice')?.value || 'Kore').trim();
+    const style = (document.getElementById('studio-tts-style')?.value || '').trim();
+    const inlineKey = (document.getElementById('studio-gemini-key-inline')?.value || '').trim();
+    return { languages, voice, style, inlineKey };
+}
+
+function syncWeeklyTtsMirrorBadge() {
+    const el = document.getElementById('weekly-pdf-tts-mirror');
+    if (!el) return;
+    const { languages, voice } = getSelectedStudioTtsOptions();
+    const langsTxt = languages.length ? languages.map(l => l.toUpperCase()).join(', ') : 'Nenhum idioma';
+    el.textContent = `🎙️ ${langsTxt} • Voz: ${voice}`;
+}
+
+function saveWeeklyPackToStorage() {
+    try {
+        localStorage.setItem(WEEKLY_PACK_STORAGE_KEY, JSON.stringify({
+            weekTitle: weeklyPackState.weekTitle,
+            fileName: weeklyPackState.fileName,
+            mondayIso: weeklyPackState.mondayIso,
+            items: weeklyPackState.items,
+        }));
+    } catch (e) { }
+}
+
+function loadWeeklyPackFromStorage() {
+    try {
+        const raw = localStorage.getItem(WEEKLY_PACK_STORAGE_KEY);
+        if (!raw) return;
+        const parsed = JSON.parse(raw);
+        if (parsed && Array.isArray(parsed.items) && parsed.items.length > 0) {
+            weeklyPackState.weekTitle = parsed.weekTitle || '';
+            weeklyPackState.fileName = parsed.fileName || '';
+            weeklyPackState.mondayIso = parsed.mondayIso || getDefaultWeekMondayIso();
+            weeklyPackState.items = parsed.items.map(it => ({
+                ...it,
+                status: it.status === 'running' ? 'idle' : (it.status || 'idle')
+            }));
+        }
+    } catch (e) { }
+}
+
+function initWeeklyPdfImporter() {
+    const monEl = document.getElementById('weekly-pdf-monday');
+    if (monEl && !monEl.value) {
+        monEl.value = weeklyPackState.mondayIso || getDefaultWeekMondayIso();
+    }
+    if (!weeklyPackState.mondayIso) {
+        weeklyPackState.mondayIso = monEl?.value || getDefaultWeekMondayIso();
+    }
+
+    if (weeklyPackState.items.length === 0) {
+        loadWeeklyPackFromStorage();
+        if (monEl && weeklyPackState.mondayIso) {
+            monEl.value = weeklyPackState.mondayIso;
+        }
+    }
+
+    const dropEl = document.getElementById('weekly-pdf-dropzone');
+    if (dropEl && !dropEl.dataset.pdfDropBound) {
+        dropEl.dataset.pdfDropBound = '1';
+        dropEl.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropEl.style.borderColor = '#f59e0b';
+        });
+        dropEl.addEventListener('dragleave', () => {
+            dropEl.style.borderColor = '';
+        });
+        dropEl.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropEl.style.borderColor = '';
+            const f = e.dataTransfer?.files?.[0];
+            if (f) handleWeeklyPdfSelected([f]);
+        });
+    }
+
+    if (!weeklyPackState.controlsBound) {
+        weeklyPackState.controlsBound = true;
+        document.querySelectorAll('input[name="studio-tts-lang"]').forEach(cb => {
+            cb.addEventListener('change', syncWeeklyTtsMirrorBadge);
+        });
+        const vSel = document.getElementById('studio-tts-voice');
+        if (vSel) vSel.addEventListener('change', syncWeeklyTtsMirrorBadge);
+    }
+
+    renderWeeklyPdfPreview();
+}
+
+function toggleWeeklyPdfCard() {
+    const body = document.getElementById('weekly-pdf-body');
+    const btn = document.getElementById('btn-weekly-pdf-toggle');
+    weeklyPackState.collapsed = !weeklyPackState.collapsed;
+    if (body) body.classList.toggle('twod-hidden', weeklyPackState.collapsed);
+    if (btn) btn.textContent = weeklyPackState.collapsed ? 'Expandir' : 'Recolher';
+}
+
+function ensurePdfJsLoaded() {
+    if (window.pdfjsLib && typeof window.pdfjsLib.getDocument === 'function') {
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_CDN_URL;
+        return Promise.resolve(window.pdfjsLib);
+    }
+    if (weeklyPackState.pdfJsPromise) return weeklyPackState.pdfJsPromise;
+
+    weeklyPackState.pdfJsPromise = new Promise((resolve, reject) => {
+        const script = document.createElement('script');
+        script.src = PDFJS_CDN_URL;
+        script.async = true;
+        script.onload = () => {
+            if (window.pdfjsLib) {
+                window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_CDN_URL;
+                resolve(window.pdfjsLib);
+            } else {
+                weeklyPackState.pdfJsPromise = null;
+                reject(new Error('Falha ao inicializar biblioteca PDF.js.'));
+            }
+        };
+        script.onerror = () => {
+            weeklyPackState.pdfJsPromise = null;
+            reject(new Error('Não foi possível baixar o leitor de PDF (verifique sua conexão).'));
+        };
+        document.head.appendChild(script);
+    });
+    return weeklyPackState.pdfJsPromise;
+}
+
+function clusterPdfItemsToLines(items) {
+    if (!Array.isArray(items) || items.length === 0) return [];
+    const sorted = items
+        .filter(it => it && typeof it.str === 'string' && it.str.trim() !== '')
+        .slice()
+        .sort((a, b) => (b.y - a.y) || (a.x - b.x));
+
+    const lines = [];
+    for (const it of sorted) {
+        let group = lines.find(l => Math.abs(l.y - it.y) <= 4.0);
+        if (!group) {
+            group = { y: it.y, tokens: [] };
+            lines.push(group);
+        }
+        group.tokens.push(it);
+    }
+
+    lines.sort((a, b) => b.y - a.y);
+    return lines.map(line => {
+        line.tokens.sort((a, b) => a.x - b.x);
+        let text = '';
+        let prevEndX = null;
+        for (const t of line.tokens) {
+            const chunk = t.str;
+            if (prevEndX !== null) {
+                const gap = t.x - prevEndX;
+                if (gap > 2.0 && !text.endsWith(' ') && !chunk.startsWith(' ')) {
+                    text += ' ';
+                }
+            }
+            text += chunk;
+            prevEndX = t.x + (Number(t.width) || 0);
+        }
+        return text.replace(/\s+/g, ' ').trim();
+    }).filter(Boolean);
+}
+
+const WEEKLY_DAY_PATTERNS = [
+    { index: 0, name: 'Segunda', regex: /\bsegunda\b/i },
+    { index: 1, name: 'Terça', regex: /\bter[çc]a\b/i },
+    { index: 2, name: 'Quarta', regex: /\bquarta\b/i },
+    { index: 3, name: 'Quinta', regex: /\bquinta\b/i },
+    { index: 4, name: 'Sexta', regex: /\bsexta\b/i },
+];
+
+function detectDayFromLines(lines) {
+    for (let i = 0; i < Math.min(lines.length, 6); i++) {
+        const line = lines[i];
+        if (!/(?:·|\bnicho|\b2\/dia|\bsegunda|\bter[çc]a|\bquarta|\bquinta|\bsexta)/i.test(line)) continue;
+        for (const d of WEEKLY_DAY_PATTERNS) {
+            if (d.regex.test(line)) {
+                return { dayIndex: d.index, dayName: d.name, headerLine: line };
+            }
+        }
+    }
+    return null;
+}
+
+function buildFallbackSlug(title) {
+    const clean = String(title || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-zA-Z0-9\s]+/g, ' ')
+        .trim();
+    const pascal = clean
+        .split(/\s+/)
+        .filter(Boolean)
+        .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+        .join('');
+    return pascal || 'Nicho';
+}
+
+function parseWeeklyNicheColumn(rawLines, dayInfo, mondayIso, seqIdx) {
+    const lines = rawLines
+        .filter(l => !/^(?:Segunda|Ter[çc]a|Quarta|Quinta|Sexta)\s*·\s*\d+\s*nichos?/i.test(l))
+        .filter(Boolean);
+
+    if (lines.length < 3) return null;
+    const joinedCheck = lines.join('\n');
+    if (!/(?:Android:|iOS:|[ÁA]UDIO\s*\()/i.test(joinedCheck)) return null;
+
+    const androidIdx = lines.findIndex(l => /^Android\s*:/i.test(l));
+    const iosIdx = lines.findIndex(l => /^iOS\s*:/i.test(l));
+    const tagsIdx = lines.findIndex(l => /^TAGS\s*:/i.test(l));
+    const seoIdx = lines.findIndex(l => /^(?:\d+\s+)?T[ÍI]TULOS\b/i.test(l));
+    const creativeIdx = lines.findIndex(l => /^CRIATIVO\s*[—\-]/i.test(l));
+    const audioIdx = lines.findIndex(l => /^[ÁA]UDIO\b/i.test(l));
+    const policyIdx = lines.findIndex(l => /^Pol[íi]tica\s*:/i.test(l));
+
+    if (audioIdx === -1 && androidIdx === -1) return null;
+
+    // Identifica Título, Categoria e Slug (ex: "UTILIDADE RastrearAviao" ou 2 linhas separadas)
+    let catIdx = -1;
+    let slugLineAdvance = 1;
+    let category = '';
+    let slug = '';
+    const headerLimit = androidIdx > 0 ? Math.min(androidIdx, 6) : Math.min(lines.length, 6);
+
+    for (let i = 0; i < headerLimit; i++) {
+        const sameLine = lines[i].match(/^([A-ZÀ-Ú][A-ZÀ-Ú\s&/]{2,}?)\s+([A-Z][A-Za-z0-9]{3,})$/);
+        if (sameLine) {
+            catIdx = i;
+            category = sameLine[1].trim();
+            slug = sameLine[2].trim();
+            slugLineAdvance = 1;
+            break;
+        }
+        if (
+            i + 1 < headerLimit &&
+            /^[A-ZÀ-Ú][A-ZÀ-Ú\s&/]{2,}$/.test(lines[i]) &&
+            /^[A-Z][A-Za-z0-9]{3,}$/.test(lines[i + 1])
+        ) {
+            catIdx = i;
+            category = lines[i].trim();
+            slug = lines[i + 1].trim();
+            slugLineAdvance = 2;
+            break;
+        }
+    }
+
+    const title = catIdx > 0
+        ? lines.slice(0, catIdx).join(' ').trim()
+        : (lines[0] || `Nicho ${seqIdx + 1}`);
+    if (!slug) slug = buildFallbackSlug(title);
+
+    const descStart = catIdx >= 0 ? catIdx + slugLineAdvance : 1;
+    const descEnd = androidIdx >= 0 ? androidIdx : (tagsIdx >= 0 ? tagsIdx : descStart);
+    const description = descEnd > descStart ? lines.slice(descStart, descEnd).join(' ').trim() : '';
+
+    const androidEnd = iosIdx > androidIdx ? iosIdx : (tagsIdx > androidIdx ? tagsIdx : androidIdx + 1);
+    const androidUrl = androidIdx >= 0
+        ? lines.slice(androidIdx, androidEnd).join('').replace(/^Android\s*:\s*/i, '').trim()
+        : '';
+
+    const iosEnd = tagsIdx > iosIdx ? tagsIdx : (seoIdx > iosIdx ? seoIdx : iosIdx + 1);
+    const iosUrl = iosIdx >= 0
+        ? lines.slice(iosIdx, iosEnd).join('').replace(/^iOS\s*:\s*/i, '').trim()
+        : '';
+
+    const tagsEnd = seoIdx > tagsIdx ? seoIdx : (creativeIdx > tagsIdx ? creativeIdx : tagsIdx + 1);
+    const tags = tagsIdx >= 0
+        ? lines.slice(tagsIdx, tagsEnd).join(' ').replace(/^TAGS\s*:\s*/i, '').trim()
+        : '';
+
+    const seoTitles = [];
+    if (seoIdx >= 0) {
+        for (let i = seoIdx + 1; i < lines.length; i++) {
+            const mSeo = lines[i].match(/^\d+\.\s*(.+)$/);
+            if (mSeo) {
+                seoTitles.push(mSeo[1].trim());
+            } else if (seoTitles.length >= 4 || (creativeIdx >= 0 && i >= creativeIdx)) {
+                break;
+            }
+        }
+    }
+
+    const creativeEnd = audioIdx > creativeIdx ? audioIdx : lines.length;
+    const creativePhrases = creativeIdx >= 0
+        ? lines.slice(creativeIdx + 1, creativeEnd).filter(Boolean)
+        : [];
+
+    let audioDurationHint = '~18s';
+    let audioScript = '';
+    if (audioIdx >= 0) {
+        const durM = lines[audioIdx].match(/\(([^)]+)\)/);
+        if (durM) audioDurationHint = durM[1].toLowerCase();
+        const inlineAudioRemainder = lines[audioIdx].replace(/^[ÁA]UDIO(?:\s*\([^)]*\))?\s*:?\s*/i, '').trim();
+        const audioEnd = policyIdx > audioIdx ? policyIdx : lines.length;
+        const bodyLines = [];
+        if (inlineAudioRemainder) bodyLines.push(inlineAudioRemainder);
+        for (let i = audioIdx + 1; i < audioEnd; i++) {
+            bodyLines.push(lines[i]);
+        }
+        audioScript = bodyLines.join(' ').replace(/\s+/g, ' ').trim();
+    }
+
+    const policy = policyIdx >= 0
+        ? lines.slice(policyIdx).join(' ').replace(/^Pol[íi]tica\s*:\s*/i, '').trim()
+        : '';
+
+    const dayIndex = dayInfo ? dayInfo.dayIndex : Math.min(4, Math.floor(seqIdx / 2));
+    const dayName = dayInfo ? dayInfo.dayName : (WEEKLY_DAY_PATTERNS[dayIndex]?.name || 'Dia');
+
+    return {
+        id: `wk_${Date.now()}_${seqIdx}`,
+        selected: true,
+        dayIndex,
+        dayName,
+        dateIso: addDaysToIsoDate(mondayIso, dayIndex),
+        title,
+        category,
+        slug,
+        description,
+        androidUrl,
+        iosUrl,
+        tags,
+        seoTitles,
+        creativePhrases,
+        audioDurationHint,
+        audioScript,
+        policy,
+        status: 'idle',
+        statusDetail: 'Pronto para gerar',
+        generatedAudios: [],
+    };
+}
+
+function parseWeeklyPdfPagesData(pagesData, fileName, mondayIso) {
+    let weekTitle = '';
+    const extracted = [];
+
+    for (let pIdx = 0; pIdx < pagesData.length; pIdx++) {
+        const page = pagesData[pIdx];
+        const allLines = clusterPdfItemsToLines(page.items);
+        if (allLines.length === 0) continue;
+
+        if (!weekTitle) {
+            const wkLine = allLines.find(l => /Pacote da Semana\s+\d+/i.test(l));
+            if (wkLine) weekTitle = wkLine;
+        }
+
+        const dayInfo = detectDayFromLines(allLines);
+        const midX = (Number(page.width) || 842) * 0.48;
+        const leftItems = page.items.filter(it => it.x < midX);
+        const rightItems = page.items.filter(it => it.x >= midX);
+
+        const leftLines = clusterPdfItemsToLines(leftItems);
+        const rightLines = clusterPdfItemsToLines(rightItems);
+
+        const effectiveDay = dayInfo || (extracted.length > 0 || pIdx > 0
+            ? { dayIndex: Math.min(4, Math.max(0, pIdx - 1)), dayName: WEEKLY_DAY_PATTERNS[Math.min(4, Math.max(0, pIdx - 1))].name }
+            : null);
+
+        const leftNiche = parseWeeklyNicheColumn(leftLines, effectiveDay, mondayIso, extracted.length);
+        if (leftNiche) extracted.push(leftNiche);
+
+        const rightNiche = parseWeeklyNicheColumn(rightLines, effectiveDay, mondayIso, extracted.length);
+        if (rightNiche) extracted.push(rightNiche);
+    }
+
+    return {
+        weekTitle: weekTitle || fileName.replace(/\.pdf$/i, ''),
+        items: extracted,
+    };
+}
+
+async function handleWeeklyPdfSelected(files) {
+    const file = files && files[0];
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith('.pdf') && file.type !== 'application/pdf') {
+        alert('Selecione um arquivo .PDF válido do Pacote da Semana.');
+        return;
+    }
+
+    const infoEl = document.getElementById('weekly-pdf-file-info');
+    if (infoEl) infoEl.textContent = `⏳ Lendo "${file.name}"...`;
+
+    try {
+        const pdfjs = await ensurePdfJsLoaded();
+        const arrayBuf = await file.arrayBuffer();
+        const pdfDoc = await pdfjs.getDocument({ data: arrayBuf }).promise;
+
+        const pagesData = [];
+        for (let p = 1; p <= pdfDoc.numPages; p++) {
+            const page = await pdfDoc.getPage(p);
+            const vp = page.getViewport({ scale: 1.0 });
+            const tc = await page.getTextContent();
+            const items = (tc.items || []).map(it => ({
+                str: it.str || '',
+                x: Array.isArray(it.transform) ? it.transform[4] : 0,
+                y: Array.isArray(it.transform) ? it.transform[5] : 0,
+                width: Number(it.width) || 0,
+            }));
+            pagesData.push({ pageNum: p, width: vp.width, height: vp.height, items });
+        }
+
+        const monEl = document.getElementById('weekly-pdf-monday');
+        const mondayIso = (monEl?.value || getDefaultWeekMondayIso()).trim();
+        weeklyPackState.mondayIso = mondayIso;
+        weeklyPackState.fileName = file.name;
+
+        const parsed = parseWeeklyPdfPagesData(pagesData, file.name, mondayIso);
+        if (!parsed.items.length) {
+            throw new Error('Não encontrei os nichos/roteiros neste PDF. Verifique se ele possui texto selecionável (não apenas imagem).');
+        }
+
+        weeklyPackState.weekTitle = parsed.weekTitle;
+        weeklyPackState.items = parsed.items;
+        saveWeeklyPackToStorage();
+
+        if (infoEl) infoEl.textContent = `✅ ${file.name} (${pdfDoc.numPages} pág. • ${parsed.items.length} nichos extraídos)`;
+        renderWeeklyPdfPreview();
+    } catch (err) {
+        console.error('Erro ao ler PDF semanal:', err);
+        if (infoEl) infoEl.textContent = `❌ Erro ao ler PDF: ${err.message}`;
+        alert(`Erro ao processar PDF da semana: ${err.message}`);
+    }
+}
+
+function recalculateWeeklyDatesFromMonday() {
+    const monEl = document.getElementById('weekly-pdf-monday');
+    const newMon = (monEl?.value || '').trim();
+    if (!newMon) return;
+    weeklyPackState.mondayIso = newMon;
+    weeklyPackState.items.forEach(item => {
+        item.dateIso = addDaysToIsoDate(newMon, item.dayIndex || 0);
+    });
+    saveWeeklyPackToStorage();
+    renderWeeklyPdfPreview();
+}
+
+function toggleWeeklyItemCheck(idx, checked) {
+    if (!weeklyPackState.items[idx]) return;
+    weeklyPackState.items[idx].selected = Boolean(checked);
+    saveWeeklyPackToStorage();
+}
+
+function selectAllWeeklyNiches(selected) {
+    weeklyPackState.items.forEach(it => { it.selected = Boolean(selected); });
+    saveWeeklyPackToStorage();
+    renderWeeklyPdfPreview();
+}
+
+function updateWeeklyItemField(idx, field, value) {
+    const item = weeklyPackState.items[idx];
+    if (!item) return;
+    item[field] = value;
+    saveWeeklyPackToStorage();
+    if (field === 'slug' || field === 'dateIso') {
+        const badge = document.getElementById(`weekly-folder-badge-${idx}`);
+        if (badge) badge.textContent = `📁 ${item.slug || 'Nicho'} ${formatStudioDateShort(item.dateIso)}`;
+    }
+}
+
+function clearSavedWeeklyPack() {
+    if (weeklyPackState.running) return;
+    if (!confirm('Descartar o pacote semanal carregado na tela?')) return;
+    weeklyPackState.weekTitle = '';
+    weeklyPackState.fileName = '';
+    weeklyPackState.items = [];
+    try { localStorage.removeItem(WEEKLY_PACK_STORAGE_KEY); } catch (e) { }
+    const infoEl = document.getElementById('weekly-pdf-file-info');
+    if (infoEl) infoEl.textContent = 'Ex.: Pacote da Semana 23 — 10 Nichos (2/dia)';
+    renderWeeklyPdfPreview();
+}
+
+function loadWeeklyNicheIntoStudio(idx) {
+    const item = weeklyPackState.items[idx];
+    if (!item) return;
+
+    const nicheEl = document.getElementById('studio-niche-input');
+    const dateEl = document.getElementById('studio-date-input');
+    const scriptEl = document.getElementById('studio-tts-script');
+    if (nicheEl) nicheEl.value = item.slug || item.title;
+    if (dateEl && item.dateIso) dateEl.value = item.dateIso;
+    if (scriptEl && item.audioScript) scriptEl.value = item.audioScript;
+    updateStudioNamingPreview();
+
+    const targetFolder = `${item.slug} ${formatStudioDateShort(item.dateIso)}`;
+    if (typeof setStudioTargetCampaign === 'function') {
+        const exists = studioState.campaigns.some(c => c.name === targetFolder);
+        if (exists) {
+            setStudioTargetCampaign(targetFolder);
+        }
+    }
+
+    if (nicheEl) {
+        nicheEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        nicheEl.focus();
+    }
+}
+
+function renderWeeklyPdfPreview() {
+    const wrap = document.getElementById('weekly-pdf-preview-wrap');
+    const listEl = document.getElementById('weekly-pdf-list');
+    const titleEl = document.getElementById('weekly-pdf-week-title');
+    const countEl = document.getElementById('weekly-pdf-count-badge');
+    const infoEl = document.getElementById('weekly-pdf-file-info');
+    if (!wrap || !listEl) return;
+
+    syncWeeklyTtsMirrorBadge();
+
+    if (!weeklyPackState.items || weeklyPackState.items.length === 0) {
+        wrap.classList.add('twod-hidden');
+        listEl.innerHTML = '';
+        return;
+    }
+
+    wrap.classList.remove('twod-hidden');
+    if (titleEl) titleEl.textContent = weeklyPackState.weekTitle || 'Pacote da Semana';
+    if (countEl) countEl.textContent = `${weeklyPackState.items.length} nichos`;
+    if (infoEl && weeklyPackState.fileName) {
+        infoEl.textContent = `✅ ${weeklyPackState.fileName} (${weeklyPackState.items.length} nichos carregados)`;
+    }
+
+    const baseUrl = (typeof API_BASE_URL !== 'undefined' ? API_BASE_URL : (window.API_BASE_URL || ''));
+
+    listEl.innerHTML = weeklyPackState.items.map((item, idx) => {
+        const folderPreview = `${item.slug || 'Nicho'} ${formatStudioDateShort(item.dateIso)}`;
+        const statusCls = item.status === 'done' ? 'is-done' : (item.status === 'error' ? 'is-error' : '');
+        const badgeCls = item.status === 'done' ? 'ok' : (item.status === 'error' ? 'warn' : 'muted');
+        const statusIcon = item.status === 'done' ? '✅' : (item.status === 'running' ? '⏳' : (item.status === 'error' ? '⚠️' : '•'));
+
+        const audiosHtml = Array.isArray(item.generatedAudios) && item.generatedAudios.length > 0
+            ? `<div class="weekly-niche-audios">${item.generatedAudios.map(g => {
+                const rawUrl = g.url ? (g.url.startsWith('http') ? g.url : `${baseUrl}${g.url}`) : '';
+                const mediaUrl = (rawUrl && typeof window.withMediaAuth === 'function') ? window.withMediaAuth(rawUrl) : rawUrl;
+                return `
+                    <div class="weekly-niche-audio-pill">
+                        <span><strong>${_studioEsc((g.lang_code || '').toUpperCase())}</strong> • ${_studioEsc(g.filename || '')} (${g.duration || '?'}s)</span>
+                        ${mediaUrl ? `<audio controls preload="none" src="${_studioEsc(mediaUrl)}"></audio>` : ''}
+                    </div>
+                `;
+            }).join('')}</div>`
+            : '';
+
+        const seoHtml = item.seoTitles && item.seoTitles.length
+            ? `<div><strong>Títulos SEO:</strong><ol style="margin:2px 0 0 18px;">${item.seoTitles.map(t => `<li>${_studioEsc(t)}</li>`).join('')}</ol></div>`
+            : '';
+        const phrasesHtml = item.creativePhrases && item.creativePhrases.length
+            ? `<div><strong>Frases criativo:</strong> ${_studioEsc(item.creativePhrases.join(' | '))}</div>`
+            : '';
+
+        return `
+            <div class="weekly-niche-card ${statusCls}" id="weekly-niche-card-${idx}">
+                <div class="weekly-niche-head">
+                    <label class="weekly-niche-check">
+                        <input type="checkbox" ${item.selected ? 'checked' : ''} ${weeklyPackState.running ? 'disabled' : ''} onchange="toggleWeeklyItemCheck(${idx}, this.checked)">
+                        <div>
+                            <div>${_studioEsc(item.title)}</div>
+                            <div style="font-size:11px; font-weight:600; color:var(--text-muted); margin-top:2px;">
+                                ${_studioEsc(item.dayName)} • ${_studioEsc(item.category || 'NICHO')} • <span id="weekly-folder-badge-${idx}">📁 ${_studioEsc(folderPreview)}</span>
+                            </div>
+                        </div>
+                    </label>
+                    <span class="studio-mini-badge ${badgeCls}">${statusIcon} ${_studioEsc(item.statusDetail || 'Pronto')}</span>
+                </div>
+
+                <div class="weekly-niche-inputs">
+                    <input type="text" class="twod-input" value="${_studioEsc(item.slug)}" title="Slug da pasta no OneDrive" placeholder="Slug da pasta" onchange="updateWeeklyItemField(${idx}, 'slug', this.value.trim())">
+                    <input type="date" class="twod-input" value="${_studioEsc(item.dateIso)}" title="Data da campanha no OneDrive" onchange="updateWeeklyItemField(${idx}, 'dateIso', this.value)">
+                </div>
+
+                <textarea class="weekly-niche-script" rows="3" title="Roteiro extraído do áudio (${_studioEsc(item.audioDurationHint)})" onchange="updateWeeklyItemField(${idx}, 'audioScript', this.value)">${_studioEsc(item.audioScript)}</textarea>
+
+                ${audiosHtml}
+
+                <div class="weekly-niche-actions">
+                    <button type="button" class="btn btn-outline btn-sm" ${weeklyPackState.running ? 'disabled' : ''} onclick="runSingleWeeklyNiche(${idx})">🎙️ Gerar Só Este</button>
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="loadWeeklyNicheIntoStudio(${idx})">📤 Subir Imagens</button>
+                </div>
+
+                <details class="weekly-niche-details">
+                    <summary>Ver links, SEO, tags e política</summary>
+                    <div class="weekly-niche-details-body">
+                        ${item.androidUrl ? `<div><strong>Android:</strong> <a href="${_studioEsc(item.androidUrl)}" target="_blank" rel="noopener">Abrir Play Store ↗</a></div>` : ''}
+                        ${item.iosUrl ? `<div><strong>iOS:</strong> <a href="${_studioEsc(item.iosUrl)}" target="_blank" rel="noopener">Abrir App Store ↗</a></div>` : ''}
+                        ${item.tags ? `<div><strong>Tags:</strong> ${_studioEsc(item.tags)}</div>` : ''}
+                        ${seoHtml}
+                        ${phrasesHtml}
+                        ${item.policy ? `<div style="color:#fbbf24;"><strong>Política:</strong> ${_studioEsc(item.policy)}</div>` : ''}
+                    </div>
+                </details>
+            </div>
+        `;
+    }).join('');
+}
+
+async function processSingleWeeklyItem(item, options) {
+    const { createFolders, languages, voice, style, geminiApiKey } = options;
+
+    item.status = 'running';
+    item.statusDetail = createFolders ? 'Criando pastas...' : 'Gerando áudios...';
+    renderWeeklyPdfPreview();
+
+    try {
+        if (createFolders) {
+            const folderResp = await window.apiFetch('/api/studio/create-campaign', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    niche: item.slug || item.title,
+                    date: item.dateIso,
+                    use_blocks: true
+                })
+            });
+            const folderData = await folderResp.json();
+            if (!folderResp.ok || !folderData.success) {
+                throw new Error(folderData.error || 'Erro ao criar pastas no OneDrive');
+            }
+        }
+
+        item.statusDetail = `Gerando (${languages.map(l => l.toUpperCase()).join(', ')})...`;
+        renderWeeklyPdfPreview();
+
+        const ttsResp = await window.apiFetch('/api/studio/generate-audios', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                campaign: item.slug || item.title,
+                date: item.dateIso,
+                script_pt: item.audioScript,
+                languages,
+                voice,
+                style,
+                gemini_api_key: geminiApiKey
+            })
+        });
+        const ttsData = await ttsResp.json();
+        if (!ttsResp.ok || !ttsData.success) {
+            throw new Error(ttsData.error || `Erro HTTP ${ttsResp.status}`);
+        }
+
+        const generated = Array.isArray(ttsData.generated) ? ttsData.generated : [];
+        const errors = Array.isArray(ttsData.errors) ? ttsData.errors : [];
+        item.generatedAudios = generated;
+        if (errors.length > 0 && generated.length === 0) {
+            throw new Error(errors.map(e => `${e.lang_code}: ${e.error}`).join('; '));
+        }
+        item.status = errors.length > 0 ? 'error' : 'done';
+        item.statusDetail = errors.length > 0
+            ? `${generated.length} OK, ${errors.length} erro(s)`
+            : `${generated.length} áudio(s) no OneDrive`;
+    } catch (err) {
+        item.status = 'error';
+        item.statusDetail = String(err.message || err).slice(0, 70);
+    }
+
+    saveWeeklyPackToStorage();
+    renderWeeklyPdfPreview();
+}
+
+async function runSingleWeeklyNiche(idx) {
+    if (weeklyPackState.running) return;
+    const item = weeklyPackState.items[idx];
+    if (!item) return;
+    if (!String(item.audioScript || '').trim()) {
+        alert('O roteiro deste nicho está vazio.');
+        return;
+    }
+
+    const { languages, voice, style, inlineKey } = getSelectedStudioTtsOptions();
+    if (languages.length === 0) {
+        alert('Selecione pelo menos 1 idioma na seção de Áudios IA abaixo.');
+        return;
+    }
+    const hasServerKey = Boolean(window.metaState && window.metaState.hasGeminiKey);
+    if (!hasServerKey && !inlineKey) {
+        syncStudioGeminiBanner();
+        alert('Informe sua Gemini API Key gratuita (ou peça para o Admin salvar nas Configurações do servidor).');
+        document.getElementById('studio-gemini-key-inline')?.focus();
+        return;
+    }
+
+    const createFolders = Boolean(document.getElementById('weekly-pdf-create-folders')?.checked);
+    weeklyPackState.running = true;
+    try {
+        await processSingleWeeklyItem(item, {
+            createFolders,
+            languages,
+            voice,
+            style,
+            geminiApiKey: inlineKey
+        });
+        await loadStudioCampaigns();
+        if (typeof window.loadNichesFromAPI === 'function') window.loadNichesFromAPI(true);
+    } finally {
+        weeklyPackState.running = false;
+        renderWeeklyPdfPreview();
+    }
+}
+
+async function runWeeklyPdfBatch() {
+    if (weeklyPackState.running) return;
+    const targets = weeklyPackState.items
+        .map((item, idx) => ({ item, idx }))
+        .filter(x => x.item.selected && String(x.item.audioScript || '').trim().length > 0);
+
+    if (targets.length === 0) {
+        alert('Marque ao menos 1 nicho com roteiro de áudio para processar.');
+        return;
+    }
+
+    const { languages, voice, style, inlineKey } = getSelectedStudioTtsOptions();
+    if (languages.length === 0) {
+        alert('Selecione pelo menos 1 idioma na seção de Gerar Áudios (.mp3) por IA abaixo.');
+        return;
+    }
+    const hasServerKey = Boolean(window.metaState && window.metaState.hasGeminiKey);
+    if (!hasServerKey && !inlineKey) {
+        syncStudioGeminiBanner();
+        alert('Informe sua Gemini API Key gratuita (ou salve nas Configurações do servidor).');
+        document.getElementById('studio-gemini-key-inline')?.focus();
+        return;
+    }
+
+    const createFolders = Boolean(document.getElementById('weekly-pdf-create-folders')?.checked);
+    const startBtn = document.getElementById('btn-weekly-batch-start');
+    const stopBtn = document.getElementById('btn-weekly-batch-stop');
+    const statusEl = document.getElementById('weekly-batch-status');
+    const progWrap = document.getElementById('weekly-batch-progress-wrap');
+    const progLabel = document.getElementById('weekly-batch-progress-label');
+    const progPct = document.getElementById('weekly-batch-progress-pct');
+    const progFill = document.getElementById('weekly-batch-progress-fill');
+
+    weeklyPackState.running = true;
+    weeklyPackState.stopRequested = false;
+    if (startBtn) startBtn.disabled = true;
+    if (stopBtn) stopBtn.classList.remove('twod-hidden');
+    if (progWrap) progWrap.classList.remove('twod-hidden');
+
+    let okCount = 0;
+    let errCount = 0;
+
+    try {
+        for (let i = 0; i < targets.length; i++) {
+            if (weeklyPackState.stopRequested) break;
+            const { item } = targets[i];
+            const pct = Math.round((i / targets.length) * 100);
+            if (progLabel) progLabel.textContent = `⏳ Processando ${i + 1}/${targets.length}: ${item.slug} (${item.dayName})...`;
+            if (progPct) progPct.textContent = `${pct}%`;
+            if (progFill) progFill.style.width = `${pct}%`;
+            if (statusEl) statusEl.textContent = `Processando ${i + 1}/${targets.length}...`;
+
+            await processSingleWeeklyItem(item, {
+                createFolders,
+                languages,
+                voice,
+                style,
+                geminiApiKey: inlineKey
+            });
+
+            if (item.status === 'done') okCount++;
+            else errCount++;
+
+            if (i < targets.length - 1 && !weeklyPackState.stopRequested) {
+                await new Promise(r => setTimeout(r, 1500));
+            }
+        }
+
+        if (progPct) progPct.textContent = '100%';
+        if (progFill) progFill.style.width = '100%';
+        const stoppedMsg = weeklyPackState.stopRequested ? ' (interrompido)' : '';
+        if (progLabel) progLabel.textContent = `Concluído${stoppedMsg}: ${okCount} OK, ${errCount} com alerta.`;
+        if (statusEl) statusEl.textContent = `✅ ${okCount} nicho(s) prontos no OneDrive${errCount ? ` • ⚠️ ${errCount} com alerta` : ''}.`;
+
+        if (inlineKey) {
+            const keyInlineEl = document.getElementById('studio-gemini-key-inline');
+            if (keyInlineEl) keyInlineEl.value = '';
+        }
+
+        await loadStudioCampaigns();
+        if (typeof window.loadNichesFromAPI === 'function') window.loadNichesFromAPI(true);
+    } finally {
+        weeklyPackState.running = false;
+        weeklyPackState.stopRequested = false;
+        if (startBtn) startBtn.disabled = false;
+        if (stopBtn) stopBtn.classList.add('twod-hidden');
+        renderWeeklyPdfPreview();
+    }
+}
+
+function stopWeeklyPdfBatch() {
+    if (!weeklyPackState.running) return;
+    weeklyPackState.stopRequested = true;
+    const statusEl = document.getElementById('weekly-batch-status');
+    if (statusEl) statusEl.textContent = '⏹️ Parando após terminar o nicho atual...';
+}
+
+window.toggleWeeklyPdfCard = toggleWeeklyPdfCard;
+window.handleWeeklyPdfSelected = handleWeeklyPdfSelected;
+window.recalculateWeeklyDatesFromMonday = recalculateWeeklyDatesFromMonday;
+window.toggleWeeklyItemCheck = toggleWeeklyItemCheck;
+window.selectAllWeeklyNiches = selectAllWeeklyNiches;
+window.updateWeeklyItemField = updateWeeklyItemField;
+window.clearSavedWeeklyPack = clearSavedWeeklyPack;
+window.loadWeeklyNicheIntoStudio = loadWeeklyNicheIntoStudio;
+window.runSingleWeeklyNiche = runSingleWeeklyNiche;
+window.runWeeklyPdfBatch = runWeeklyPdfBatch;
+window.stopWeeklyPdfBatch = stopWeeklyPdfBatch;
+window.syncWeeklyTtsMirrorBadge = syncWeeklyTtsMirrorBadge;
+window.twodWeeklyPdfParser = {
+    clusterPdfItemsToLines,
+    detectDayFromLines,
+    parseWeeklyNicheColumn,
+    parseWeeklyPdfPagesData,
+    addDaysToIsoDate,
+};
