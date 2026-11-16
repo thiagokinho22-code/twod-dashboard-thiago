@@ -691,6 +691,17 @@ const tabTitles = {
 const PANEL_CHANGELOG = [
     {
         date: '15/11/2026',
+        type: 'feat',
+        badge: '🎬 Studio V2',
+        title: 'TWOD Criativos Studio V2 no OneDrive (Upload + Renderizador FFmpeg)',
+        summary: 'Criação de pacotes <Nicho> <Data>, envio padronizado de áudios/imagens/ZIP para o OneDrive e renderização 1.mp4–6.mp4 em nuvem.',
+        highlights: [
+            'Padronização automática: 1–3 Feed (1:1), 4–6 Reels (9:16), Bloco A/B, 1. Imagens preservada e áudios *_pt/_es/_en.mp3.',
+            'Auditoria pré-voo e renderização H.264 + AAC (math.ceil + apad) salvando MP4s direto no OneDrive.'
+        ]
+    },
+    {
+        date: '15/11/2026',
         type: 'sec',
         badge: '🛡️ Proteção & Status',
         title: 'Status do App Meta (Verde/Amarelo/Vermelho) & Circuit Breaker Anti-Rajada',
@@ -848,6 +859,10 @@ function switchTab(tabId) {
 
     if (tabId === 'duplicador') {
         onDuplicatorTabOpened();
+    } else if (tabId === 'criativos') {
+        if (typeof window.onStudioTabOpened === 'function') {
+            window.onStudioTabOpened();
+        }
     } else if (tabId === 'gerador-campanhas') {
         if (typeof window.onCampaignBuilderTabOpened === 'function') {
             window.onCampaignBuilderTabOpened();
@@ -2854,6 +2869,8 @@ function escHtml(str = '') {
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#39;');
 }
+window.escHtml = escHtml;
+window.loadNichesFromAPI = loadNichesFromAPI;
 
 function formatMetaApiError(err) {
     if (!err) return 'Erro desconhecido';

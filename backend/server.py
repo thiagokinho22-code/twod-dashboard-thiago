@@ -18,6 +18,11 @@ from concurrent.futures import ThreadPoolExecutor
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, unquote, parse_qs
 
+try:
+    import studio_engine
+except ImportError:
+    from backend import studio_engine
+
 # Diretório base do dashboard (onde ficam index.html, styles.css, app.js)
 DASHBOARD_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 BACKEND_DIR = os.path.dirname(__file__)
@@ -2641,6 +2646,46 @@ class APIHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 self._send_json({"success": False, "error": str(e)}, 500)
 
+        # --------------------------------------------------------
+        # 5B. TWOD CRIATIVOS STUDIO V2 (ONEDRIVE + FFMPEG NUVEM)
+        # --------------------------------------------------------
+        elif path == "/api/studio/campaigns":
+            if not self._authenticate_request():
+                return
+            try:
+                tok, err = get_graph_access_token()
+                if not tok:
+                    self._send_json({"success": False, "error": err or "OneDrive não autenticado"}, 401)
+                    return
+                search_q = (qs.get("search", [""])[0] or "").strip()
+                limit_q = int((qs.get("limit", ["20"])[0] or "20"))
+                res = studio_engine.list_studio_campaigns_cloud(tok, _find_work_folder_ids, search=search_q, limit=limit_q)
+                self._send_json(res, 200 if res.get("success") else 400)
+            except Exception as e:
+                self._send_json({"success": False, "error": str(e)}, 500)
+
+        elif path == "/api/studio/audit":
+            if not self._authenticate_request():
+                return
+            try:
+                camp_q = (qs.get("name", [""])[0] or "").strip()
+                if not camp_q:
+                    self._send_json({"success": False, "error": "Parâmetro 'name' obrigatório"}, 400)
+                    return
+                tok, err = get_graph_access_token()
+                if not tok:
+                    self._send_json({"success": False, "error": err or "OneDrive não autenticado"}, 401)
+                    return
+                res = studio_engine.audit_campaign_cloud(camp_q, tok, _find_work_folder_ids)
+                self._send_json(res)
+            except Exception as e:
+                self._send_json({"success": False, "error": str(e)}, 500)
+
+        elif path == "/api/studio/render/status":
+            if not self._authenticate_request():
+                return
+            self._send_json(studio_engine.get_render_status_snapshot())
+
         elif path.startswith("/api/audio/"):
             if not self._authenticate_request(qs=qs, allow_media_scope=True):
                 return
@@ -2672,7 +2717,7 @@ class APIHandler(BaseHTTPRequestHandler):
         elif path == "/" or path == "/index.html":
             self._serve_file(os.path.join(DASHBOARD_DIR, "index.html"))
 
-        elif path in ["/styles.css", "/app.js", "/campaign_builder.js", "/privacy.html", "/README.md"]:
+        elif path in ["/styles.css", "/app.js", "/studio.js", "/campaign_builder.js", "/privacy.html", "/README.md"]:
             self._serve_file(os.path.join(DASHBOARD_DIR, path.lstrip("/")))
 
         else:
@@ -3129,6 +3174,212 @@ class APIHandler(BaseHTTPRequestHandler):
                 self._send_json({"success": True, "link": current[camp_id]})
             except Exception as e:
                 self._send_json({"success": False, "error": str(e)}, 500)
+
+        # --------------------------------------------------------
+        # 5B. POSTS DO TWOD CRIATIVOS STUDIO V2
+        # --------------------------------------------------------
+        elif path == "/api/studio/create-campaign":
+            if not self._authenticate_request():
+                return
+            try:
+                payload = self._read_json_body()
+                niche = (payload.get("niche") or "").strip()
+                date_str = (payload.get("date") or "").strip()
+                use_blocks = bool(payload.get("use_blocks", True))
+                tok, err = get_graph_access_token()
+                if not tok:
+                    self._send_json({"success": False, "error": err or "OneDrive não autenticado"}, 401)
+                    return
+                res = studio_engine.create_campaign_folders_cloud(niche, date_str, use_blocks, tok, _find_work_folder_ids)
+                threading.Thread(target=start_graph_sync_background, kwargs={"force_full": False}, daemon=True).start()
+                self._send_json(res)
+            except Exception as e:
+                self._send_json({"success": False, "error": str(e)}, 400 if isinstance(e, ValueError) else 500)
+
+        elif path == "/api/studio/upload-audio":
+            if not self._authenticate_request():
+                return
+            tmp_path = None
+            try:
+                camp = (qs.get("campaign", [""])[0] or "").strip()
+                date_str = (qs.get("date", [""])[0] or "").strip()
+                lang = (qs.get("lang", [""])[0] or "").strip()
+                filename = os.path.basename((qs.get("filename", ["audio.mp3"])[0] or "audio.mp3").strip())
+                content_len = int(self.headers.get("Content-Length", "0") or 0)
+                if content_len <= 0 or content_len > 100 * 1024 * 1024:
+                    self._send_json({"success": False, "error": "Tamanho de arquivo de áudio inválido (máx 100MB)."}, 400)
+                    return
+                tok, err = get_graph_access_token()
+                if not tok:
+                    self._send_json({"success": False, "error": err or "OneDrive não autenticado"}, 401)
+                    return
+
+                fd, tmp_path = tempfile.mkstemp(prefix="twod_aud_", suffix=os.path.splitext(filename)[1] or ".mp3")
+                os.close(fd)
+                remaining = content_len
+                with open(tmp_path, "wb") as tf:
+                    while remaining > 0:
+                        chunk = self.rfile.read(min(remaining, 1024 * 256))
+                        if not chunk:
+                            break
+                        tf.write(chunk)
+                        remaining -= len(chunk)
+
+                res = studio_engine.upload_audio_to_onedrive_cloud(camp, date_str, lang, filename, tmp_path, tok, _find_work_folder_ids)
+                threading.Thread(target=start_graph_sync_background, kwargs={"force_full": False}, daemon=True).start()
+                self._send_json(res)
+            except Exception as e:
+                self._send_json({"success": False, "error": str(e)}, 400 if isinstance(e, ValueError) else 500)
+            finally:
+                if tmp_path and os.path.exists(tmp_path):
+                    try:
+                        os.unlink(tmp_path)
+                    except OSError:
+                        pass
+
+        elif path == "/api/studio/stage-file":
+            if not self._authenticate_request():
+                return
+            try:
+                batch_id = (qs.get("batch_id", [""])[0] or "").strip()
+                filename = os.path.basename((qs.get("filename", ["file.png"])[0] or "file.png").strip())
+                if not re.match(r"^[a-zA-Z0-9_-]{4,64}$", batch_id):
+                    self._send_json({"success": False, "error": "batch_id inválido."}, 400)
+                    return
+                content_len = int(self.headers.get("Content-Length", "0") or 0)
+                if content_len <= 0 or content_len > 80 * 1024 * 1024:
+                    self._send_json({"success": False, "error": "Tamanho de arquivo inválido."}, 400)
+                    return
+                stage_dir = os.path.join(tempfile.gettempdir(), f"twod_stage_{batch_id}")
+                os.makedirs(stage_dir, exist_ok=True)
+                dest_path = os.path.join(stage_dir, filename)
+                remaining = content_len
+                with open(dest_path, "wb") as tf:
+                    while remaining > 0:
+                        chunk = self.rfile.read(min(remaining, 1024 * 256))
+                        if not chunk:
+                            break
+                        tf.write(chunk)
+                        remaining -= len(chunk)
+                self._send_json({"success": True, "batch_id": batch_id, "filename": filename, "size": os.path.getsize(dest_path)})
+            except Exception as e:
+                self._send_json({"success": False, "error": str(e)}, 500)
+
+        elif path == "/api/studio/commit-images":
+            if not self._authenticate_request():
+                return
+            stage_dir = None
+            try:
+                payload = self._read_json_body()
+                batch_id = str(payload.get("batch_id") or "").strip()
+                camp = str(payload.get("campaign") or "").strip()
+                date_str = str(payload.get("date") or "").strip()
+                block = str(payload.get("block") or "").strip()
+                lang = str(payload.get("lang") or "pt").strip()
+                if not re.match(r"^[a-zA-Z0-9_-]{4,64}$", batch_id):
+                    self._send_json({"success": False, "error": "batch_id inválido."}, 400)
+                    return
+                stage_dir = os.path.join(tempfile.gettempdir(), f"twod_stage_{batch_id}")
+                if not os.path.isdir(stage_dir):
+                    self._send_json({"success": False, "error": "Nenhum arquivo enviado neste lote."}, 400)
+                    return
+                tok, err = get_graph_access_token()
+                if not tok:
+                    self._send_json({"success": False, "error": err or "OneDrive não autenticado"}, 401)
+                    return
+
+                staged = [
+                    (fn, os.path.join(stage_dir, fn))
+                    for fn in sorted(os.listdir(stage_dir))
+                    if os.path.isfile(os.path.join(stage_dir, fn))
+                ]
+                res = studio_engine.upload_standardized_images_cloud(camp, date_str, block, lang, staged, tok, _find_work_folder_ids)
+                self._send_json(res)
+            except Exception as e:
+                self._send_json({"success": False, "error": str(e)}, 400 if isinstance(e, ValueError) else 500)
+            finally:
+                if stage_dir and os.path.isdir(stage_dir):
+                    shutil.rmtree(stage_dir, ignore_errors=True)
+
+        elif path == "/api/studio/import-zip":
+            if not self._authenticate_request():
+                return
+            tmp_zip = None
+            try:
+                camp = (qs.get("campaign", [""])[0] or "").strip()
+                date_str = (qs.get("date", [""])[0] or "").strip()
+                content_len = int(self.headers.get("Content-Length", "0") or 0)
+                if content_len <= 0 or content_len > 250 * 1024 * 1024:
+                    self._send_json({"success": False, "error": "Tamanho de ZIP inválido (máx 250MB)."}, 400)
+                    return
+                tok, err = get_graph_access_token()
+                if not tok:
+                    self._send_json({"success": False, "error": err or "OneDrive não autenticado"}, 401)
+                    return
+                fd, tmp_zip = tempfile.mkstemp(prefix="twod_zipin_", suffix=".zip")
+                os.close(fd)
+                remaining = content_len
+                with open(tmp_zip, "wb") as tf:
+                    while remaining > 0:
+                        chunk = self.rfile.read(min(remaining, 1024 * 512))
+                        if not chunk:
+                            break
+                        tf.write(chunk)
+                        remaining -= len(chunk)
+                res = studio_engine.import_zip_to_onedrive_cloud(camp, date_str, tmp_zip, tok, _find_work_folder_ids)
+                threading.Thread(target=start_graph_sync_background, kwargs={"force_full": False}, daemon=True).start()
+                self._send_json(res)
+            except Exception as e:
+                self._send_json({"success": False, "error": str(e)}, 400 if isinstance(e, ValueError) else 500)
+            finally:
+                if tmp_zip and os.path.exists(tmp_zip):
+                    try:
+                        os.unlink(tmp_zip)
+                    except OSError:
+                        pass
+
+        elif path == "/api/studio/render/start":
+            if not self._authenticate_request():
+                return
+            try:
+                payload = self._read_json_body()
+                campaigns = payload.get("campaigns") or []
+                options = {
+                    "round_duration": payload.get("round_duration", True),
+                    "cleanup_translated": payload.get("cleanup_translated", True),
+                    "force_overwrite": payload.get("force_overwrite", False),
+                    "languages": payload.get("languages") or [],
+                }
+
+                def _on_render_done(camp_list):
+                    tok, _ = get_graph_access_token()
+                    if tok:
+                        for c_name in camp_list:
+                            try:
+                                fetch_single_niche_videos_from_graph(c_name, tok=tok)
+                            except Exception:
+                                pass
+                        _save_graph_cache_to_disk()
+
+                res = studio_engine.start_render_job_async(
+                    campaigns, options, get_graph_access_token, _find_work_folder_ids, _on_render_done
+                )
+                self._send_json(res, 200 if res.get("success") else 400)
+            except Exception as e:
+                self._send_json({"success": False, "error": str(e)}, 500)
+
+        elif path == "/api/studio/render/pause":
+            if not self._authenticate_request():
+                return
+            res = studio_engine.pause_or_resume_render_job()
+            self._send_json(res, 200 if res.get("success") else 400)
+
+        elif path == "/api/studio/render/cancel":
+            if not self._authenticate_request():
+                return
+            res = studio_engine.cancel_render_job()
+            self._send_json(res, 200 if res.get("success") else 400)
+
         else:
             self._send_json({"error": "Rota não encontrada"}, 404)
 
