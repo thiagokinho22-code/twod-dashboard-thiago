@@ -31,6 +31,15 @@ DEFAULT_NEGATIVE_PROMPT = (
 )
 
 
+class CloudflareQuotaError(RuntimeError):
+    """Indica esgotamento da cota diária gratuita de Neurons (HTTP 429) para interromper lotes com segurança."""
+
+
+def _is_quota_message(msg):
+    low = str(msg or "").lower()
+    return any(k in low for k in ("429", "quota", "neurons", "limit reached", "rate limit", "daily limit", "exceeded"))
+
+
 def _detect_image_mime(raw_bytes):
     if raw_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
         return "image/png"
@@ -110,8 +119,8 @@ def _run_single_cf_model(model_id, prompt_en, account_id, api_token, negative_pr
             pass
         if e.code in (401, 403):
             raise PermissionError(f"Credenciais Cloudflare inválidas ou sem permissão Workers AI ({msg[:180]})")
-        if e.code == 429:
-            raise RuntimeError(f"Limite/cota Cloudflare Workers AI atingido ({msg[:160]})")
+        if e.code == 429 or _is_quota_message(msg):
+            raise CloudflareQuotaError(f"Cota diária Cloudflare Workers AI atingida ({msg[:160]})")
         raise RuntimeError(f"Cloudflare HTTP {e.code} ({model_id}): {msg[:200]}")
 
     if "application/json" in ctype or raw.lstrip().startswith(b"{"):
@@ -119,6 +128,8 @@ def _run_single_cf_model(model_id, prompt_en, account_id, api_token, negative_pr
         if res_j.get("success") is False:
             errs = res_j.get("errors") or []
             msg = errs[0].get("message") if errs else "Erro desconhecido Cloudflare"
+            if _is_quota_message(msg):
+                raise CloudflareQuotaError(f"Cota diária Cloudflare Workers AI atingida ({msg[:160]})")
             raise RuntimeError(f"Cloudflare ({model_id}): {msg}")
         img_b64 = ((res_j.get("result") or {}).get("image") or "").strip()
         if not img_b64:
@@ -176,6 +187,8 @@ def generate_clean_image_cf(prompt_en, account_id, api_token, preferred_model=""
             }
         except PermissionError as auth_err:
             raise RuntimeError(str(auth_err))
+        except CloudflareQuotaError:
+            raise
         except Exception as e:
             last_err = str(e)
 

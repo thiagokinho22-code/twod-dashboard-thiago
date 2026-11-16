@@ -1585,6 +1585,23 @@ function renderWeeklyPdfPreview() {
             `
             : '';
 
+        const imgTotal = Number(item.imgProgressTotal) || 0;
+        const imgDone = Number(item.imgProgressDone) || 0;
+        const imgPct = imgTotal > 0 ? Math.min(100, Math.round((imgDone / imgTotal) * 100)) : 0;
+        const cardImgProgressHtml = (item.imgStatus && imgTotal > 0)
+            ? `
+                <div class="weekly-niche-progress">
+                    <div class="weekly-niche-progress-head">
+                        <span>🎨 ${_studioEsc(item.imgProgressLabel || `${imgDone}/${imgTotal} etapas`)}</span>
+                        <strong>${imgPct}%</strong>
+                    </div>
+                    <div class="weekly-niche-progress-track">
+                        <div class="weekly-niche-progress-fill" style="width:${imgPct}%;"></div>
+                    </div>
+                </div>
+            `
+            : '';
+
         const audiosHtml = slots.length > 0
             ? `<div class="weekly-niche-audios">${slots.map(g => {
                 const codeUp = (g.lang_code || '').toUpperCase();
@@ -1656,6 +1673,7 @@ function renderWeeklyPdfPreview() {
                 <textarea class="weekly-niche-script" rows="3" title="Roteiro extraído do áudio (${_studioEsc(item.audioDurationHint)})" onchange="updateWeeklyItemField(${idx}, 'audioScript', this.value)">${_studioEsc(item.audioScript)}</textarea>
 
                 ${cardProgressHtml}
+                ${cardImgProgressHtml}
                 ${audiosHtml}
 
                 <div class="weekly-niche-actions">

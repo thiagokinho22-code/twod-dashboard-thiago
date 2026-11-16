@@ -3514,6 +3514,8 @@ class APIHandler(BaseHTTPRequestHandler):
                     negative_prompt=neg,
                 )
                 self._send_json(res)
+            except cloudflare_image.CloudflareQuotaError as qe:
+                self._send_json({"success": False, "quota_exceeded": True, "error": str(qe)}, 429)
             except Exception as e:
                 self._send_json({"success": False, "error": str(e)}, 400 if isinstance(e, ValueError) else 500)
 

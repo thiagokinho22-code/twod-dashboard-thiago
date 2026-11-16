@@ -663,6 +663,123 @@ function setCfFactoryProgress(pct, labelText) {
     if (fill) fill.style.width = `${cleanPct}%`;
 }
 
+const STYLE_META_LABELS = {
+    A1: 'Bloco A · Estilo 1 — Advertorial (Foto)',
+    A2: 'Bloco A · Estilo 2 — Clean Moderno (Foto)',
+    A3: 'Bloco A · Estilo 3 — Fundo Branco (#FFFFFF)',
+    B1: 'Bloco B · Estilo 1 — Ilustração Flat',
+    B2: 'Bloco B · Estilo 2 — Render 3D Estúdio',
+    B3: 'Bloco B · Estilo 3 — Comparativo Smartphones (#FFFFFF)',
+};
+
+function logCfTerminal(message, type = 'info') {
+    const body = document.getElementById('cf-terminal-body');
+    const clearBtn = document.getElementById('btn-clear-cf-log');
+    if (clearBtn) clearBtn.classList.remove('twod-hidden');
+    if (!body) return;
+    const empty = body.querySelector('.terminal-log-empty');
+    if (empty) empty.remove();
+
+    const timeStr = new Date().toTimeString().split(' ')[0];
+    const line = document.createElement('div');
+    line.className = `terminal-entry ${type}`;
+    line.innerHTML = `<span class="term-time">[${timeStr}]</span> <span class="term-text">${_cfEsc(message)}</span>`;
+    body.appendChild(line);
+    body.scrollTop = body.scrollHeight;
+}
+
+function setCfTerminalLiveStatus(text) {
+    const el = document.getElementById('cf-terminal-live-status');
+    if (el) el.textContent = text || '';
+}
+
+function clearCfLog() {
+    const body = document.getElementById('cf-terminal-body');
+    const clearBtn = document.getElementById('btn-clear-cf-log');
+    if (body) {
+        body.innerHTML = '<div class="terminal-log-empty">Terminal limpo. Pronto para iniciar geração de criativos.</div>';
+    }
+    if (clearBtn) clearBtn.classList.add('twod-hidden');
+    setCfTerminalLiveStatus('Pronto para iniciar');
+}
+
+function renderCfStyleQueue(queueItems) {
+    const wrap = document.getElementById('cf-style-queue');
+    if (!wrap) return;
+    if (!Array.isArray(queueItems) || queueItems.length === 0) {
+        wrap.classList.add('twod-hidden');
+        wrap.innerHTML = '';
+        return;
+    }
+
+    wrap.classList.remove('twod-hidden');
+    wrap.innerHTML = queueItems.map(it => {
+        const cls = it.status === 'done' ? 'is-done'
+            : (it.status === 'skipped' ? 'is-skipped'
+                : (it.status === 'error' ? 'is-error'
+                    : (it.status === 'running' ? 'is-running' : 'is-pending')));
+        const icon = it.status === 'done' ? '✅'
+            : (it.status === 'skipped' ? '⏭️'
+                : (it.status === 'error' ? '❌'
+                    : (it.status === 'running' ? '⏳' : '🕒')));
+        const pct = Math.max(0, Math.min(100, Math.round(Number(it.pct) || 0)));
+        return `
+            <div class="cf-queue-item ${cls}">
+                <div class="cf-queue-head">
+                    <span><strong>${icon} ${_cfEsc(it.title || it.key)}</strong></span>
+                    <span class="text-muted" style="font-size:11px;">${_cfEsc(it.detail || 'Na fila...')} • <strong>${pct}%</strong></span>
+                </div>
+                <div class="cf-queue-mini-track">
+                    <div class="cf-queue-mini-fill" style="width:${pct}%;"></div>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+function _buildCampFullName(slug, dateIso) {
+    const dShort = (typeof formatStudioDateShort === 'function') ? formatStudioDateShort(dateIso) : dateIso;
+    if (!slug) return '';
+    return dShort ? `${slug} ${dShort}` : slug;
+}
+
+async function auditAndFilterPendingBlocks(nicheSpec, blocks, languages) {
+    const campFullName = _buildCampFullName(nicheSpec.slug, nicheSpec.dateIso);
+    if (!campFullName) {
+        return { pendingBlocks: [...blocks], doneBlocks: [], campFullName };
+    }
+
+    try {
+        const resp = await window.apiFetch(`/api/studio/audit?name=${encodeURIComponent(campFullName)}`);
+        if (!resp.ok) {
+            return { pendingBlocks: [...blocks], doneBlocks: [], campFullName, auditError: `HTTP ${resp.status}` };
+        }
+        const audit = await resp.json();
+        if (!audit || !audit.success || !Array.isArray(audit.blocks) || audit.blocks.length === 0) {
+            return { pendingBlocks: [...blocks], doneBlocks: [], campFullName };
+        }
+
+        const pendingBlocks = [];
+        const doneBlocks = [];
+        for (const blk of blocks) {
+            const bEntry = audit.blocks.find(b => String(b.block || '').toLowerCase() === blk.toLowerCase());
+            if (!bEntry || !Array.isArray(bEntry.languages)) {
+                pendingBlocks.push(blk);
+                continue;
+            }
+            const allLangsReady = languages.every(lc => {
+                const lEntry = bEntry.languages.find(x => String(x.lang_code || '').toLowerCase() === lc.toLowerCase());
+                return lEntry && (Number(lEntry.imgs_count) >= 6 || Number(lEntry.videos_count) >= 6);
+            });
+            if (allLangsReady) doneBlocks.push(blk);
+            else pendingBlocks.push(blk);
+        }
+        return { pendingBlocks, doneBlocks, campFullName };
+    } catch (e) {
+        return { pendingBlocks: [...blocks], doneBlocks: [], campFullName, auditError: e.message };
+    }
+}
+
 async function uploadComposedBlockLangToOneDrive(campaignSlug, dateIso, blockName, langCode, blobsMap) {
     const batchId = `cf_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     for (let slot = 1; slot <= 6; slot++) {
@@ -698,10 +815,57 @@ async function uploadComposedBlockLangToOneDrive(campaignSlug, dateIso, blockNam
 }
 
 async function generateAllVariantsForNiche(nicheSpec, options) {
-    const { blocks, languages, creds, autoUpload, onProgress } = options;
+    const { blocks, languages, creds, autoUpload, skipExisting = true, onProgress, onStage } = options;
+    const campFullName = _buildCampFullName(nicheSpec.slug, nicheSpec.dateIso) || nicheSpec.slug;
+
+    let activeBlocks = [...blocks];
+    let skippedBlocks = [];
+    if (skipExisting && autoUpload) {
+        logCfTerminal(`🔍 Auditando OneDrive para "${campFullName}"...`, 'info');
+        if (onProgress) onProgress(0.03, `🔍 Verificando o que já está pronto em ${campFullName}...`);
+        const auditRes = await auditAndFilterPendingBlocks(nicheSpec, blocks, languages);
+        activeBlocks = auditRes.pendingBlocks;
+        skippedBlocks = auditRes.doneBlocks;
+        if (skippedBlocks.length > 0) {
+            logCfTerminal(`⏭️ ${campFullName}: ${skippedBlocks.join(', ')} já completo(s) no OneDrive (${languages.map(l => l.toUpperCase()).join('/')}) — pulando sem gastar cota.`, 'warning');
+        }
+    }
+
+    const allStyleKeys = [];
+    if (blocks.includes('Bloco A')) allStyleKeys.push('A1', 'A2', 'A3');
+    if (blocks.includes('Bloco B')) allStyleKeys.push('B1', 'B2', 'B3');
+
+    const queueItems = allStyleKeys.map(sk => {
+        const blkName = sk.startsWith('B') ? 'Bloco B' : 'Bloco A';
+        const isSkipped = skippedBlocks.includes(blkName);
+        return {
+            key: sk,
+            title: `${nicheSpec.slug} • ${STYLE_META_LABELS[sk] || sk}`,
+            status: isSkipped ? 'skipped' : 'pending',
+            pct: isSkipped ? 100 : 0,
+            detail: isSkipped ? '⏭️ Bloco já completo no OneDrive' : 'Na fila...',
+        };
+    });
+    renderCfStyleQueue(queueItems);
+
+    const setStyleItem = (sk, status, pct, detail) => {
+        const q = queueItems.find(x => x.key === sk);
+        if (q) {
+            q.status = status;
+            q.pct = pct;
+            q.detail = detail;
+            renderCfStyleQueue(queueItems);
+        }
+    };
+
+    if (activeBlocks.length === 0) {
+        if (onStage) onStage(1, 1, '⏭️ Já completo no OneDrive');
+        return { skippedAll: true, skippedBlocks, plan: null, baseImages: {}, composedBlobs: {} };
+    }
+
     const styleKeys = [];
-    if (blocks.includes('Bloco A')) styleKeys.push('A1', 'A2', 'A3');
-    if (blocks.includes('Bloco B')) styleKeys.push('B1', 'B2', 'B3');
+    if (activeBlocks.includes('Bloco A')) styleKeys.push('A1', 'A2', 'A3');
+    if (activeBlocks.includes('Bloco B')) styleKeys.push('B1', 'B2', 'B3');
 
     const promptPack = cfFactoryState.promptsBySlug[nicheSpec.slug] || {};
     const stylePrompts = {};
@@ -709,7 +873,12 @@ async function generateAllVariantsForNiche(nicheSpec, options) {
         if (promptPack[k]) stylePrompts[k] = promptPack[k];
     });
 
-    if (onProgress) onProgress(0.05, `🧠 Preparando copys e prompts (${nicheSpec.slug})...`);
+    const totalStageSteps = styleKeys.length + (activeBlocks.length * languages.length);
+    let doneStageSteps = 0;
+    if (onStage) onStage(0, totalStageSteps, '🧠 Preparando copys...');
+    if (onProgress) onProgress(0.06, `🧠 Preparando copys e prompts (${nicheSpec.slug})...`);
+    logCfTerminal(`🧠 ${campFullName}: planejando copys (${languages.map(l => l.toUpperCase()).join(', ')}) para ${activeBlocks.join(' + ')}...`, 'info');
+
     const planResp = await window.apiFetch('/api/studio/prepare-creative-plan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -731,13 +900,16 @@ async function generateAllVariantsForNiche(nicheSpec, options) {
     if (!planResp.ok || !planData.success) {
         throw new Error(planData.error || 'Erro ao preparar copys e prompts.');
     }
+    logCfTerminal(`📝 Plano pronto (${planData.source || 'gemini'}) para ${campFullName}.`, 'info');
 
     const baseImages = {};
     for (let i = 0; i < styleKeys.length; i++) {
         if (cfFactoryState.stopRequested) throw new Error('Cancelado pelo usuário.');
         const sk = styleKeys[i];
-        const frac = 0.1 + (0.65 * (i / Math.max(1, styleKeys.length)));
+        const frac = 0.1 + (0.58 * (i / Math.max(1, styleKeys.length)));
+        setStyleItem(sk, 'running', 35, '⏳ Gerando cena limpa na Cloudflare AI...');
         if (onProgress) onProgress(frac, `🎨 [${i + 1}/${styleKeys.length}] Gerando imagem limpa ${sk} na Cloudflare AI...`);
+        logCfTerminal(`🎨 [${i + 1}/${styleKeys.length}] Gerando ${sk} (${STYLE_META_LABELS[sk] || sk}) via ${creds.model}...`, 'info');
 
         const imgResp = await window.apiFetch('/api/studio/generate-base-image', {
             method: 'POST',
@@ -751,43 +923,69 @@ async function generateAllVariantsForNiche(nicheSpec, options) {
         });
         const imgData = await imgResp.json();
         if (!imgResp.ok || !imgData.success || !imgData.data_url) {
-            throw new Error(imgData.error || `Falha na Cloudflare (${sk})`);
+            const errMsg = imgData.error || `Falha na Cloudflare (${sk})`;
+            const isQuota = Boolean(
+                imgResp.status === 429 ||
+                imgData.quota_exceeded ||
+                /cota|limite|429|quota|exceeded|neurons/i.test(errMsg)
+            );
+            setStyleItem(sk, 'error', 35, isQuota ? '❌ Cota diária atingida' : `❌ ${errMsg.slice(0, 60)}`);
+            logCfTerminal(`❌ Erro em ${sk}: ${errMsg}`, isQuota ? 'warning' : 'error');
+            const errObj = new Error(errMsg);
+            errObj.isQuotaExceeded = isQuota;
+            throw errObj;
         }
         baseImages[sk] = imgData.data_url;
+        doneStageSteps++;
+        setStyleItem(sk, 'running', 65, `🎨 Cena base pronta (${imgData.model}) — compondo Canvas...`);
+        logCfTerminal(`✅ Cena base ${sk} recebida (${imgData.model}).`, 'success');
+        if (onStage) onStage(doneStageSteps, totalStageSteps, `🎨 Cena ${sk} gerada`);
     }
 
-    if (onProgress) onProgress(0.78, `🖼️ Montando Feed (1..3) e Reels (4..6) em ${languages.map(l => l.toUpperCase()).join(', ')}...`);
-    const composedBlobs = await composeAllFormatsForNiche(blocks, languages, planData.copy_by_lang, baseImages);
+    if (onProgress) onProgress(0.72, `🖼️ Montando Feed (1..3) e Reels (4..6) em ${languages.map(l => l.toUpperCase()).join(', ')}...`);
+    logCfTerminal(`🖼️ Compondo artes 1080×1080 (Feed) e 1080×1920 (Reels) para ${languages.map(l => l.toUpperCase()).join(', ')}...`, 'info');
+    const composedBlobs = await composeAllFormatsForNiche(activeBlocks, languages, planData.copy_by_lang, baseImages, (styleKey) => {
+        setStyleItem(styleKey, autoUpload ? 'running' : 'done', autoUpload ? 82 : 100, autoUpload ? '🖼️ Canvas pronto — aguardando upload' : '✅ Prévia pronta!');
+    });
 
     if (autoUpload) {
-        const totalUploads = blocks.length * languages.length;
+        const totalUploads = activeBlocks.length * languages.length;
         let doneUp = 0;
-        for (const blk of blocks) {
+        for (const blk of activeBlocks) {
+            const prefix = blk === 'Bloco B' ? 'B' : 'A';
             for (const lc of languages) {
                 doneUp++;
-                const frac = 0.84 + (0.16 * (doneUp / Math.max(1, totalUploads)));
+                doneStageSteps++;
+                const frac = 0.8 + (0.2 * (doneUp / Math.max(1, totalUploads)));
                 if (onProgress) onProgress(frac, `☁️ Salvando ${blk} › ${lc.toUpperCase()} (1..6.png) no OneDrive...`);
+                logCfTerminal(`☁️ Enviando ${campFullName} › ${blk} › ${lc.toUpperCase()} (1..6.png) para o OneDrive...`, 'info');
                 await uploadComposedBlockLangToOneDrive(nicheSpec.slug, nicheSpec.dateIso, blk, lc, composedBlobs);
+                if (onStage) onStage(doneStageSteps, totalStageSteps, `☁️ ${blk} ${lc.toUpperCase()} enviado`);
             }
+            ['1', '2', '3'].forEach(n => {
+                setStyleItem(`${prefix}${n}`, 'done', 100, `✅ Salvo no OneDrive (${languages.map(l => l.toUpperCase()).join('/')})`);
+            });
+            logCfTerminal(`✅ ${campFullName} › ${blk} finalizado (pasta '1. Imagens' + 'Português' vazia + idiomas)!`, 'success');
         }
     }
 
-    return { plan: planData, baseImages, composedBlobs };
+    return { skippedAll: false, skippedBlocks, activeBlocks, plan: planData, baseImages, composedBlobs };
 }
 
-async function composeAllFormatsForNiche(blocks, languages, copyByLang, baseImages) {
+async function composeAllFormatsForNiche(blocks, languages, copyByLang, baseImages, onStyleComposed = null) {
     const blobs = {};
     for (const blk of blocks) {
         const prefix = blk === 'Bloco B' ? 'B' : 'A';
-        for (const lc of languages) {
-            const copy = (copyByLang && copyByLang[lc]) || (copyByLang && copyByLang.pt) || {};
-            for (let styleIdx = 1; styleIdx <= 3; styleIdx++) {
-                const styleKey = `${prefix}${styleIdx}`;
-                const baseUrl = baseImages[styleKey];
+        for (let styleIdx = 1; styleIdx <= 3; styleIdx++) {
+            const styleKey = `${prefix}${styleIdx}`;
+            const baseUrl = baseImages[styleKey];
+            for (const lc of languages) {
+                const copy = (copyByLang && copyByLang[lc]) || (copyByLang && copyByLang.pt) || {};
                 // Slot 1..3 Feed (1080x1080) e Slot 4..6 Reels (1080x1920)
                 blobs[`${blk}|${lc}|${styleIdx}`] = await composeCreativeToPngBlob(styleKey, baseUrl, copy, false);
                 blobs[`${blk}|${lc}|${styleIdx + 3}`] = await composeCreativeToPngBlob(styleKey, baseUrl, copy, true);
             }
+            if (typeof onStyleComposed === 'function') onStyleComposed(styleKey);
         }
     }
     return blobs;
@@ -843,10 +1041,13 @@ async function runCreativeFactorySingle(customNicheSpec = null) {
     const blocks = getSelectedBlocksFromUI();
     const languages = getCfSelectedLanguages();
     const autoUpload = Boolean(document.getElementById('cf-auto-upload-check')?.checked);
+    const skipExisting = Boolean(document.getElementById('cf-skip-existing-check')?.checked);
 
     cfFactoryState.running = true;
     cfFactoryState.stopRequested = false;
     toggleCfButtonsState(true);
+    setCfTerminalLiveStatus(`Gerando ${nicheSpec.slug}...`);
+    logCfTerminal(`🚀 Iniciando geração de criativos para ${nicheSpec.slug} (${blocks.join(' + ')} • ${languages.map(l => l.toUpperCase()).join(', ')})...`, 'info');
 
     try {
         const res = await generateAllVariantsForNiche(nicheSpec, {
@@ -854,9 +1055,17 @@ async function runCreativeFactorySingle(customNicheSpec = null) {
             languages,
             creds,
             autoUpload,
+            skipExisting,
             onProgress: (frac, msg) => setCfFactoryProgress(frac * 100, msg),
         });
 
+        if (res.skippedAll) {
+            setCfFactoryProgress(100, `⏭️ ${nicheSpec.slug}: todos os blocos selecionados já estavam prontos no OneDrive.`);
+            setCfTerminalLiveStatus('Concluído (já pronto)');
+            return;
+        }
+
+        const generatedBlocks = res.activeBlocks || blocks;
         cfFactoryState.preview = {
             slug: nicheSpec.slug,
             title: nicheSpec.title,
@@ -864,16 +1073,17 @@ async function runCreativeFactorySingle(customNicheSpec = null) {
             plan: res.plan,
             baseImages: res.baseImages,
             activeLang: languages[0] || 'pt',
-            activeBlock: blocks[0] || 'Bloco A',
+            activeBlock: generatedBlocks[0] || 'Bloco A',
             composedBlobs: res.composedBlobs,
         };
 
         setCfFactoryProgress(
             100,
             autoUpload
-                ? `✅ ${nicheSpec.slug} concluído e salvo no OneDrive (${blocks.length * languages.length * 6} imagens)!`
+                ? `✅ ${nicheSpec.slug} concluído e salvo no OneDrive (${generatedBlocks.length * languages.length * 6} imagens)!`
                 : `✅ Prévia pronta! Revise abaixo e clique em "☁️ Salvar no OneDrive".`
         );
+        setCfTerminalLiveStatus('Concluído');
         renderCfPreviewGrid();
 
         if (autoUpload && typeof loadStudioCampaigns === 'function') {
@@ -881,7 +1091,10 @@ async function runCreativeFactorySingle(customNicheSpec = null) {
         }
     } catch (err) {
         setCfFactoryProgress(0, `❌ ${err.message}`);
-        alert(`Erro ao gerar criativos: ${err.message}`);
+        setCfTerminalLiveStatus(err.isQuotaExceeded ? 'Cota diária atingida' : 'Erro');
+        alert(err.isQuotaExceeded
+            ? `Cota diária da Cloudflare Workers AI atingida (10k Neurons/dia). O que já foi concluído foi salvo no OneDrive. Retome após as 21:00 (BRT) — o sistema pula automaticamente o que já está pronto!\n\nDetalhe: ${err.message}`
+            : `Erro ao gerar criativos: ${err.message}`);
     } finally {
         cfFactoryState.running = false;
         toggleCfButtonsState(false);
@@ -903,19 +1116,34 @@ async function runCreativeFactoryWeeklyBatch() {
 
     const blocks = getSelectedBlocksFromUI();
     const languages = getCfSelectedLanguages();
+    const skipExisting = Boolean(document.getElementById('cf-skip-existing-check')?.checked);
 
     cfFactoryState.running = true;
     cfFactoryState.stopRequested = false;
     toggleCfButtonsState(true);
+    setCfTerminalLiveStatus(`Lote Semana (0/${targets.length})`);
+    logCfTerminal(`🚀 Lote da Semana iniciado: ${targets.length} nicho(s) • Blocos: ${blocks.join(' + ')} • Modelo: ${creds.model} • Pular prontos: ${skipExisting ? 'SIM' : 'NÃO'}.`, 'info');
 
     let ok = 0;
+    let skippedCnt = 0;
     let errCnt = 0;
+    let quotaStopped = false;
     try {
         for (let i = 0; i < targets.length; i++) {
-            if (cfFactoryState.stopRequested) break;
+            if (cfFactoryState.stopRequested) {
+                logCfTerminal('⏹️ Lote interrompido manualmente pelo usuário.', 'warning');
+                break;
+            }
             const item = targets[i];
             const basePct = (i / targets.length);
             const span = (1 / targets.length);
+            setCfTerminalLiveStatus(`Nicho ${i + 1}/${targets.length}: ${item.slug}`);
+
+            item.imgStatus = 'running';
+            item.imgProgressTotal = 1;
+            item.imgProgressDone = 0;
+            item.imgProgressLabel = 'Verificando OneDrive...';
+            if (typeof renderWeeklyPdfPreview === 'function') renderWeeklyPdfPreview();
 
             try {
                 const res = await generateAllVariantsForNiche(item, {
@@ -923,32 +1151,66 @@ async function runCreativeFactoryWeeklyBatch() {
                     languages,
                     creds,
                     autoUpload: true,
+                    skipExisting,
+                    onStage: (done, total, lbl) => {
+                        item.imgProgressDone = done;
+                        item.imgProgressTotal = Math.max(1, total);
+                        item.imgProgressLabel = lbl;
+                        if (typeof renderWeeklyPdfPreview === 'function') renderWeeklyPdfPreview();
+                    },
                     onProgress: (frac, msg) => {
                         setCfFactoryProgress((basePct + frac * span) * 100, `[Nicho ${i + 1}/${targets.length}] ${msg}`);
                     },
                 });
-                ok++;
-                cfFactoryState.preview = {
-                    slug: item.slug,
-                    title: item.title,
-                    dateIso: item.dateIso,
-                    plan: res.plan,
-                    baseImages: res.baseImages,
-                    activeLang: languages[0] || 'pt',
-                    activeBlock: blocks[0] || 'Bloco A',
-                    composedBlobs: res.composedBlobs,
-                };
-                renderCfPreviewGrid();
+
+                if (res.skippedAll) {
+                    skippedCnt++;
+                    item.imgStatus = 'skipped';
+                    item.imgProgressDone = 1;
+                    item.imgProgressTotal = 1;
+                    item.imgProgressLabel = `⏭️ Já completo no OneDrive (${(res.skippedBlocks || blocks).join(' + ')})`;
+                } else {
+                    ok++;
+                    item.imgStatus = 'done';
+                    item.imgProgressDone = item.imgProgressTotal;
+                    item.imgProgressLabel = `✅ Imagens salvas (${(res.activeBlocks || blocks).join(' + ')})`;
+                    cfFactoryState.preview = {
+                        slug: item.slug,
+                        title: item.title,
+                        dateIso: item.dateIso,
+                        plan: res.plan,
+                        baseImages: res.baseImages,
+                        activeLang: languages[0] || 'pt',
+                        activeBlock: (res.activeBlocks && res.activeBlocks[0]) || blocks[0] || 'Bloco A',
+                        composedBlobs: res.composedBlobs,
+                    };
+                    renderCfPreviewGrid();
+                }
+                if (typeof saveWeeklyPackToStorage === 'function') saveWeeklyPackToStorage();
+                if (typeof renderWeeklyPdfPreview === 'function') renderWeeklyPdfPreview();
             } catch (err) {
                 errCnt++;
+                item.imgStatus = 'error';
+                item.imgProgressLabel = err.isQuotaExceeded ? '⏸️ Cota diária Cloudflare atingida' : `❌ ${err.message}`;
+                if (typeof renderWeeklyPdfPreview === 'function') renderWeeklyPdfPreview();
                 console.warn(`Erro no nicho ${item.slug}:`, err);
+                if (err.isQuotaExceeded) {
+                    quotaStopped = true;
+                    logCfTerminal(
+                        `⏸️ Cota diária da Cloudflare (10k Neurons/dia) atingida! ${ok} nicho(s) gerados hoje + ${skippedCnt} já estavam prontos no OneDrive. Rode novamente após as 21:00 (BRT) — o restante continuará de onde parou!`,
+                        'warning'
+                    );
+                    break;
+                }
             }
         }
 
-        setCfFactoryProgress(
-            100,
-            `🎉 Semana concluída: ${ok} nicho(s) salvos no OneDrive${errCnt ? ` • ⚠️ ${errCnt} com erro` : ''}.`
-        );
+        const summaryText = quotaStopped
+            ? `⏸️ Pausa automática por cota diária: ${ok} gerado(s), ${skippedCnt} já pronto(s). Retome após 21:00 BRT para finalizar o restante.`
+            : `🎉 Semana concluída: ${ok} gerado(s)${skippedCnt ? ` • ⏭️ ${skippedCnt} já pronto(s)` : ''}${errCnt ? ` • ⚠️ ${errCnt} erro(s)` : ''}.`;
+        setCfFactoryProgress(quotaStopped ? Math.round(((ok + skippedCnt) / targets.length) * 100) : 100, summaryText);
+        setCfTerminalLiveStatus(quotaStopped ? 'Pausado (cota diária)' : 'Concluído');
+        logCfTerminal(summaryText, quotaStopped ? 'warning' : 'success');
         if (typeof loadStudioCampaigns === 'function') await loadStudioCampaigns();
     } finally {
         cfFactoryState.running = false;
@@ -1145,7 +1407,12 @@ window.stopCreativeFactoryBatch = stopCreativeFactoryBatch;
 window.regenerateSingleCfBaseStyle = regenerateSingleCfBaseStyle;
 window.uploadCurrentPreviewToOneDrive = uploadCurrentPreviewToOneDrive;
 window.setCfPreviewFilter = setCfPreviewFilter;
+window.clearCfLog = clearCfLog;
+window.logCfTerminal = logCfTerminal;
 window.twodCreativePdfParser = {
     parseCreativePromptPdfPagesData,
     extractPromptCardText,
+};
+window.twodCreativeAuditHelper = {
+    auditAndFilterPendingBlocks,
 };
