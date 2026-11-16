@@ -1748,6 +1748,7 @@ def generate_audios_to_onedrive_cloud(
     tok,
     find_work_ids_fn,
     pretranslated_map=None,
+    audio_folder_id="",
 ):
     """Traduz locução PT-BR -> idiomas, gera voz natural via Gemini TTS, converte p/ MP3 e salva no OneDrive."""
     folder_name = format_campaign_folder_name(campaign_name, date_str)
@@ -1764,11 +1765,14 @@ def generate_audios_to_onedrive_cloud(
         langs = ["pt", "es", "en"]
     pre_map = {str(k).strip().lower(): str(v).strip() for k, v in (pretranslated_map or {}).items() if v}
 
-    _, audios_root_id, _ = find_work_ids_fn(tok)
-    if not audios_root_id:
-        raise RuntimeError("Pasta 'Arquivos de Áudio' não encontrada no OneDrive.")
-
-    aud_folder = graph_ensure_folder(audios_root_id, folder_name, tok)
+    resolved_folder_id = str(audio_folder_id or "").strip()
+    if resolved_folder_id:
+        aud_folder = {"id": resolved_folder_id, "name": folder_name}
+    else:
+        _, audios_root_id, _ = find_work_ids_fn(tok)
+        if not audios_root_id:
+            raise RuntimeError("Pasta 'Arquivos de Áudio' não encontrada no OneDrive.")
+        aud_folder = graph_ensure_folder(audios_root_id, folder_name, tok)
     niche_slug = extract_clean_niche_slug(folder_name)
 
     generated = []
@@ -1842,6 +1846,7 @@ def generate_audios_to_onedrive_cloud(
             "success": len(generated) > 0,
             "campaign_name": folder_name,
             "audio_folder": aud_folder["name"],
+            "audio_folder_id": aud_folder["id"],
             "generated": generated,
             "errors": errors,
         }

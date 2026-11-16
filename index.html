@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>TwoD Hub — Central de Automações</title>
-    <link rel="stylesheet" href="styles.css?v=2.7">
+    <link rel="stylesheet" href="styles.css?v=2.8">
 </head>
 <body>
 
@@ -608,6 +608,16 @@
                                     <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:10px;">
                                         <button type="button" id="btn-studio-tts-generate" class="btn btn-primary btn-sm" onclick="generateStudioAudiosWithAI()">🎙️ Gerar Áudios (.mp3) Direto no OneDrive</button>
                                         <span id="studio-tts-msg" class="text-muted" style="font-size:12px;"></span>
+                                    </div>
+
+                                    <div id="studio-tts-progress-wrap" class="studio-render-progress twod-hidden" style="margin-top:10px;">
+                                        <div class="progress-head">
+                                            <span id="studio-tts-progress-label">Preparando geração de áudios...</span>
+                                            <strong id="studio-tts-progress-pct">0%</strong>
+                                        </div>
+                                        <div class="progress-bar-track">
+                                            <div class="progress-bar-fill" id="studio-tts-progress-fill" style="width:0%;"></div>
+                                        </div>
                                     </div>
 
                                     <div id="studio-tts-results" class="studio-tts-results twod-hidden"></div>
@@ -1689,8 +1699,8 @@
         </div>
     </div>
 
-    <script src="app.js?v=8.9"></script>
-    <script src="studio.js?v=1.4"></script>
+    <script src="app.js?v=9.0"></script>
+    <script src="studio.js?v=1.5"></script>
     <script src="campaign_builder.js?v=1.7"></script>
 </body>
 </html>

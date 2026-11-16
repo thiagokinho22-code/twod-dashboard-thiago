@@ -691,6 +691,17 @@ const tabTitles = {
 const PANEL_CHANGELOG = [
     {
         date: '16/11/2026',
+        type: 'feat',
+        badge: '📊 Progresso Ao Vivo',
+        title: 'Barrinha de progresso individual por áudio (Studio + Semana)',
+        summary: 'Acompanhamento em tempo real de cada idioma/arquivo (.mp3) sendo gerado e salvo no OneDrive.',
+        highlights: [
+            'Barra de progresso no Studio TTS + fila ao vivo (🕒 na fila, ⏳ gerando, ✅ player pronto).',
+            'Mini barra de progresso em cada card da semana + contador global áudio por áudio (ex.: 14/30).'
+        ]
+    },
+    {
+        date: '16/11/2026',
         type: 'fix',
         badge: '🌐 Tradução & TTS',
         title: 'Tradução nativa via Gemini API nos áudios ES / EN / Europa',

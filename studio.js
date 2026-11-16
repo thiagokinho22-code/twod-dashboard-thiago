@@ -606,8 +606,37 @@ async function buildBrowserPretranslations(scriptPt, langs) {
     return out;
 }
 
-async function requestGenerateAudios({ campaign, date, scriptPt, languages, voice, style, geminiApiKey }) {
-    const translations = await buildBrowserPretranslations(scriptPt, languages);
+const STUDIO_LANG_LABELS = {
+    pt: 'Português',
+    es: 'Espanhol',
+    en: 'Inglês',
+    fr: 'Francês',
+    it: 'Italiano',
+    de: 'Alemão'
+};
+
+function buildAudioSlotFilename(campaign, code) {
+    const clean = String(campaign || '')
+        .replace(/\s+\d{1,2}[.\-_]\d{1,2}(?:[.\-_]\d{2,4})?$/, '')
+        .replace(/[\\/:*?"<>|\s]+/g, '')
+        .trim() || 'Nicho';
+    return `${clean}_${String(code || '').toLowerCase()}.mp3`;
+}
+
+async function requestGenerateAudios({
+    campaign,
+    date,
+    scriptPt,
+    languages,
+    voice,
+    style,
+    geminiApiKey,
+    preTranslations = null,
+    audioFolderId = ''
+}) {
+    const translations = preTranslations !== null
+        ? preTranslations
+        : await buildBrowserPretranslations(scriptPt, languages);
     const resp = await window.apiFetch('/api/studio/generate-audios', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -619,6 +648,7 @@ async function requestGenerateAudios({ campaign, date, scriptPt, languages, voic
             voice,
             style,
             translations,
+            audio_folder_id: audioFolderId || undefined,
             gemini_api_key: geminiApiKey
         })
     });
@@ -627,6 +657,190 @@ async function requestGenerateAudios({ campaign, date, scriptPt, languages, voic
         throw new Error(data.error || `Erro HTTP ${resp.status}`);
     }
     return data;
+}
+
+async function generateAudiosSequentiallyWithProgress({
+    campaign,
+    date,
+    scriptPt,
+    languages,
+    voice,
+    style,
+    geminiApiKey,
+    initialAudioFolderId = '',
+    shouldStop = null,
+    onStep = null
+}) {
+    const langs = (Array.isArray(languages) && languages.length ? languages : ['pt', 'es', 'en'])
+        .map(l => String(l || '').trim().toLowerCase())
+        .filter(Boolean);
+
+    const slots = langs.map(code => ({
+        lang_code: code,
+        lang_name: STUDIO_LANG_LABELS[code] || code.toUpperCase(),
+        filename: buildAudioSlotFilename(campaign, code),
+        status: 'pending',
+        error: ''
+    }));
+    const generated = [];
+    const errors = [];
+    let audioFolderId = initialAudioFolderId || '';
+    let campaignName = '';
+
+    if (typeof onStep === 'function') {
+        onStep({
+            index: 0,
+            total: langs.length,
+            completed: 0,
+            langCode: langs[0] || '',
+            phase: 'init',
+            slots,
+            generated,
+            errors
+        });
+    }
+
+    const preTranslations = await buildBrowserPretranslations(scriptPt, langs);
+
+    for (let i = 0; i < langs.length; i++) {
+        if (typeof shouldStop === 'function' && shouldStop()) break;
+        const code = langs[i];
+        const slot = slots[i];
+        slot.status = 'running';
+
+        if (typeof onStep === 'function') {
+            onStep({
+                index: i,
+                total: langs.length,
+                completed: generated.length + errors.length,
+                langCode: code,
+                phase: 'running',
+                slot,
+                slots,
+                generated,
+                errors
+            });
+        }
+
+        try {
+            const perLangPre = (code !== 'pt' && preTranslations[code]) ? { [code]: preTranslations[code] } : {};
+            const data = await requestGenerateAudios({
+                campaign,
+                date,
+                scriptPt,
+                languages: [code],
+                voice,
+                style,
+                geminiApiKey,
+                preTranslations: perLangPre,
+                audioFolderId
+            });
+
+            if (data.audio_folder_id) audioFolderId = data.audio_folder_id;
+            if (data.campaign_name) campaignName = data.campaign_name;
+
+            const genOne = Array.isArray(data.generated) && data.generated[0];
+            const errOne = Array.isArray(data.errors) && data.errors[0];
+            if (genOne) {
+                Object.assign(slot, genOne, { status: 'done', error: '' });
+                generated.push(genOne);
+            } else {
+                const msg = (errOne && errOne.error) || 'Falha ao gerar áudio.';
+                slot.status = 'error';
+                slot.error = msg;
+                errors.push({ lang_code: code, lang_name: slot.lang_name, error: msg });
+            }
+        } catch (err) {
+            const msg = String(err.message || err);
+            slot.status = 'error';
+            slot.error = msg;
+            errors.push({ lang_code: code, lang_name: slot.lang_name, error: msg });
+        }
+
+        if (typeof onStep === 'function') {
+            onStep({
+                index: i,
+                total: langs.length,
+                completed: generated.length + errors.length,
+                langCode: code,
+                phase: slot.status,
+                slot,
+                slots,
+                generated,
+                errors
+            });
+        }
+
+        if (i < langs.length - 1 && !(typeof shouldStop === 'function' && shouldStop())) {
+            await new Promise(r => setTimeout(r, 650));
+        }
+    }
+
+    return { generated, errors, audioFolderId, campaignName, slots };
+}
+
+function renderStudioTtsResultSlots(resEl, slots) {
+    if (!resEl) return;
+    if (!Array.isArray(slots) || slots.length === 0) {
+        resEl.innerHTML = '';
+        resEl.classList.add('twod-hidden');
+        return;
+    }
+
+    const baseUrl = (typeof API_BASE_URL !== 'undefined' ? API_BASE_URL : (window.API_BASE_URL || ''));
+    resEl.innerHTML = slots.map(slot => {
+        if (slot.status === 'done') {
+            const rawUrl = slot.url ? (slot.url.startsWith('http') ? slot.url : `${baseUrl}${slot.url}`) : '';
+            const mediaUrl = (rawUrl && typeof window.withMediaAuth === 'function')
+                ? window.withMediaAuth(rawUrl)
+                : rawUrl;
+            const audioTag = mediaUrl
+                ? `<audio controls preload="none" src="${_studioEsc(mediaUrl)}"></audio>`
+                : '';
+            const trPreview = slot.translated_text
+                ? `<div class="text-muted" style="font-size:11px; margin-top:2px;">“${_studioEsc(slot.translated_text)}”</div>`
+                : '';
+            return `
+                <div class="studio-tts-item">
+                    <div style="flex:1; min-width:220px;">
+                        <strong>✅ ${_studioEsc(slot.filename)}</strong>
+                        <span class="text-muted"> (${_studioEsc(slot.lang_name)} • ${slot.duration}s ➔ vídeo ${slot.duration_ceil}s)</span>
+                        ${trPreview}
+                    </div>
+                    ${audioTag}
+                </div>
+            `;
+        }
+        if (slot.status === 'error') {
+            return `
+                <div class="studio-tts-item is-error">
+                    <div style="flex:1; min-width:220px;">
+                        <strong>❌ ${_studioEsc(slot.filename)} (${_studioEsc(slot.lang_name)})</strong>
+                        <div style="font-size:11.5px; color:#fca5a5; margin-top:2px;">${_studioEsc(slot.error || 'Erro ao gerar')}</div>
+                    </div>
+                </div>
+            `;
+        }
+        if (slot.status === 'running') {
+            return `
+                <div class="studio-tts-item is-running">
+                    <div>
+                        <strong>⏳ ${_studioEsc(slot.filename)}</strong>
+                        <span class="text-muted"> (${_studioEsc(slot.lang_name)}) — Traduzindo e gerando voz no OneDrive...</span>
+                    </div>
+                </div>
+            `;
+        }
+        return `
+            <div class="studio-tts-item is-pending">
+                <div>
+                    <strong>🕒 ${_studioEsc(slot.filename)}</strong>
+                    <span class="text-muted"> (${_studioEsc(slot.lang_name)}) — Na fila...</span>
+                </div>
+            </div>
+        `;
+    }).join('');
+    resEl.classList.remove('twod-hidden');
 }
 
 async function generateStudioAudiosWithAI() {
@@ -638,6 +852,10 @@ async function generateStudioAudiosWithAI() {
     const msgEl = document.getElementById('studio-tts-msg');
     const resEl = document.getElementById('studio-tts-results');
     const btnEl = document.getElementById('btn-studio-tts-generate');
+    const progWrap = document.getElementById('studio-tts-progress-wrap');
+    const progLabel = document.getElementById('studio-tts-progress-label');
+    const progPct = document.getElementById('studio-tts-progress-pct');
+    const progFill = document.getElementById('studio-tts-progress-fill');
 
     const scriptPt = (scriptEl?.value || '').trim();
     const voice = (voiceEl?.value || 'Kore').trim();
@@ -669,36 +887,56 @@ async function generateStudioAudiosWithAI() {
 
     if (btnEl) {
         btnEl.disabled = true;
-        btnEl.textContent = `⏳ Gerando ${langs.length} áudio(s) no OneDrive...`;
+        btnEl.textContent = `⏳ Gerando ${langs.length} áudio(s)...`;
     }
     if (msgEl) {
         msgEl.classList.remove('twod-hidden');
         msgEl.style.color = '#93c5fd';
-        msgEl.textContent = `⏳ Traduzindo roteiro, sintetizando vozes (Gemini TTS) e salvando MP3 direto em Arquivos de Áudio/${fullName || niche}...`;
+        msgEl.textContent = `⏳ Gerando áudios direto em Arquivos de Áudio/${fullName || niche}...`;
     }
-    if (resEl) {
-        resEl.innerHTML = '';
-        resEl.classList.add('twod-hidden');
-    }
+    if (progWrap) progWrap.classList.remove('twod-hidden');
 
     try {
-        const data = await requestGenerateAudios({
+        const result = await generateAudiosSequentiallyWithProgress({
             campaign: niche,
             date: dateIso,
             scriptPt,
             languages: langs,
             voice,
             style,
-            geminiApiKey: inlineKey
+            geminiApiKey: inlineKey,
+            onStep: ({ index, total, completed, phase, slot, slots }) => {
+                renderStudioTtsResultSlots(resEl, slots);
+                const pct = Math.round((completed / Math.max(1, total)) * 100);
+                if (progPct) progPct.textContent = `${pct}%`;
+                if (progFill) progFill.style.width = `${pct}%`;
+                if (progLabel) {
+                    if (phase === 'init') {
+                        progLabel.textContent = `⏳ Preparando ${total} áudio(s)...`;
+                    } else if (phase === 'running' && slot) {
+                        progLabel.textContent = `⏳ [${index + 1}/${total}] Gerando ${slot.filename} (${slot.lang_name})...`;
+                    } else if (slot) {
+                        const icon = phase === 'done' ? '✅' : '⚠️';
+                        progLabel.textContent = `${icon} [${completed}/${total}] ${slot.filename} concluído`;
+                    }
+                }
+            }
         });
 
         if (inlineKey && keyInlineEl) {
             keyInlineEl.value = '';
         }
 
-        const generated = Array.isArray(data.generated) ? data.generated : [];
-        const errors = Array.isArray(data.errors) ? data.errors : [];
-        const targetCamp = data.campaign_name || fullName || niche;
+        const { generated, errors, campaignName } = result;
+        const targetCamp = campaignName || fullName || niche;
+
+        if (progPct) progPct.textContent = '100%';
+        if (progFill) progFill.style.width = '100%';
+        if (progLabel) {
+            progLabel.textContent = errors.length > 0
+                ? `⚠️ ${generated.length}/${langs.length} salvos, ${errors.length} erro(s)`
+                : `✅ ${generated.length}/${langs.length} áudios salvos no OneDrive`;
+        }
 
         if (msgEl) {
             msgEl.style.color = errors.length > 0 ? '#fbbf24' : '#34d399';
@@ -707,42 +945,7 @@ async function generateStudioAudiosWithAI() {
                 : `✅ ${generated.length} áudio(s) MP3 gerados e salvos direto no OneDrive em Arquivos de Áudio/${targetCamp}!`;
         }
 
-        if (resEl) {
-            const baseUrl = (typeof API_BASE_URL !== 'undefined' ? API_BASE_URL : (window.API_BASE_URL || ''));
-            const itemsHtml = generated.map(g => {
-                const rawUrl = g.url ? (g.url.startsWith('http') ? g.url : `${baseUrl}${g.url}`) : '';
-                const mediaUrl = (rawUrl && typeof window.withMediaAuth === 'function')
-                    ? window.withMediaAuth(rawUrl)
-                    : rawUrl;
-                const audioTag = mediaUrl
-                    ? `<audio controls preload="none" src="${_studioEsc(mediaUrl)}"></audio>`
-                    : '';
-                const trPreview = g.translated_text
-                    ? `<div class="text-muted" style="font-size:11px; margin-top:2px;">“${_studioEsc(g.translated_text)}”</div>`
-                    : '';
-                return `
-                    <div class="studio-tts-item">
-                        <div style="flex:1; min-width:220px;">
-                            <strong>✅ ${_studioEsc(g.filename)}</strong>
-                            <span class="text-muted"> (${_studioEsc(g.lang_name)} • ${g.duration}s ➔ vídeo ${g.duration_ceil}s)</span>
-                            ${trPreview}
-                        </div>
-                        ${audioTag}
-                    </div>
-                `;
-            }).join('');
-
-            const errHtml = errors.map(er => `
-                <div class="studio-error-banner">
-                    ❌ <strong>${_studioEsc(er.lang_name || er.lang_code)}:</strong> ${_studioEsc(er.error)}
-                </div>
-            `).join('');
-
-            resEl.innerHTML = itemsHtml + errHtml;
-            resEl.classList.toggle('twod-hidden', !itemsHtml && !errHtml);
-        }
-
-        if (targetCamp) {
+        if (targetCamp && generated.length > 0) {
             studioState.selectedSet.add(targetCamp);
             await loadStudioCampaigns();
             await auditStudioCampaigns([targetCamp]);
@@ -759,7 +962,7 @@ async function generateStudioAudiosWithAI() {
     } finally {
         if (btnEl) {
             btnEl.disabled = false;
-            btnEl.textContent = '🎙️ Gerar Áudios com IA e Salvar MP3 no OneDrive';
+            btnEl.textContent = '🎙️ Gerar Áudios (.mp3) Direto no OneDrive';
         }
     }
 }
@@ -1343,6 +1546,7 @@ function renderWeeklyPdfPreview() {
         infoEl.textContent = `✅ ${weeklyPackState.fileName} (${weeklyPackState.items.length} nichos carregados)`;
     }
 
+    const prevScroll = listEl.scrollTop;
     const baseUrl = (typeof API_BASE_URL !== 'undefined' ? API_BASE_URL : (window.API_BASE_URL || ''));
 
     listEl.innerHTML = weeklyPackState.items.map((item, idx) => {
@@ -1351,20 +1555,65 @@ function renderWeeklyPdfPreview() {
         const badgeCls = item.status === 'done' ? 'ok' : (item.status === 'error' ? 'warn' : 'muted');
         const statusIcon = item.status === 'done' ? '✅' : (item.status === 'running' ? '⏳' : (item.status === 'error' ? '⚠️' : '•'));
 
-        const audiosHtml = Array.isArray(item.generatedAudios) && item.generatedAudios.length > 0
-            ? `<div class="weekly-niche-audios">${item.generatedAudios.map(g => {
-                const rawUrl = g.url ? (g.url.startsWith('http') ? g.url : `${baseUrl}${g.url}`) : '';
-                const mediaUrl = (rawUrl && typeof window.withMediaAuth === 'function') ? window.withMediaAuth(rawUrl) : rawUrl;
-                const trShort = g.translated_text
-                    ? `<div class="text-muted" style="font-size:10.5px; margin-top:2px;">“${_studioEsc(g.translated_text.slice(0, 120))}${g.translated_text.length > 120 ? '...' : ''}”</div>`
-                    : '';
-                return `
-                    <div class="weekly-niche-audio-pill">
-                        <div style="flex:1; min-width:140px;">
-                            <span><strong>${_studioEsc((g.lang_code || '').toUpperCase())}</strong> • ${_studioEsc(g.filename || '')} (${g.duration || '?'}s)</span>
-                            ${trShort}
+        const slots = Array.isArray(item.audioSlots) && item.audioSlots.length > 0
+            ? item.audioSlots
+            : (Array.isArray(item.generatedAudios)
+                ? item.generatedAudios.map(g => ({ ...g, status: 'done' }))
+                : []);
+
+        const progTotal = Number(item.progressTotal) || (item.status === 'running' ? slots.length : 0);
+        const progDone = Number(item.progressDone) || slots.filter(s => s.status === 'done' || s.status === 'error').length;
+        const progPct = progTotal > 0 ? Math.min(100, Math.round((progDone / progTotal) * 100)) : 0;
+        const cardProgressHtml = (progTotal > 0 && (item.status === 'running' || item.status === 'done' || item.status === 'error'))
+            ? `
+                <div class="weekly-niche-progress">
+                    <div class="weekly-niche-progress-head">
+                        <span>${_studioEsc(item.progressLabel || `${progDone}/${progTotal} áudios`)}</span>
+                        <strong>${progPct}%</strong>
+                    </div>
+                    <div class="weekly-niche-progress-track">
+                        <div class="weekly-niche-progress-fill" style="width:${progPct}%;"></div>
+                    </div>
+                </div>
+            `
+            : '';
+
+        const audiosHtml = slots.length > 0
+            ? `<div class="weekly-niche-audios">${slots.map(g => {
+                const codeUp = (g.lang_code || '').toUpperCase();
+                if (g.status === 'done' || !g.status) {
+                    const rawUrl = g.url ? (g.url.startsWith('http') ? g.url : `${baseUrl}${g.url}`) : '';
+                    const mediaUrl = (rawUrl && typeof window.withMediaAuth === 'function') ? window.withMediaAuth(rawUrl) : rawUrl;
+                    const trShort = g.translated_text
+                        ? `<div class="text-muted" style="font-size:10.5px; margin-top:2px;">“${_studioEsc(g.translated_text.slice(0, 120))}${g.translated_text.length > 120 ? '...' : ''}”</div>`
+                        : '';
+                    return `
+                        <div class="weekly-niche-audio-pill">
+                            <div style="flex:1; min-width:140px;">
+                                <span>✅ <strong>${_studioEsc(codeUp)}</strong> • ${_studioEsc(g.filename || '')} (${g.duration || '?'}s)</span>
+                                ${trShort}
+                            </div>
+                            ${mediaUrl ? `<audio controls preload="none" src="${_studioEsc(mediaUrl)}"></audio>` : ''}
                         </div>
-                        ${mediaUrl ? `<audio controls preload="none" src="${_studioEsc(mediaUrl)}"></audio>` : ''}
+                    `;
+                }
+                if (g.status === 'running') {
+                    return `
+                        <div class="weekly-niche-audio-pill is-running">
+                            <span>⏳ <strong>${_studioEsc(codeUp)}</strong> • ${_studioEsc(g.filename || '')} — Gerando no OneDrive...</span>
+                        </div>
+                    `;
+                }
+                if (g.status === 'error') {
+                    return `
+                        <div class="weekly-niche-audio-pill is-error">
+                            <span>❌ <strong>${_studioEsc(codeUp)}</strong> • ${_studioEsc(g.error || 'Erro ao gerar')}</span>
+                        </div>
+                    `;
+                }
+                return `
+                    <div class="weekly-niche-audio-pill is-pending">
+                        <span>🕒 <strong>${_studioEsc(codeUp)}</strong> • ${_studioEsc(g.filename || '')} — Na fila</span>
                     </div>
                 `;
             }).join('')}</div>`
@@ -1399,6 +1648,7 @@ function renderWeeklyPdfPreview() {
 
                 <textarea class="weekly-niche-script" rows="3" title="Roteiro extraído do áudio (${_studioEsc(item.audioDurationHint)})" onchange="updateWeeklyItemField(${idx}, 'audioScript', this.value)">${_studioEsc(item.audioScript)}</textarea>
 
+                ${cardProgressHtml}
                 ${audiosHtml}
 
                 <div class="weekly-niche-actions">
@@ -1420,16 +1670,21 @@ function renderWeeklyPdfPreview() {
             </div>
         `;
     }).join('');
+    listEl.scrollTop = prevScroll;
 }
 
 async function processSingleWeeklyItem(item, options) {
-    const { createFolders, languages, voice, style, geminiApiKey } = options;
+    const { createFolders, languages, voice, style, geminiApiKey, onAudioProgress, shouldStop } = options;
 
     item.status = 'running';
-    item.statusDetail = createFolders ? 'Criando pastas...' : 'Gerando áudios...';
+    item.statusDetail = createFolders ? 'Criando pastas...' : 'Preparando...';
+    item.progressTotal = languages.length;
+    item.progressDone = 0;
+    item.progressLabel = createFolders ? 'Criando pastas no OneDrive...' : 'Iniciando...';
     renderWeeklyPdfPreview();
 
     try {
+        let audioFolderId = '';
         if (createFolders) {
             const folderResp = await window.apiFetch('/api/studio/create-campaign', {
                 method: 'POST',
@@ -1444,24 +1699,46 @@ async function processSingleWeeklyItem(item, options) {
             if (!folderResp.ok || !folderData.success) {
                 throw new Error(folderData.error || 'Erro ao criar pastas no OneDrive');
             }
+            if (folderData.audio_folder_id) audioFolderId = folderData.audio_folder_id;
         }
 
-        item.statusDetail = `Gerando (${languages.map(l => l.toUpperCase()).join(', ')})...`;
-        renderWeeklyPdfPreview();
-
-        const ttsData = await requestGenerateAudios({
+        const seqResult = await generateAudiosSequentiallyWithProgress({
             campaign: item.slug || item.title,
             date: item.dateIso,
             scriptPt: item.audioScript,
             languages,
             voice,
             style,
-            geminiApiKey
+            geminiApiKey,
+            initialAudioFolderId: audioFolderId,
+            shouldStop,
+            onStep: ({ index, total, completed, phase, slot, slots }) => {
+                item.audioSlots = slots.map(s => ({ ...s }));
+                item.progressTotal = total;
+                item.progressDone = completed;
+                if (phase === 'running' && slot) {
+                    item.statusDetail = `Áudio ${index + 1}/${total} (${(slot.lang_code || '').toUpperCase()})`;
+                    item.progressLabel = `⏳ Gerando ${slot.filename}...`;
+                } else if (phase === 'init') {
+                    item.statusDetail = `0/${total} áudios`;
+                    item.progressLabel = `Preparando ${total} áudio(s)...`;
+                } else if (slot) {
+                    item.statusDetail = `${completed}/${total} áudios`;
+                    item.progressLabel = `${phase === 'done' ? '✅' : '⚠️'} ${completed}/${total} concluídos`;
+                }
+                if (typeof onAudioProgress === 'function') {
+                    onAudioProgress({ item, index, total, completed, phase, slot });
+                }
+                renderWeeklyPdfPreview();
+            }
         });
 
-        const generated = Array.isArray(ttsData.generated) ? ttsData.generated : [];
-        const errors = Array.isArray(ttsData.errors) ? ttsData.errors : [];
+        const generated = Array.isArray(seqResult.generated) ? seqResult.generated : [];
+        const errors = Array.isArray(seqResult.errors) ? seqResult.errors : [];
         item.generatedAudios = generated;
+        item.audioSlots = seqResult.slots || [];
+        item.progressTotal = languages.length;
+        item.progressDone = generated.length + errors.length;
         if (errors.length > 0 && generated.length === 0) {
             throw new Error(errors.map(e => `${e.lang_code}: ${e.error}`).join('; '));
         }
@@ -1469,9 +1746,13 @@ async function processSingleWeeklyItem(item, options) {
         item.statusDetail = errors.length > 0
             ? `${generated.length} OK, ${errors.length} erro(s)`
             : `${generated.length} áudio(s) no OneDrive`;
+        item.progressLabel = errors.length > 0
+            ? `⚠️ ${generated.length}/${languages.length} OK`
+            : `✅ ${generated.length}/${languages.length} áudios salvos`;
     } catch (err) {
         item.status = 'error';
         item.statusDetail = String(err.message || err).slice(0, 70);
+        item.progressLabel = `❌ ${item.statusDetail}`;
     }
 
     saveWeeklyPackToStorage();
@@ -1559,30 +1840,48 @@ async function runWeeklyPdfBatch() {
 
     let okCount = 0;
     let errCount = 0;
+    const totalWeekAudios = targets.length * languages.length;
+    let completedPriorAudios = 0;
 
     try {
         for (let i = 0; i < targets.length; i++) {
             if (weeklyPackState.stopRequested) break;
             const { item } = targets[i];
-            const pct = Math.round((i / targets.length) * 100);
-            if (progLabel) progLabel.textContent = `⏳ Processando ${i + 1}/${targets.length}: ${item.slug} (${item.dayName})...`;
-            if (progPct) progPct.textContent = `${pct}%`;
-            if (progFill) progFill.style.width = `${pct}%`;
-            if (statusEl) statusEl.textContent = `Processando ${i + 1}/${targets.length}...`;
+            const initPct = Math.round((completedPriorAudios / Math.max(1, totalWeekAudios)) * 100);
+            if (progLabel) progLabel.textContent = `⏳ Nicho ${i + 1}/${targets.length}: ${item.slug} (${item.dayName})...`;
+            if (progPct) progPct.textContent = `${initPct}%`;
+            if (progFill) progFill.style.width = `${initPct}%`;
+            if (statusEl) statusEl.textContent = `Áudio ${completedPriorAudios + 1}/${totalWeekAudios} • ${item.slug}...`;
 
             await processSingleWeeklyItem(item, {
                 createFolders,
                 languages,
                 voice,
                 style,
-                geminiApiKey: inlineKey
+                geminiApiKey: inlineKey,
+                shouldStop: () => weeklyPackState.stopRequested,
+                onAudioProgress: ({ completed, phase, slot }) => {
+                    const globalDone = completedPriorAudios + completed;
+                    const gPct = Math.min(100, Math.round((globalDone / Math.max(1, totalWeekAudios)) * 100));
+                    if (progPct) progPct.textContent = `${gPct}%`;
+                    if (progFill) progFill.style.width = `${gPct}%`;
+                    if (phase === 'running' && slot) {
+                        const curNum = Math.min(totalWeekAudios, globalDone + 1);
+                        if (progLabel) progLabel.textContent = `⏳ Áudio ${curNum}/${totalWeekAudios} • ${item.dayName}: ${slot.filename}...`;
+                        if (statusEl) statusEl.textContent = `Áudio ${curNum}/${totalWeekAudios}...`;
+                    } else if (slot && (phase === 'done' || phase === 'error')) {
+                        const icon = phase === 'done' ? '✅' : '⚠️';
+                        if (progLabel) progLabel.textContent = `${icon} Áudio ${globalDone}/${totalWeekAudios} • ${slot.filename}`;
+                    }
+                }
             });
 
+            completedPriorAudios += Number(item.progressDone || languages.length);
             if (item.status === 'done') okCount++;
             else errCount++;
 
             if (i < targets.length - 1 && !weeklyPackState.stopRequested) {
-                await new Promise(r => setTimeout(r, 1500));
+                await new Promise(r => setTimeout(r, 900));
             }
         }
 

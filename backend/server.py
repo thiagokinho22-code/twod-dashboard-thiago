@@ -3231,6 +3231,7 @@ class APIHandler(BaseHTTPRequestHandler):
                 voice = str(payload.get("voice") or "Kore").strip()
                 style = str(payload.get("style") or "").strip()
                 pretranslated = payload.get("translations") if isinstance(payload.get("translations"), dict) else {}
+                audio_folder_id = str(payload.get("audio_folder_id") or "").strip()
                 gemini_key = str(payload.get("gemini_api_key") or "").strip() or load_env_vars().get("GEMINI_API_KEY", "").strip()
 
                 tok, err = get_graph_access_token()
@@ -3242,6 +3243,7 @@ class APIHandler(BaseHTTPRequestHandler):
                     camp, date_str, script_pt, langs, voice, style, gemini_key,
                     _translate_single_text, tok, _find_work_folder_ids,
                     pretranslated_map=pretranslated,
+                    audio_folder_id=audio_folder_id,
                 )
 
                 # Atualiza cache local do OneDrive com os novos MP3s gerados
