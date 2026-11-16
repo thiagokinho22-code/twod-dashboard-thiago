@@ -998,37 +998,55 @@ def upload_standardized_images_cloud(campaign_name, date_str, block_name, lang_c
 
 
 def import_zip_to_onedrive_cloud(campaign_name, date_str, zip_path, tok, find_work_ids_fn):
-    """Descompacta pacote ZIP do GPT/Canva, padroniza 1..6 por Bloco/Idioma e envia ao OneDrive."""
-    folder_name = format_campaign_folder_name(campaign_name, date_str)
-    if not folder_name:
-        raise ValueError("Informe o nome da campanha/nicho.")
+    """
+    Descompacta pacote ZIP do GPT/Canva (suporta múltiplos nichos como 'sexta_13.11.26_blocos_A_B_72_imagens.zip'
+    ou pacote único), cria pastas em Vídeos e Arquivos de Áudio, padroniza 1..6 e envia ao OneDrive.
+    """
     _, audios_root_id, videos_root_id = find_work_ids_fn(tok)
     if not videos_root_id:
         raise RuntimeError("Pasta 'Vídeos' não encontrada no OneDrive.")
 
+    fallback_folder = format_campaign_folder_name(campaign_name, date_str) if (campaign_name or "").strip() else ""
     tmp_dir = tempfile.mkdtemp(prefix="twod_zip_")
     try:
-        grouped_images = {}  # (block_name, folder_label) -> [paths]
-        audio_files = []     # (orig_name, lang_code, tmp_path)
-
         with zipfile.ZipFile(zip_path, "r") as zf:
             infos = [i for i in zf.infolist() if not i.is_dir()]
             clean_items = []
             for i in infos:
                 cname = get_clean_zip_filename(i).replace("\\", "/").strip("/")
-                if not cname or "__MACOSX" in cname or os.path.basename(cname).startswith("._"):
+                if not cname or "__MACOSX" in cname or os.path.basename(cname).startswith("._") or cname.endswith(".DS_Store"):
                     continue
                 parts = [p for p in cname.split("/") if p and p not in (".", "..")]
                 if not parts:
                     continue
                 clean_items.append((i, parts))
 
-            # Se tudo estiver dentro de 1 pasta raiz genérica, descasca a raiz se não for Bloco/Idioma/1. Imagens
-            if clean_items and len({p[0] for _, p in clean_items}) == 1:
-                first = clean_items[0][1][0]
-                if not first.lower().startswith("bloco") and not is_master_images_folder(first) and not identify_language_from_name(first):
-                    clean_items = [(i, p[1:] if len(p) > 1 else p) for i, p in clean_items]
+            if not clean_items:
+                raise ValueError("Arquivo ZIP vazio ou sem arquivos válidos.")
 
+            # Descasca pasta raiz genérica envoltória caso contenha múltiplos nichos dentro (regra do twod_studio.py)
+            top_dirs = {p[0] for _, p in clean_items if len(p) > 1}
+            if len(top_dirs) == 1:
+                only_root = next(iter(top_dirs))
+                sub_firsts = {p[1] for _, p in clean_items if len(p) > 2}
+                is_direct_structure = any(
+                    normalize_folder_key(sf) in ("blocoa", "blocob")
+                    or is_master_images_folder(sf)
+                    or identify_language_from_name(sf) is not None
+                    for sf in sub_firsts
+                )
+                if not is_direct_structure and len(sub_firsts) > 1:
+                    clean_items = [(i, p[1:]) for i, p in clean_items if len(p) > 1]
+
+            def _is_structure_segment(seg):
+                return (
+                    normalize_folder_key(seg) in ("blocoa", "blocob")
+                    or is_master_images_folder(seg)
+                    or identify_language_from_name(seg) is not None
+                )
+
+            # Agrupa por nicho_folder -> {images: {(block, lang): [...]}, audios: [...]}
+            niches_bucket = {}
             for idx, (info, parts) in enumerate(clean_items):
                 filename = parts[-1]
                 low = filename.lower()
@@ -1036,9 +1054,20 @@ def import_zip_to_onedrive_cloud(campaign_name, date_str, zip_path, tok, find_wo
                 with zf.open(info, "r") as src, open(safe_tmp, "wb") as dst:
                     shutil.copyfileobj(src, dst)
 
+                if len(parts) >= 2 and not _is_structure_segment(parts[0]):
+                    niche_folder = format_campaign_folder_name(parts[0])
+                    rel_parts = parts[1:]
+                else:
+                    if not fallback_folder:
+                        raise ValueError("ZIP sem pasta de nicho na raiz. Informe o Nicho e a Data acima.")
+                    niche_folder = fallback_folder
+                    rel_parts = parts
+
+                bucket = niches_bucket.setdefault(niche_folder, {"images": {}, "audios": []})
+
                 if low.endswith(AUDIO_EXTS):
-                    code = identify_language_from_name(filename) or (identify_language_from_name(parts[-2]) if len(parts) >= 2 else None) or "pt"
-                    audio_files.append((filename, code, safe_tmp))
+                    code = identify_language_from_name(filename) or (identify_language_from_name(rel_parts[-2]) if len(rel_parts) >= 2 else None) or "pt"
+                    bucket["audios"].append((filename, code, safe_tmp))
                     continue
 
                 if not low.endswith(IMAGE_EXTS) or not is_image_valid_file(safe_tmp):
@@ -1046,7 +1075,7 @@ def import_zip_to_onedrive_cloud(campaign_name, date_str, zip_path, tok, find_wo
 
                 block_name = ""
                 lang_folder = "1. Imagens"
-                for seg in parts[:-1]:
+                for seg in rel_parts[:-1]:
                     if normalize_folder_key(seg) in ("blocoa", "blocob"):
                         block_name = "Bloco A" if normalize_folder_key(seg) == "blocoa" else "Bloco B"
                     elif is_master_images_folder(seg):
@@ -1056,43 +1085,73 @@ def import_zip_to_onedrive_cloud(campaign_name, date_str, zip_path, tok, find_wo
                         if c:
                             lang_folder = "1. Imagens" if c == "pt" else LANGUAGES_DB[c]["name"]
 
-                # Caso arquivo venha solto na raiz sem subpasta de idioma, tenta detectar pelo próprio nome
-                if lang_folder == "1. Imagens" and len(parts) == 1:
+                if lang_folder == "1. Imagens" and len(rel_parts) == 1:
                     c_file = identify_language_from_name(filename)
                     if c_file and c_file != "pt":
                         lang_folder = LANGUAGES_DB[c_file]["name"]
 
-                grouped_images.setdefault((block_name, lang_folder), []).append((filename, safe_tmp))
+                bucket["images"].setdefault((block_name, lang_folder), []).append((filename, safe_tmp))
 
-        vid_folder = graph_ensure_folder(videos_root_id, folder_name, tok)
-        uploaded_summary = []
+        existing_audio_folders = [c for c in (graph_list_children(audios_root_id, tok) if audios_root_id else []) if "folder" in c]
+        niches_results = []
+        total_images_uploaded = 0
+        total_audios_uploaded = 0
 
-        for (block_name, lang_folder), file_tuples in grouped_images.items():
-            rel = ([block_name] if block_name else []) + [lang_folder]
-            dest_folder = graph_ensure_nested_folder(vid_folder["id"], rel, tok)
-            paths = [p for _, p in file_tuples]
-            sorted_paths = sort_creatives_by_dims(paths)
-            for slot_idx, p in enumerate(sorted_paths, start=1):
-                ext = os.path.splitext(p)[1].lower() or ".png"
-                out_name = f"{slot_idx}{ext}"
-                graph_upload_file(dest_folder["id"], out_name, p, tok)
-            uploaded_summary.append({"folder": "/".join(rel), "count": len(sorted_paths)})
+        for niche_folder, bucket in niches_bucket.items():
+            vid_folder = graph_ensure_folder(videos_root_id, niche_folder, tok)
 
-        uploaded_audios = []
-        if audio_files and audios_root_id:
-            aud_folder = graph_ensure_folder(audios_root_id, folder_name, tok)
-            niche_slug = extract_clean_niche_slug(folder_name)
-            for orig_name, code, p in audio_files:
-                ext = os.path.splitext(orig_name)[1].lower() or ".mp3"
-                out_name = f"{niche_slug}_{code}{ext}"
-                graph_upload_file(aud_folder["id"], out_name, p, tok)
-                uploaded_audios.append(out_name)
+            # Prepara pastas de destino e ordena 1..6 antes do upload paralelo
+            upload_tasks = []
+            folders_summary = []
+            for (block_name, lang_folder), file_tuples in bucket["images"].items():
+                rel = ([block_name] if block_name else []) + [lang_folder]
+                dest_folder = graph_ensure_nested_folder(vid_folder["id"], rel, tok)
+                sorted_paths = sort_creatives_by_dims([p for _, p in file_tuples])
+                for slot_idx, p in enumerate(sorted_paths, start=1):
+                    ext = os.path.splitext(p)[1].lower() or ".png"
+                    upload_tasks.append((dest_folder["id"], f"{slot_idx}{ext}", p))
+                folders_summary.append({"folder": "/".join(rel), "count": len(sorted_paths)})
+                total_images_uploaded += len(sorted_paths)
+
+            if upload_tasks:
+                with ThreadPoolExecutor(max_workers=4) as pool:
+                    list(pool.map(lambda t: graph_upload_file(t[0], t[1], t[2], tok), upload_tasks))
+
+            # Garante pasta correspondente em Arquivos de Áudio (ou casa existente ignorando acentos/caixa)
+            aud_folder_obj = None
+            audios_imported = []
+            existing_audios_count = 0
+            if audios_root_id:
+                matched_aud = _match_audio_folder_entry(niche_folder, existing_audio_folders)
+                aud_folder_obj = matched_aud or graph_ensure_folder(audios_root_id, niche_folder, tok)
+                if bucket["audios"]:
+                    niche_slug = extract_clean_niche_slug(niche_folder)
+                    for orig_name, code, p in bucket["audios"]:
+                        ext = os.path.splitext(orig_name)[1].lower() or ".mp3"
+                        out_name = f"{niche_slug}_{code}{ext}"
+                        graph_upload_file(aud_folder_obj["id"], out_name, p, tok)
+                        audios_imported.append(out_name)
+                        total_audios_uploaded += 1
+                existing_audios_count = len(_collect_audios_in_folder(aud_folder_obj["id"], tok))
+
+            niches_results.append({
+                "campaign_name": vid_folder["name"],
+                "audio_folder_name": aud_folder_obj["name"] if aud_folder_obj else None,
+                "existing_audios_count": existing_audios_count,
+                "folders_imported": folders_summary,
+                "audios_imported": audios_imported,
+                "total_images": sum(f["count"] for f in folders_summary),
+            })
 
         return {
             "success": True,
-            "campaign_name": folder_name,
-            "folders_imported": uploaded_summary,
-            "audios_imported": uploaded_audios,
+            "campaign_name": niches_results[0]["campaign_name"] if niches_results else fallback_folder,
+            "campaigns": niches_results,
+            "total_campaigns": len(niches_results),
+            "total_images": total_images_uploaded,
+            "total_audios": total_audios_uploaded,
+            "folders_imported": niches_results[0]["folders_imported"] if niches_results else [],
+            "audios_imported": niches_results[0]["audios_imported"] if niches_results else [],
         }
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
@@ -1450,3 +1509,4 @@ def start_render_job_async(campaigns, options, get_tok_fn, find_work_ids_fn, on_
         daemon=True,
     ).start()
     return get_render_status_snapshot()
+
