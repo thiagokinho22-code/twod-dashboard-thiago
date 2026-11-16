@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>TwoD Hub — Central de Automações</title>
-    <link rel="stylesheet" href="styles.css?v=2.3">
+    <link rel="stylesheet" href="styles.css?v=2.4">
 </head>
 <body>
 
@@ -168,6 +168,11 @@
                 </div>
 
                 <div class="header-actions">
+                    <button type="button" id="header-meta-app-pill" class="app-health-pill health-pending" onclick="openMetaAppHealthPanel()" title="Ver Status de Saúde do App Meta, DUC e Rate Limit">
+                        <span class="health-dot"></span>
+                        <span id="header-meta-app-pill-text">App Meta: Verificando...</span>
+                    </button>
+
                     <!-- SELETOR RÁPIDO DE TEMA -->
                     <div class="theme-quick-toggle" title="Modo de Tema">
                         <button class="theme-btn" id="theme-btn-light" onclick="setThemeMode('light')" title="Modo Claro">☀️</button>
@@ -261,6 +266,37 @@
                                 <button class="btn btn-secondary" onclick="switchTab('criativos')">Abrir Gerador de Criativos</button>
                                 <button class="btn btn-outline" onclick="switchTab('fun-digital')">Ver Fila FUN Digital</button>
                             </div>
+                        </div>
+                    </div>
+
+                    <!-- Status do App Meta, DUC & Proteção Anti-Queda -->
+                    <div class="panel-card changelog-card meta-health-card" id="meta-app-health-panel">
+                        <div class="changelog-header">
+                            <div>
+                                <h2>🛡️ Status do App Meta & Proteção Anti-Queda</h2>
+                                <p>Semáforo em tempo real (Token, Permissões, Cota / Rate Limit, Conta/BM, Circuit Breaker e lembrete de DUC/Alertas).</p>
+                            </div>
+                            <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                                <span id="meta-app-health-badge" class="app-health-badge health-pending">⏳ Verificando...</span>
+                                <button type="button" id="btn-meta-health-refresh" class="btn btn-outline btn-sm" onclick="refreshMetaAppHealth(true)">🔄 Verificar Agora</button>
+                            </div>
+                        </div>
+
+                        <div id="meta-app-health-grid" class="meta-health-summary-grid"></div>
+                        <div id="meta-app-health-checks" class="meta-health-checks"></div>
+
+                        <div class="meta-health-actions-bar">
+                            <div class="meta-health-actions-group">
+                                <button type="button" id="btn-ack-duc-check" class="btn btn-primary btn-sm" onclick="ackMetaAppHealth('duc_checked')">✅ Marcar DUC / Alertas Conferidos Hoje</button>
+                                <button type="button" id="btn-toggle-backup-app" class="btn btn-outline btn-sm" onclick="ackMetaAppHealth('toggle_backup')">🛟 App Reserva: Pendente</button>
+                                <button type="button" id="btn-reset-circuit-breaker" class="btn btn-outline btn-sm twod-hidden" onclick="ackMetaAppHealth('reset_circuit')">🔓 Destravar Circuit Breaker</button>
+                            </div>
+                            <div class="meta-health-links-group" id="meta-app-health-links"></div>
+                        </div>
+
+                        <div class="meta-health-footnote">
+                            <span>ℹ️ <strong>Transparência da API:</strong> Token, permissões, cota em tempo real (<code>X-App-Usage</code> / <code>X-Business-Use-Case-Usage</code>), conta/BM e erros 190/200/1885183 são checados automaticamente na API. Como a Meta não expõe o prazo de <strong>Data Use Checkup (DUC)</strong> e <strong>Alerts Inbox</strong> via Graph API, use os atalhos diretos e confirme acima após conferir.</span>
+                            <span id="meta-app-health-updated">Aguardando leitura...</span>
                         </div>
                     </div>
 
@@ -1371,7 +1407,7 @@
         </div>
     </div>
 
-    <script src="app.js?v=8.4"></script>
+    <script src="app.js?v=8.5"></script>
     <script src="campaign_builder.js?v=1.7"></script>
 </body>
 </html>

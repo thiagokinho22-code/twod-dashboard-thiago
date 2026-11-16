@@ -690,6 +690,17 @@ const tabTitles = {
 // ========================================================
 const PANEL_CHANGELOG = [
     {
+        date: '15/11/2026',
+        type: 'sec',
+        badge: '🛡️ Proteção & Status',
+        title: 'Status do App Meta (Verde/Amarelo/Vermelho) & Circuit Breaker Anti-Rajada',
+        summary: 'Monitoramento em tempo real da saúde do App Meta + trava automática contra rajadas para evitar bloqueios e acompanhar DUC/Alertas.',
+        highlights: [
+            'Semáforo ao vivo no cabeçalho e na Visão Geral (Token, Permissões, Uso de Cota Meta, Conta/BM, DUC e App Reserva).',
+            'Throttle e Circuit Breaker no servidor pausam lotes automaticamente antes que a API atinja limite ou receba flag antifraude.'
+        ]
+    },
+    {
         date: '14/11/2026',
         type: 'perf',
         badge: '⚡ Velocidade',
@@ -1994,6 +2005,8 @@ function hasActiveMetaAuth() {
     return Boolean((metaState.token && metaState.token.trim()) || metaState.hasServerToken);
 }
 
+let _lastCircuitHealthSyncAt = 0;
+
 async function metaGraphRequest(method, pathOrUrl, params = null, manualTokenOverride = null) {
     const manualToken = manualTokenOverride !== null ? manualTokenOverride : (metaState.token || '');
     const resp = await apiFetch('/api/meta/graph', {
@@ -2006,7 +2019,17 @@ async function metaGraphRequest(method, pathOrUrl, params = null, manualTokenOve
             manual_token: manualToken
         })
     });
-    return resp.json();
+    const json = await resp.json();
+    if (json?.error?.is_circuit_breaker || resp.status === 429) {
+        const now = Date.now();
+        if (now - _lastCircuitHealthSyncAt > 10000) {
+            _lastCircuitHealthSyncAt = now;
+            setTimeout(() => {
+                if (typeof refreshMetaAppHealth === 'function') refreshMetaAppHealth(false);
+            }, 250);
+        }
+    }
+    return json;
 }
 
 function metaGraphGet(pathOrUrl, manualTokenOverride = null) {
@@ -2146,10 +2169,12 @@ async function testAndReloadMetaApi(forceReload = false) {
         updateMetaStatusUI(true, null, data);
 
         await loadMetaAccounts(forceReload);
+        refreshMetaAppHealth(false);
 
     } catch (err) {
         console.error('Falha de rede ao conectar à Meta API:', err);
         updateMetaStatusUI(false, err.message);
+        refreshMetaAppHealth(false);
     }
 }
 
@@ -2208,6 +2233,191 @@ function updateMetaStatusUI(isSuccess, errorMessage = null, userData = null) {
         window.onCampaignBuilderMetaStatus(isSuccess, errorMessage, userData);
     }
 }
+
+let _lastMetaHealthReport = null;
+
+function openMetaAppHealthPanel() {
+    switchTab('visao-geral');
+    const panel = document.getElementById('meta-app-health-panel');
+    if (panel) {
+        setTimeout(() => {
+            panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, 60);
+    }
+    refreshMetaAppHealth(true);
+}
+
+async function refreshMetaAppHealth(manual = false) {
+    const btn = document.getElementById('btn-meta-health-refresh');
+    if (manual && btn) {
+        btn.disabled = true;
+        btn.innerText = '⏳ Verificando...';
+    }
+    try {
+        const accId = metaState.selectedAccountId || metaState.defaultAccountId || '';
+        const q = accId ? `?account_id=${encodeURIComponent(accId)}` : '';
+        const hdrs = {};
+        if (metaState.token) hdrs['X-Meta-Token'] = metaState.token;
+        const resp = await apiFetch(`/api/meta/app-health${q}`, { headers: hdrs });
+        const data = await resp.json();
+        if (data && data.success) {
+            _lastMetaHealthReport = data;
+            renderMetaAppHealthUI(data);
+        }
+    } catch (e) {
+        console.warn('Falha ao consultar /api/meta/app-health:', e);
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerText = '🔄 Verificar Agora';
+        }
+    }
+}
+
+async function ackMetaAppHealth(action) {
+    try {
+        const payload = {
+            action,
+            account_id: metaState.selectedAccountId || metaState.defaultAccountId || ''
+        };
+        if (action === 'toggle_backup') {
+            payload.ready = !Boolean(_lastMetaHealthReport?.audit?.backup_app_ready);
+        }
+        const hdrs = { 'Content-Type': 'application/json' };
+        if (metaState.token) hdrs['X-Meta-Token'] = metaState.token;
+        const resp = await apiFetch('/api/meta/app-health/ack', {
+            method: 'POST',
+            headers: hdrs,
+            body: JSON.stringify(payload)
+        });
+        const data = await resp.json();
+        if (data && data.success) {
+            _lastMetaHealthReport = data;
+            renderMetaAppHealthUI(data);
+        }
+    } catch (e) {
+        console.warn('Erro ao atualizar check DUC/Backup:', e);
+    }
+}
+
+function renderMetaAppHealthUI(report) {
+    if (!report) return;
+    const overall = report.overall || 'yellow';
+    const overallMeta = {
+        green: { cls: 'health-green', pill: 'App Meta: Saudável', badge: '🟢 Verde — Operacional' },
+        yellow: { cls: 'health-yellow', pill: 'App Meta: Atenção', badge: '🟡 Amarelo — Requer Atenção' },
+        red: { cls: 'health-red', pill: 'App Meta: Crítico', badge: '🔴 Vermelho — Ação Urgente' }
+    }[overall] || { cls: 'health-pending', pill: 'App Meta: Verificando', badge: '⏳ Verificando' };
+
+    const pillEl = document.getElementById('header-meta-app-pill');
+    const pillTxt = document.getElementById('header-meta-app-pill-text');
+    if (pillEl) pillEl.className = `app-health-pill ${overallMeta.cls}`;
+    if (pillTxt) pillTxt.innerText = overallMeta.pill;
+
+    const badgeEl = document.getElementById('meta-app-health-badge');
+    if (badgeEl) {
+        badgeEl.className = `app-health-badge ${overallMeta.cls}`;
+        badgeEl.innerText = overallMeta.badge;
+    }
+
+    const updatedEl = document.getElementById('meta-app-health-updated');
+    if (updatedEl) updatedEl.innerText = `Última verificação: ${report.checked_at || 'agora'}`;
+
+    const gridEl = document.getElementById('meta-app-health-grid');
+    if (gridEl) {
+        const appObj = report.app || {};
+        const tokObj = report.token || {};
+        const usageObj = report.usage || {};
+        const guardObj = report.guard || {};
+        const accObj = report.account || null;
+        const auditObj = report.audit || {};
+
+        const appLabel = appObj.name || (appObj.id ? `App ID ${appObj.id}` : 'App não identificado');
+        const tokTypeLabel = tokObj.source === 'server' ? 'Servidor (Permanente)' : (tokObj.source === 'manual' ? 'Manual (Navegador)' : 'Não configurado');
+        const expLabel = tokObj.expires_at === 0 ? 'Sem expiração' : (tokObj.days_until_expiry != null ? `Expira em ${tokObj.days_until_expiry} dia(s)` : tokTypeLabel);
+
+        const maxPct = Number(usageObj.max_pct || 0);
+        const circuitText = guardObj.circuit_open
+            ? `Pausado (${guardObj.circuit_seconds_left}s)`
+            : (guardObj.throttle_delay_ms > 0 ? `Espaçamento (${guardObj.throttle_delay_ms}ms)` : 'Fechado / Normal');
+
+        const accStatusLabel = accObj
+            ? (accObj.account_status === 1 ? 'Ativa (OK)' : (accObj.account_status === 3 ? 'Pagto Pendente' : `Restrita (${accObj.account_status})`))
+            : 'Nenhuma conta selecionada';
+        const bmLabel = accObj && accObj.business_verification_status
+            ? `BM: ${accObj.business_verification_status === 'verified' ? 'Verificada ✅' : accObj.business_verification_status}`
+            : `Permissões: ${(tokObj.granted_scopes || []).length}/5`;
+
+        const ducText = auditObj.last_duc_check_at
+            ? `Conferido (${auditObj.duc_age_days}d)`
+            : 'Nunca confirmado';
+        const backupText = auditObj.backup_app_ready ? 'App Reserva: Pronto ✅' : 'App Reserva: Pendente ⚠️';
+
+        gridEl.innerHTML = `
+            <div class="meta-health-metric">
+                <div class="meta-health-metric-label">App & Token</div>
+                <div class="meta-health-metric-value">${escHtml(appLabel)}</div>
+                <div class="meta-health-metric-sub">${escHtml(tokTypeLabel)} • ${escHtml(expLabel)}</div>
+            </div>
+            <div class="meta-health-metric">
+                <div class="meta-health-metric-label">Cota Meta & Anti-Rajada</div>
+                <div class="meta-health-metric-value">${maxPct}% de uso • ${escHtml(circuitText)}</div>
+                <div class="meta-health-metric-sub">Call ${Number(usageObj.call_count || 0)}% • CPU ${Number(usageObj.total_cputime || 0)}% • Conta ${Number(usageObj.acc_util_pct || 0)}%</div>
+            </div>
+            <div class="meta-health-metric">
+                <div class="meta-health-metric-label">Conta de Anúncios & BM</div>
+                <div class="meta-health-metric-value">${escHtml(accStatusLabel)}</div>
+                <div class="meta-health-metric-sub">${escHtml(bmLabel)}</div>
+            </div>
+            <div class="meta-health-metric">
+                <div class="meta-health-metric-label">DUC, Alertas & Contingência</div>
+                <div class="meta-health-metric-value">${escHtml(ducText)}</div>
+                <div class="meta-health-metric-sub">${escHtml(backupText)}</div>
+            </div>
+        `;
+    }
+
+    const checksEl = document.getElementById('meta-app-health-checks');
+    if (checksEl) {
+        const checks = Array.isArray(report.checks) ? report.checks : [];
+        const icons = { green: '🟢', yellow: '🟡', red: '🔴' };
+        checksEl.innerHTML = checks.map(chk => `
+            <div class="meta-health-check-item lvl-${escHtml(chk.level || 'yellow')}">
+                <span style="font-size:14px; line-height:1.2;">${icons[chk.level] || 'ℹ️'}</span>
+                <div>
+                    <div class="meta-health-check-title">${escHtml(chk.title || '')}</div>
+                    <div class="meta-health-check-detail">${escHtml(chk.detail || '')}</div>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    const backupBtn = document.getElementById('btn-toggle-backup-app');
+    if (backupBtn) {
+        const ready = Boolean(report.audit?.backup_app_ready);
+        backupBtn.innerText = ready ? '🛟 App Reserva: Pronto ✅' : '🛟 Marcar App Reserva Pronto';
+    }
+
+    const resetBtn = document.getElementById('btn-reset-circuit-breaker');
+    if (resetBtn) {
+        if (report.guard?.circuit_open) resetBtn.classList.remove('twod-hidden');
+        else resetBtn.classList.add('twod-hidden');
+    }
+
+    const linksEl = document.getElementById('meta-app-health-links');
+    if (linksEl && report.links) {
+        linksEl.innerHTML = `
+            <a class="btn btn-outline btn-sm" href="${escHtml(report.links.alerts_inbox)}" target="_blank" rel="noopener">📬 Alerts Inbox & DUC</a>
+            <a class="btn btn-outline btn-sm" href="${escHtml(report.links.app_settings)}" target="_blank" rel="noopener">⚙️ Config. App Meta</a>
+            <a class="btn btn-outline btn-sm" href="${escHtml(report.links.account_quality)}" target="_blank" rel="noopener">🛡️ Qualidade da Conta</a>
+            <a class="btn btn-outline btn-sm" href="${escHtml(report.links.bm_security)}" target="_blank" rel="noopener">🏢 Segurança da BM</a>
+        `;
+    }
+}
+
+window.openMetaAppHealthPanel = openMetaAppHealthPanel;
+window.refreshMetaAppHealth = refreshMetaAppHealth;
+window.ackMetaAppHealth = ackMetaAppHealth;
 
 // Busca a lista de contas de anúncio do usuário
 async function loadMetaAccounts(forceReload = false) {
@@ -4981,7 +5191,9 @@ async function startBatchDuplication() {
             });
 
             if (copyData.error) {
-                throw new Error(copyData.error.message || 'Erro ao copiar conjunto');
+                const cErr = new Error(copyData.error.message || 'Erro ao copiar conjunto');
+                cErr.isCircuitBreaker = Boolean(copyData.error.is_circuit_breaker);
+                throw cErr;
             }
 
             const copiedAdSetId = copyData.copied_adset_id;
@@ -5139,10 +5351,14 @@ async function startBatchDuplication() {
             failCount++;
             console.error(`Erro ao duplicar para ${country.adSetName}:`, err);
             logMetaTerminal(`❌ [${currentIdx}/${total}] Falha em ${country.adSetName}: ${err.message}`, 'error');
+            if (err.isCircuitBreaker || /Proteção anti-rajada ativa|rate limit/i.test(err.message || '')) {
+                logMetaTerminal('🛑 Lote pausado automaticamente pelo Circuit Breaker para proteger o App Meta contra bloqueios. Veja o Status do App na Visão Geral.', 'warn');
+                break;
+            }
         }
 
         // Breve intervalo para respeitar taxa da Meta
-        await new Promise(r => setTimeout(r, 250));
+        await new Promise(r => setTimeout(r, 350));
     }
 
     const elapsedSecs = ((Date.now() - startTime) / 1000).toFixed(1);
@@ -5160,6 +5376,7 @@ async function startBatchDuplication() {
     metaState.isDuplicating = false;
 
     logMetaTerminal(`🎉 Operação finalizada em ${elapsedSecs}s! Sucesso: ${successCount} | Falhas: ${failCount}`, successCount > 0 ? 'success' : 'warning');
+    refreshMetaAppHealth(false);
 }
 
 // Helpers compartilhados de Token Meta (Configurações e Duplicador)

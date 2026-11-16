@@ -25,6 +25,7 @@ ENV_PATH = os.path.join(BACKEND_DIR, ".env")
 GRAPH_CACHE_PATH = os.path.join(BACKEND_DIR, ".graph_cache.json")
 CAMPAIGN_CREATIVES_PATH = os.path.join(BACKEND_DIR, ".campaign_creatives.json")
 USERS_PATH = os.path.join(BACKEND_DIR, ".users.json")
+META_HEALTH_AUDIT_PATH = os.path.join(BACKEND_DIR, ".meta_health_audit.json")
 
 # Auto-detecta a pasta local do OneDrive de Trabalho (quando rodando no PC do Thiago)
 DEFAULT_WORK_DIR = os.path.join(os.path.expanduser("~"), "OneDrive", "Documentos", "Trabalho")
@@ -47,6 +48,34 @@ _SESSION_SECRET_CACHE = None
 _LOGIN_FAILURES = {}
 SESSION_TTL_SECONDS = 7 * 24 * 3600
 ONEDRIVE_USERS_REMOTE_PATH = ".twod_hub/users.json"
+ONEDRIVE_HEALTH_AUDIT_REMOTE_PATH = ".twod_hub/meta_health_audit.json"
+
+# Proteção anti-rajada (Circuit Breaker + Throttle) & telemetria da Meta Graph API
+META_GUARD_LOCK = threading.Lock()
+META_HEALTH_AUDIT_LOCK = threading.Lock()
+META_HEALTH_AUDIT_MEM = None
+META_RATE_LIMIT_CODES = {4, 17, 32, 613, 80000, 80001, 80002, 80003, 80004, 80005, 80006, 80008, 80009}
+META_GUARD_STATE = {
+    "circuit_open_until": 0.0,
+    "circuit_reason": "",
+    "circuit_code": None,
+    "throttle_delay_ms": 0,
+    "last_usage": {
+        "call_count": 0,
+        "total_cputime": 0,
+        "total_time": 0,
+        "acc_util_pct": 0,
+        "estimated_time_to_regain_access": 0,
+        "max_pct": 0,
+        "updated_at": 0.0,
+        "source": "",
+    },
+    "recent_errors": [],
+    "dev_mode_blocked": False,
+    "token_blocked": False,
+    "token_blocked_reason": "",
+    "last_ok_at": 0.0,
+}
 
 # Caches em memória e sincronização em segundo plano
 NICHES_CACHE = None
@@ -563,7 +592,139 @@ def _scrub_meta_secret(obj, secret_token=""):
     return obj
 
 
-def _execute_meta_graph_request(method, raw_path, params=None, manual_token=""):
+def _parse_usage_header_metrics(headers):
+    """Extrai métricas reais de cota (X-App-Usage, X-Business-Use-Case-Usage, X-Ad-Account-Usage)."""
+    if not headers:
+        return None
+    call_count = 0
+    cpu_time = 0
+    total_time = 0
+    acc_util = 0
+    est_regain = 0
+    sources = []
+
+    raw_app = headers.get("X-App-Usage")
+    if raw_app:
+        try:
+            d = json.loads(raw_app)
+            if isinstance(d, dict):
+                call_count = max(call_count, int(d.get("call_count") or 0))
+                cpu_time = max(cpu_time, int(d.get("total_cputime") or 0))
+                total_time = max(total_time, int(d.get("total_time") or 0))
+                sources.append("app")
+        except Exception:
+            pass
+
+    raw_buca = headers.get("X-Business-Use-Case-Usage")
+    if raw_buca:
+        try:
+            d = json.loads(raw_buca)
+            if isinstance(d, dict):
+                for items in d.values():
+                    if isinstance(items, list):
+                        for item in items:
+                            if isinstance(item, dict):
+                                call_count = max(call_count, int(item.get("call_count") or 0))
+                                cpu_time = max(cpu_time, int(item.get("total_cputime") or 0))
+                                total_time = max(total_time, int(item.get("total_time") or 0))
+                                est_regain = max(est_regain, int(item.get("estimated_time_to_regain_access") or 0))
+                sources.append("buca")
+        except Exception:
+            pass
+
+    raw_acc = headers.get("X-Ad-Account-Usage")
+    if raw_acc:
+        try:
+            d = json.loads(raw_acc)
+            if isinstance(d, dict):
+                acc_util = max(acc_util, int(d.get("acc_id_util_pct") or 0))
+                sources.append("ad_account")
+        except Exception:
+            pass
+
+    if not sources:
+        return None
+    max_pct = max(call_count, cpu_time, total_time, acc_util)
+    return {
+        "call_count": call_count,
+        "total_cputime": cpu_time,
+        "total_time": total_time,
+        "acc_util_pct": acc_util,
+        "estimated_time_to_regain_access": est_regain,
+        "max_pct": max_pct,
+        "source": "+".join(sources),
+        "updated_at": time.time(),
+    }
+
+
+def _record_meta_telemetry(status_code, clean_path, headers, parsed_json):
+    metrics = _parse_usage_header_metrics(headers)
+    err = parsed_json.get("error") if isinstance(parsed_json, dict) else None
+    now = time.time()
+
+    with META_GUARD_LOCK:
+        if metrics:
+            META_GUARD_STATE["last_usage"] = metrics
+            max_pct = metrics["max_pct"]
+            est = metrics["estimated_time_to_regain_access"]
+            if max_pct >= 95 or est > 0:
+                cooldown = max(60, min((est * 60) if est > 0 else 120, 600))
+                META_GUARD_STATE["circuit_open_until"] = max(META_GUARD_STATE["circuit_open_until"], now + cooldown)
+                META_GUARD_STATE["circuit_reason"] = f"Cota da Meta atingiu {max_pct}% — pausa automática para evitar bloqueio."
+                META_GUARD_STATE["circuit_code"] = 613
+                META_GUARD_STATE["throttle_delay_ms"] = 1200
+            elif max_pct >= 85:
+                META_GUARD_STATE["throttle_delay_ms"] = 1000
+            elif max_pct >= 70:
+                META_GUARD_STATE["throttle_delay_ms"] = 350
+            else:
+                META_GUARD_STATE["throttle_delay_ms"] = 0
+
+        if not err and 200 <= status_code < 300:
+            META_GUARD_STATE["last_ok_at"] = now
+            META_GUARD_STATE["token_blocked"] = False
+            META_GUARD_STATE["token_blocked_reason"] = ""
+            if "/adcreatives" in clean_path or clean_path.endswith("/ads"):
+                META_GUARD_STATE["dev_mode_blocked"] = False
+            return
+
+        if isinstance(err, dict):
+            code = err.get("code")
+            subcode = err.get("error_subcode")
+            msg = str(err.get("message") or "")
+            msg_l = msg.lower()
+
+            entry = {
+                "ts": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "status": status_code,
+                "code": code,
+                "subcode": subcode,
+                "path": clean_path,
+                "message": msg[:260],
+            }
+            recent = META_GUARD_STATE["recent_errors"]
+            recent.insert(0, entry)
+            del recent[8:]
+
+            if subcode == 1885183 or "development mode" in msg_l:
+                META_GUARD_STATE["dev_mode_blocked"] = True
+
+            if code in META_RATE_LIMIT_CODES or "rate limit" in msg_l or "too many calls" in msg_l:
+                est_min = (metrics or {}).get("estimated_time_to_regain_access", 0)
+                cooldown = max(60, min(est_min * 60 if est_min > 0 else 90, 600))
+                META_GUARD_STATE["circuit_open_until"] = max(META_GUARD_STATE["circuit_open_until"], now + cooldown)
+                META_GUARD_STATE["circuit_reason"] = f"Rate limit da Meta (código {code}) — pausa automática protetora."
+                META_GUARD_STATE["circuit_code"] = code
+            elif code == 190 or any(k in msg_l for k in ("api access blocked", "app is restricted", "application has been disabled", "session has expired", "validating access token")):
+                META_GUARD_STATE["token_blocked"] = True
+                META_GUARD_STATE["token_blocked_reason"] = msg[:220]
+                if "restricted" in msg_l or "disabled" in msg_l or "blocked" in msg_l:
+                    META_GUARD_STATE["circuit_open_until"] = max(META_GUARD_STATE["circuit_open_until"], now + 45)
+                    META_GUARD_STATE["circuit_reason"] = f"App ou token bloqueado/restrito na Meta (código {code})."
+                    META_GUARD_STATE["circuit_code"] = code
+
+
+def _execute_meta_graph_request(method, raw_path, params=None, manual_token="", bypass_circuit=False):
     token = resolve_meta_token(manual_token)
     if not token:
         return 400, {"error": {"message": "Nenhum Token da Meta configurado no servidor nem manualmente.", "code": 190}}
@@ -596,6 +757,28 @@ def _execute_meta_graph_request(method, raw_path, params=None, manual_token=""):
             base_p = "/v21.0" + base_p
         clean_path = base_p
 
+    throttle_ms = 0
+    if not bypass_circuit:
+        with META_GUARD_LOCK:
+            now = time.time()
+            open_until = META_GUARD_STATE["circuit_open_until"]
+            if open_until > now:
+                wait_secs = max(1, int(round(open_until - now)))
+                reason = META_GUARD_STATE["circuit_reason"] or "Proteção anti-rajada ativa."
+                code = META_GUARD_STATE["circuit_code"] or 613
+                return 429, {
+                    "error": {
+                        "message": f"Proteção anti-rajada ativa ({wait_secs}s restantes): {reason}",
+                        "code": code,
+                        "is_circuit_breaker": True,
+                        "retry_after_seconds": wait_secs,
+                    }
+                }
+            throttle_ms = int(META_GUARD_STATE.get("throttle_delay_ms") or 0)
+
+    if throttle_ms > 0:
+        time.sleep(min(throttle_ms, 1500) / 1000.0)
+
     merged = dict(existing_query)
     if isinstance(params, dict):
         for k, v in params.items():
@@ -626,16 +809,447 @@ def _execute_meta_graph_request(method, raw_path, params=None, manual_token=""):
                 parsed_json = json.loads(raw_txt)
             except Exception:
                 parsed_json = {"raw": raw_txt}
-            return resp.status, _scrub_meta_secret(parsed_json, token)
+            scrubbed = _scrub_meta_secret(parsed_json, token)
+            _record_meta_telemetry(resp.status, clean_path, resp.headers, scrubbed)
+            return resp.status, scrubbed
     except urllib.error.HTTPError as e:
         raw_txt = e.read().decode("utf-8", errors="replace")
         try:
             parsed_json = json.loads(raw_txt)
         except Exception:
             parsed_json = {"error": {"message": raw_txt or f"HTTP {e.code}"}}
-        return e.code, _scrub_meta_secret(parsed_json, token)
+        scrubbed = _scrub_meta_secret(parsed_json, token)
+        _record_meta_telemetry(e.code, clean_path, e.headers, scrubbed)
+        return e.code, scrubbed
     except Exception as e:
         return 502, _scrub_meta_secret({"error": {"message": str(e)}}, token)
+
+
+def _load_meta_health_audit_from_onedrive(timeout=5):
+    encoded = urllib.parse.quote(ONEDRIVE_HEALTH_AUDIT_REMOTE_PATH)
+    meta_url = f"https://graph.microsoft.com/v1.0/me/drive/root:/{encoded}?select=id,@microsoft.graph.downloadUrl,@content.downloadUrl"
+    tok, _ = get_graph_access_token()
+    if not tok:
+        return None
+    try:
+        req = urllib.request.Request(meta_url, headers={"Authorization": f"Bearer {tok}"}, method="GET")
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            meta = json.loads(resp.read().decode("utf-8"))
+        dl_url = meta.get("@microsoft.graph.downloadUrl") or meta.get("@content.downloadUrl")
+        if not dl_url:
+            return None
+        with urllib.request.urlopen(urllib.request.Request(dl_url, method="GET"), timeout=timeout) as dl_resp:
+            data = json.loads(dl_resp.read().decode("utf-8"))
+        return data if isinstance(data, dict) else None
+    except Exception:
+        return None
+
+
+def _save_meta_health_audit_to_onedrive(data):
+    tok, _ = get_graph_access_token()
+    if not tok:
+        return False
+    encoded = urllib.parse.quote(ONEDRIVE_HEALTH_AUDIT_REMOTE_PATH)
+    put_url = f"https://graph.microsoft.com/v1.0/me/drive/root:/{encoded}:/content"
+    body = json.dumps(data, indent=2, ensure_ascii=False).encode("utf-8")
+    req = urllib.request.Request(
+        put_url,
+        data=body,
+        headers={"Authorization": f"Bearer {tok}", "Content-Type": "application/json; charset=utf-8"},
+        method="PUT",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return 200 <= resp.status < 300
+    except Exception:
+        return False
+
+
+def load_meta_health_audit():
+    global META_HEALTH_AUDIT_MEM
+    with META_HEALTH_AUDIT_LOCK:
+        if META_HEALTH_AUDIT_MEM is not None:
+            return dict(META_HEALTH_AUDIT_MEM)
+        data = None
+        if os.path.exists(META_HEALTH_AUDIT_PATH):
+            try:
+                with open(META_HEALTH_AUDIT_PATH, "r", encoding="utf-8") as f:
+                    d = json.load(f)
+                if isinstance(d, dict):
+                    data = d
+            except Exception:
+                pass
+        if data is None and load_env_vars().get("ONEDRIVE_REFRESH_TOKEN"):
+            remote = _load_meta_health_audit_from_onedrive()
+            if isinstance(remote, dict):
+                data = remote
+                try:
+                    with open(META_HEALTH_AUDIT_PATH, "w", encoding="utf-8") as f:
+                        json.dump(data, f, indent=2, ensure_ascii=False)
+                except Exception:
+                    pass
+        if not isinstance(data, dict):
+            data = {"last_duc_check_ts": 0, "last_duc_check_at": None, "last_duc_checked_by": None, "backup_app_ready": False}
+        META_HEALTH_AUDIT_MEM = data
+        return dict(data)
+
+
+def save_meta_health_audit(audit_data):
+    global META_HEALTH_AUDIT_MEM
+    with META_HEALTH_AUDIT_LOCK:
+        META_HEALTH_AUDIT_MEM = dict(audit_data)
+        try:
+            with open(META_HEALTH_AUDIT_PATH, "w", encoding="utf-8") as f:
+                json.dump(audit_data, f, indent=2, ensure_ascii=False)
+        except Exception:
+            pass
+    if load_env_vars().get("ONEDRIVE_REFRESH_TOKEN"):
+        threading.Thread(target=_save_meta_health_audit_to_onedrive, args=(dict(audit_data),), daemon=True).start()
+
+
+def build_meta_app_health_report(account_id="", manual_token=""):
+    """Consulta saúde real do token, app, permissões, cota e conta Meta (sem jamais expor tokens)."""
+    token = resolve_meta_token(manual_token)
+    audit = load_meta_health_audit()
+    cfg = load_env_vars()
+    selected_acc = (account_id or cfg.get("DEFAULT_AD_ACCOUNT_ID") or "").strip()
+    now = time.time()
+
+    with META_GUARD_LOCK:
+        guard = {
+            "circuit_open_until": META_GUARD_STATE["circuit_open_until"],
+            "circuit_reason": META_GUARD_STATE["circuit_reason"],
+            "circuit_code": META_GUARD_STATE["circuit_code"],
+            "throttle_delay_ms": META_GUARD_STATE["throttle_delay_ms"],
+            "last_usage": dict(META_GUARD_STATE["last_usage"]),
+            "recent_errors": list(META_GUARD_STATE["recent_errors"]),
+            "dev_mode_blocked": META_GUARD_STATE["dev_mode_blocked"],
+            "token_blocked": META_GUARD_STATE["token_blocked"],
+            "token_blocked_reason": META_GUARD_STATE["token_blocked_reason"],
+            "last_ok_at": META_GUARD_STATE["last_ok_at"],
+        }
+
+    checks = []
+    app_info = {"id": (cfg.get("META_APP_ID") or "").strip(), "name": "", "link": ""}
+    token_info = {
+        "configured": bool(token),
+        "source": "manual" if (manual_token or "").strip() else ("server" if cfg.get("META_ACCESS_TOKEN") else "none"),
+        "is_valid": False,
+        "type": "",
+        "expires_at": None,
+        "days_until_expiry": None,
+        "user_id": "",
+        "user_name": "",
+        "missing_scopes": [],
+        "granted_scopes": [],
+    }
+    account_info = None
+    required_scopes = ["ads_management", "ads_read", "business_management", "pages_read_engagement", "pages_show_list"]
+
+    if not token:
+        checks.append({
+            "id": "token",
+            "level": "red",
+            "title": "Token da Meta não configurado",
+            "detail": "Configure META_ACCESS_TOKEN no Render (.env) ou informe um token manual.",
+        })
+    else:
+        st_me, me_res = _execute_meta_graph_request("GET", "/v21.0/me?fields=id,name", None, manual_token, bypass_circuit=True)
+        if 200 <= st_me < 300 and isinstance(me_res, dict) and me_res.get("id"):
+            token_info["is_valid"] = True
+            token_info["user_id"] = str(me_res.get("id", ""))
+            token_info["user_name"] = str(me_res.get("name", ""))
+        else:
+            err_obj = (me_res or {}).get("error", {}) if isinstance(me_res, dict) else {}
+            checks.append({
+                "id": "token",
+                "level": "red",
+                "title": "Falha de autenticação na Meta API",
+                "detail": str(err_obj.get("message") or f"HTTP {st_me} ao validar /me"),
+            })
+
+        # Permissões concedidas ao token atual
+        st_perm, perm_res = _execute_meta_graph_request("GET", "/v21.0/me/permissions", None, manual_token, bypass_circuit=True)
+        if 200 <= st_perm < 300 and isinstance(perm_res, dict) and isinstance(perm_res.get("data"), list):
+            granted = [p.get("permission") for p in perm_res["data"] if p.get("status") == "granted" and p.get("permission")]
+            token_info["granted_scopes"] = granted
+            token_info["missing_scopes"] = [s for s in required_scopes if s not in granted]
+
+        # debug_token com o próprio token para identificar App ID, tipo (SYSTEM_USER vs USER) e expiração
+        st_dbg, dbg_res = _execute_meta_graph_request("GET", "/v21.0/debug_token", {"input_token": token}, manual_token, bypass_circuit=True)
+        if 200 <= st_dbg < 300 and isinstance(dbg_res, dict) and isinstance(dbg_res.get("data"), dict):
+            dd = dbg_res["data"]
+            if dd.get("app_id"):
+                app_info["id"] = str(dd.get("app_id"))
+            if dd.get("application"):
+                app_info["name"] = str(dd.get("application"))
+            token_info["is_valid"] = bool(dd.get("is_valid", token_info["is_valid"]))
+            token_info["type"] = str(dd.get("type") or "")
+            exp = int(dd.get("expires_at") or 0)
+            token_info["expires_at"] = exp
+            if exp > 0:
+                token_info["days_until_expiry"] = round((exp - now) / 86400.0, 1)
+            if isinstance(dd.get("scopes"), list) and not token_info["granted_scopes"]:
+                token_info["granted_scopes"] = dd["scopes"]
+                token_info["missing_scopes"] = [s for s in required_scopes if s not in dd["scopes"]]
+            if dd.get("error") and isinstance(dd["error"], dict):
+                checks.append({
+                    "id": "debug_token_err",
+                    "level": "red",
+                    "title": "Token sinalizado como inválido pela Meta",
+                    "detail": str(dd["error"].get("message") or "Erro no debug_token"),
+                })
+
+        if app_info["id"] and not app_info["name"]:
+            st_app, app_res = _execute_meta_graph_request("GET", f"/v21.0/{app_info['id']}?fields=id,name,link", None, manual_token, bypass_circuit=True)
+            if 200 <= st_app < 300 and isinstance(app_res, dict) and app_res.get("id"):
+                app_info["name"] = str(app_res.get("name") or "")
+                app_info["link"] = str(app_res.get("link") or "")
+
+        if token_info["is_valid"]:
+            if token_info["expires_at"] == 0:
+                checks.append({
+                    "id": "token_ok",
+                    "level": "green",
+                    "title": "Token ativo e permanente",
+                    "detail": f"Autenticado como {token_info['user_name'] or 'Usuário do Sistema'}" + (f" ({token_info['type']})" if token_info["type"] else "") + ".",
+                })
+            elif token_info["days_until_expiry"] is not None:
+                if token_info["days_until_expiry"] <= 0:
+                    checks.append({"id": "token_exp", "level": "red", "title": "Token expirado", "detail": "Gere um novo token permanente de Usuário do Sistema."})
+                elif token_info["days_until_expiry"] < 15:
+                    checks.append({
+                        "id": "token_exp_soon",
+                        "level": "yellow",
+                        "title": f"Token expira em {token_info['days_until_expiry']} dia(s)",
+                        "detail": "Recomenda-se trocar pelo token permanente ('Never') de Usuário do Sistema no BM.",
+                    })
+                else:
+                    checks.append({
+                        "id": "token_ok",
+                        "level": "green",
+                        "title": f"Token válido (expira em {token_info['days_until_expiry']} dias)",
+                        "detail": f"Autenticado como {token_info['user_name']}.",
+                    })
+            else:
+                checks.append({
+                    "id": "token_ok",
+                    "level": "green",
+                    "title": "Token autenticado na Meta Graph API",
+                    "detail": f"Conectado como {token_info['user_name'] or token_info['user_id']}.",
+                })
+
+        if token_info["missing_scopes"]:
+            critical_missing = [s for s in token_info["missing_scopes"] if s in ("ads_management", "ads_read")]
+            checks.append({
+                "id": "scopes",
+                "level": "red" if critical_missing else "yellow",
+                "title": f"Permissões ausentes: {', '.join(token_info['missing_scopes'])}",
+                "detail": "Gere o token marcando todas as permissões necessárias no Usuário do Sistema.",
+            })
+        elif token_info["granted_scopes"]:
+            checks.append({
+                "id": "scopes_ok",
+                "level": "green",
+                "title": "Permissões essenciais completas (5/5)",
+                "detail": ", ".join(required_scopes),
+            })
+
+        # Saúde da Conta de Anúncios & Verificação da BM
+        if selected_acc:
+            acc_norm = selected_acc if selected_acc.startswith("act_") else f"act_{selected_acc}"
+            st_acc, acc_res = _execute_meta_graph_request(
+                "GET",
+                f"/v21.0/{acc_norm}?fields=id,name,account_status,disable_reason,business{{id,name,verification_status}}",
+                None,
+                manual_token,
+                bypass_circuit=True,
+            )
+            if 200 <= st_acc < 300 and isinstance(acc_res, dict) and acc_res.get("id"):
+                st_code = int(acc_res.get("account_status") or 0)
+                dis_reason = int(acc_res.get("disable_reason") or 0)
+                biz = acc_res.get("business") if isinstance(acc_res.get("business"), dict) else {}
+                biz_ver = str(biz.get("verification_status") or "")
+                account_info = {
+                    "id": acc_res.get("id"),
+                    "name": acc_res.get("name", ""),
+                    "account_status": st_code,
+                    "disable_reason": dis_reason,
+                    "business_id": biz.get("id", ""),
+                    "business_name": biz.get("name", ""),
+                    "business_verification_status": biz_ver,
+                }
+                if st_code == 1:
+                    checks.append({
+                        "id": "ad_account_ok",
+                        "level": "green",
+                        "title": f"Conta de Anúncios Ativa ({acc_res.get('name', acc_norm)})",
+                        "detail": f"Status Meta: Ativa (código 1).",
+                    })
+                elif st_code == 3:
+                    checks.append({
+                        "id": "ad_account_warn",
+                        "level": "yellow",
+                        "title": f"Conta com Pagamento Pendente ({acc_res.get('name', acc_norm)})",
+                        "detail": "Account status = 3 (Unsettled). Regularize o faturamento para evitar pausa nas campanhas.",
+                    })
+                else:
+                    checks.append({
+                        "id": "ad_account_err",
+                        "level": "red",
+                        "title": f"Conta de Anúncios Restrita/Inativa (status {st_code})",
+                        "detail": f"Conta {acc_res.get('name', acc_norm)} • disable_reason={dis_reason}. Confira a Qualidade da Conta.",
+                    })
+
+                if biz:
+                    if biz_ver.lower() == "verified":
+                        checks.append({
+                            "id": "bm_verified",
+                            "level": "green",
+                            "title": f"BM Verificada ({biz.get('name', biz.get('id', 'BM'))})",
+                            "detail": "Portfólio Empresarial com verificação confirmada pela Meta.",
+                        })
+                    elif biz_ver:
+                        checks.append({
+                            "id": "bm_unverified",
+                            "level": "yellow",
+                            "title": f"BM sem verificação completa ({biz_ver})",
+                            "detail": "Verifique o Portfólio Empresarial e vincule o App para reduzir risco de queda.",
+                        })
+
+    # Re-lê telemetria atualizada após as consultas acima
+    with META_GUARD_LOCK:
+        usage = dict(META_GUARD_STATE["last_usage"])
+        open_until = META_GUARD_STATE["circuit_open_until"]
+        circuit_reason = META_GUARD_STATE["circuit_reason"]
+        throttle_ms = META_GUARD_STATE["throttle_delay_ms"]
+        dev_blocked = META_GUARD_STATE["dev_mode_blocked"]
+        token_blocked = META_GUARD_STATE["token_blocked"]
+        token_blocked_reason = META_GUARD_STATE["token_blocked_reason"]
+        recent_errors = list(META_GUARD_STATE["recent_errors"])
+
+    circuit_secs_left = max(0, int(round(open_until - time.time())))
+    max_pct = int(usage.get("max_pct") or 0)
+
+    if circuit_secs_left > 0:
+        checks.append({
+            "id": "circuit_open",
+            "level": "red",
+            "title": f"Circuit Breaker Ativo ({circuit_secs_left}s restantes)",
+            "detail": circuit_reason or "Requisições pausadas temporariamente para proteger o App contra rajada/ban.",
+        })
+    elif max_pct >= 70:
+        checks.append({
+            "id": "rate_high",
+            "level": "yellow",
+            "title": f"Uso de Cota Meta elevado ({max_pct}%)",
+            "detail": f"Espaçamento automático anti-rajada ativado ({throttle_ms}ms entre chamadas).",
+        })
+    elif usage.get("updated_at"):
+        checks.append({
+            "id": "rate_ok",
+            "level": "green",
+            "title": f"Cota / Rate Limit saudável ({max_pct}%)",
+            "detail": f"Call={usage.get('call_count', 0)}% • CPU={usage.get('total_cputime', 0)}% • Tempo={usage.get('total_time', 0)}% • Conta={usage.get('acc_util_pct', 0)}%.",
+        })
+
+    if dev_blocked:
+        checks.append({
+            "id": "dev_mode",
+            "level": "yellow",
+            "title": "Erro 1885183 detectado (Modo de Desenvolvimento)",
+            "detail": "Alguma criação falhou com App em Desenvolvimento. Coloque o App em Live ou use Usuário do Sistema na BM.",
+        })
+    if token_blocked:
+        checks.append({
+            "id": "token_blocked",
+            "level": "red",
+            "title": "Bloqueio ou restrição sinalizado pela Meta",
+            "detail": token_blocked_reason or "A Meta retornou erro de bloqueio/restrição no último lote.",
+        })
+
+    # Checagem manual de DUC (Data Use Checkup) & Alerts Inbox (não expostos por API da Meta)
+    last_duc_ts = float(audit.get("last_duc_check_ts") or 0)
+    duc_age_days = round((now - last_duc_ts) / 86400.0, 1) if last_duc_ts > 0 else None
+    if last_duc_ts <= 0:
+        checks.append({
+            "id": "duc_check",
+            "level": "yellow",
+            "title": "DUC / Alerts Inbox nunca confirmado no painel",
+            "detail": "A Meta não expõe DUC/Alertas Obrigatórios via API. Abra o painel do App, confira DUC/Alertas e clique em 'Marcar Conferido Hoje'.",
+        })
+    elif duc_age_days > 30:
+        checks.append({
+            "id": "duc_check",
+            "level": "yellow",
+            "title": f"Conferência de DUC/Alertas pendente ({int(duc_age_days)} dias atrás)",
+            "detail": "Faz mais de 30 dias da última checagem manual de Alerts Inbox e Data Use Checkup.",
+        })
+    else:
+        checks.append({
+            "id": "duc_check",
+            "level": "green",
+            "title": f"DUC / Alertas conferido há {int(duc_age_days)} dia(s)",
+            "detail": f"Última confirmação por {audit.get('last_duc_checked_by') or 'equipe'} em {audit.get('last_duc_check_at')}.",
+        })
+
+    if not audit.get("backup_app_ready"):
+        checks.append({
+            "id": "backup_app",
+            "level": "yellow",
+            "title": "Plano B (App Reserva) não marcado como pronto",
+            "detail": "Mantenha 1 App reserva + token pronto para colar no Render caso o principal sofra revisão.",
+        })
+    else:
+        checks.append({
+            "id": "backup_app",
+            "level": "green",
+            "title": "Plano B (App Reserva) marcado como pronto",
+            "detail": "Contingência confirmada para troca rápida de META_ACCESS_TOKEN.",
+        })
+
+    levels = [c["level"] for c in checks]
+    if "red" in levels:
+        overall = "red"
+    elif "yellow" in levels:
+        overall = "yellow"
+    else:
+        overall = "green"
+
+    app_id_for_links = app_info["id"]
+    links = {
+        "app_dashboard": f"https://developers.facebook.com/apps/{app_id_for_links}/" if app_id_for_links else "https://developers.facebook.com/apps/",
+        "alerts_inbox": f"https://developers.facebook.com/apps/{app_id_for_links}/alerts/inbox/" if app_id_for_links else "https://developers.facebook.com/apps/",
+        "app_settings": f"https://developers.facebook.com/apps/{app_id_for_links}/settings/basic/" if app_id_for_links else "https://developers.facebook.com/apps/",
+        "account_quality": "https://business.facebook.com/accountquality/",
+        "bm_security": f"https://business.facebook.com/settings/security?business_id={account_info['business_id']}" if (account_info and account_info.get("business_id")) else "https://business.facebook.com/settings/security/",
+    }
+
+    return {
+        "success": True,
+        "overall": overall,
+        "checked_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "app": app_info,
+        "token": token_info,
+        "account": account_info,
+        "usage": usage,
+        "guard": {
+            "circuit_open": circuit_secs_left > 0,
+            "circuit_seconds_left": circuit_secs_left,
+            "circuit_reason": circuit_reason if circuit_secs_left > 0 else "",
+            "throttle_delay_ms": throttle_ms,
+            "recent_errors": recent_errors,
+        },
+        "audit": {
+            "last_duc_check_ts": last_duc_ts,
+            "last_duc_check_at": audit.get("last_duc_check_at"),
+            "last_duc_checked_by": audit.get("last_duc_checked_by"),
+            "duc_age_days": duc_age_days,
+            "backup_app_ready": bool(audit.get("backup_app_ready", False)),
+        },
+        "links": links,
+        "checks": checks,
+    }
 
 
 # ============================================================
@@ -2016,6 +2630,17 @@ class APIHandler(BaseHTTPRequestHandler):
                 **cfg_meta,
             })
 
+        elif path == "/api/meta/app-health":
+            if not self._authenticate_request():
+                return
+            try:
+                acc_q = (qs.get("account_id", [""])[0] or "").strip()
+                manual_tok = (self.headers.get("X-Meta-Token", "") or "").strip()
+                report = build_meta_app_health_report(account_id=acc_q, manual_token=manual_tok)
+                self._send_json(report)
+            except Exception as e:
+                self._send_json({"success": False, "error": str(e)}, 500)
+
         elif path.startswith("/api/audio/"):
             if not self._authenticate_request(qs=qs, allow_media_scope=True):
                 return
@@ -2304,6 +2929,42 @@ class APIHandler(BaseHTTPRequestHandler):
                 self._send_json(res_json, status_code)
             except Exception as e:
                 self._send_json({"error": {"message": str(e)}}, 500)
+
+        elif path == "/api/meta/app-health/ack":
+            authed = self._authenticate_request()
+            if not authed:
+                return
+            try:
+                payload = self._read_json_body()
+                action = str(payload.get("action") or "").strip().lower()
+                audit = load_meta_health_audit()
+                if action == "duc_checked":
+                    audit["last_duc_check_ts"] = time.time()
+                    audit["last_duc_check_at"] = time.strftime("%d/%m/%Y %H:%M")
+                    audit["last_duc_checked_by"] = authed.get("name") or authed.get("username") or "equipe"
+                    save_meta_health_audit(audit)
+                elif action == "toggle_backup":
+                    audit["backup_app_ready"] = bool(payload.get("ready", not audit.get("backup_app_ready", False)))
+                    save_meta_health_audit(audit)
+                elif action == "reset_circuit":
+                    with META_GUARD_LOCK:
+                        META_GUARD_STATE["circuit_open_until"] = 0.0
+                        META_GUARD_STATE["circuit_reason"] = ""
+                        META_GUARD_STATE["circuit_code"] = None
+                        META_GUARD_STATE["throttle_delay_ms"] = 0
+                        META_GUARD_STATE["token_blocked"] = False
+                        META_GUARD_STATE["token_blocked_reason"] = ""
+                        META_GUARD_STATE["dev_mode_blocked"] = False
+                else:
+                    self._send_json({"success": False, "error": "Ação inválida."}, 400)
+                    return
+
+                acc_id = str(payload.get("account_id") or "").strip()
+                manual_tok = str(payload.get("manual_token") or self.headers.get("X-Meta-Token", "") or "").strip()
+                report = build_meta_app_health_report(account_id=acc_id, manual_token=manual_tok)
+                self._send_json(report)
+            except Exception as e:
+                self._send_json({"success": False, "error": str(e)}, 500)
 
         elif path == "/api/meta/upload-video":
             authed = self._authenticate_request()

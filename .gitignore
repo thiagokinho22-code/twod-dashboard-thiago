@@ -11,6 +11,7 @@ TwoD Hub OneDrive.txt
 backend/.graph_cache.json
 backend/.campaign_creatives.json
 backend/.users.json
+backend/.meta_health_audit.json
 
 # Binários pesados gerados localmente
 *.exe
