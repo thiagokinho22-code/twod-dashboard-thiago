@@ -880,8 +880,10 @@ def create_campaign_folders_cloud(niche_name, date_str, use_blocks, tok, find_wo
         for b_name in ("Bloco A", "Bloco B"):
             b_obj = graph_ensure_folder(vid_folder["id"], b_name, tok)
             graph_ensure_folder(b_obj["id"], "1. Imagens", tok)
+            graph_ensure_folder(b_obj["id"], "Português", tok)
     else:
         graph_ensure_folder(vid_folder["id"], "1. Imagens", tok)
+        graph_ensure_folder(vid_folder["id"], "Português", tok)
 
     return {
         "success": True,
@@ -928,14 +930,21 @@ def upload_audio_to_onedrive_cloud(campaign_name, date_str, lang_code, orig_file
 
 def _resolve_target_image_folder(vid_folder_id, block_name, lang_code, tok):
     rel = []
+    parent_for_pt = vid_folder_id
     if block_name and block_name.strip().lower() not in ("", "unico", "único"):
+        b_obj = graph_ensure_folder(vid_folder_id, block_name.strip(), tok)
+        parent_for_pt = b_obj["id"]
         rel.append(block_name.strip())
     lc = (lang_code or "pt").strip().lower()
     if lc in ("pt", "master", "1. imagens"):
         rel.append("1. Imagens")
-    else:
-        rel.append(LANGUAGES_DB.get(lc, {}).get("name", lc.upper()))
-    return graph_ensure_nested_folder(vid_folder_id, rel, tok), rel
+        img_dir = graph_ensure_folder(parent_for_pt, "1. Imagens", tok)
+        # Mantém '1. Imagens' exclusiva para backup de criativos e garante pasta vazia 'Português' para os vídeos
+        graph_ensure_folder(parent_for_pt, "Português", tok)
+        return img_dir, rel
+    lang_folder = LANGUAGES_DB.get(lc, {}).get("name", lc.upper())
+    rel.append(lang_folder)
+    return graph_ensure_folder(parent_for_pt, lang_folder, tok), rel
 
 
 def upload_standardized_images_cloud(campaign_name, date_str, block_name, lang_code, staged_files, tok, find_work_ids_fn):

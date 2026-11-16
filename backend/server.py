@@ -20,8 +20,10 @@ from urllib.parse import urlparse, unquote, parse_qs
 
 try:
     import studio_engine
+    import cloudflare_image
 except ImportError:
     from backend import studio_engine
+    from backend import cloudflare_image
 
 # Diretório base do dashboard (onde ficam index.html, styles.css, app.js)
 DASHBOARD_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -122,6 +124,8 @@ def load_env_vars():
     keys = [
         "META_ACCESS_TOKEN",
         "GEMINI_API_KEY",
+        "CLOUDFLARE_ACCOUNT_ID",
+        "CLOUDFLARE_API_TOKEN",
         "DEFAULT_AD_ACCOUNT_ID",
         "PORT",
         "ONEDRIVE_CLIENT_ID",
@@ -575,6 +579,7 @@ def get_public_meta_config():
     return {
         "has_server_token": bool(env_vars.get("META_ACCESS_TOKEN", "").strip()),
         "has_gemini_key": bool(env_vars.get("GEMINI_API_KEY", "").strip()),
+        "has_cloudflare": bool(env_vars.get("CLOUDFLARE_ACCOUNT_ID", "").strip() and env_vars.get("CLOUDFLARE_API_TOKEN", "").strip()),
         "default_account_id": env_vars.get("DEFAULT_AD_ACCOUNT_ID", "act_522793227047438"),
         "is_cloud": bool(os.environ.get("RENDER") or os.environ.get("RAILWAY_ENVIRONMENT")),
     }
@@ -2968,6 +2973,18 @@ class APIHandler(BaseHTTPRequestHandler):
                         updates["GEMINI_API_KEY"] = g_val
                     elif not is_cloud:
                         updates["GEMINI_API_KEY"] = ""
+                if "cloudflare_account_id" in payload:
+                    cf_acc = str(payload["cloudflare_account_id"] or "").strip()
+                    if cf_acc:
+                        updates["CLOUDFLARE_ACCOUNT_ID"] = cf_acc
+                    elif not is_cloud:
+                        updates["CLOUDFLARE_ACCOUNT_ID"] = ""
+                if "cloudflare_api_token" in payload:
+                    cf_tok = str(payload["cloudflare_api_token"] or "").strip()
+                    if cf_tok:
+                        updates["CLOUDFLARE_API_TOKEN"] = cf_tok
+                    elif not is_cloud:
+                        updates["CLOUDFLARE_API_TOKEN"] = ""
 
                 if updates:
                     save_env_vars(updates)
@@ -2976,6 +2993,7 @@ class APIHandler(BaseHTTPRequestHandler):
                     "success": True,
                     "has_server_token": bool(env_vars.get("META_ACCESS_TOKEN", "").strip()),
                     "has_gemini_key": bool(env_vars.get("GEMINI_API_KEY", "").strip()),
+                    "has_cloudflare": bool(env_vars.get("CLOUDFLARE_ACCOUNT_ID", "").strip() and env_vars.get("CLOUDFLARE_API_TOKEN", "").strip()),
                     "is_cloud": is_cloud,
                     "message": "Salvo no ambiente em memória. Para fixar em nuvem definitivamente, configure nas Environment Variables do Render." if is_cloud else "Configurações salvas no .env local.",
                 })
@@ -3458,6 +3476,46 @@ class APIHandler(BaseHTTPRequestHandler):
                 return
             res = studio_engine.cancel_render_job()
             self._send_json(res, 200 if res.get("success") else 400)
+
+        elif path == "/api/studio/prepare-creative-plan":
+            if not self._authenticate_request():
+                return
+            try:
+                payload = self._read_json_body()
+                niche_info = payload.get("niche") or {}
+                langs = payload.get("languages") or ["pt", "es", "en"]
+                gemini_key = str(payload.get("gemini_api_key") or "").strip() or load_env_vars().get("GEMINI_API_KEY", "").strip()
+                plan = cloudflare_image.build_niche_creative_plan(
+                    niche_info,
+                    target_langs=langs,
+                    api_key=gemini_key,
+                    translate_fn=_translate_single_text,
+                )
+                self._send_json({"success": True, **plan})
+            except Exception as e:
+                self._send_json({"success": False, "error": str(e)}, 500)
+
+        elif path == "/api/studio/generate-base-image":
+            if not self._authenticate_request():
+                return
+            try:
+                payload = self._read_json_body()
+                env_vars = load_env_vars()
+                cf_acc = str(payload.get("cloudflare_account_id") or "").strip() or env_vars.get("CLOUDFLARE_ACCOUNT_ID", "").strip()
+                cf_tok = str(payload.get("cloudflare_api_token") or "").strip() or env_vars.get("CLOUDFLARE_API_TOKEN", "").strip()
+                prompt_en = str(payload.get("prompt_en") or "").strip()
+                preferred_model = str(payload.get("model") or "").strip()
+                neg = str(payload.get("negative_prompt") or "").strip()
+                res = cloudflare_image.generate_clean_image_cf(
+                    prompt_en,
+                    cf_acc,
+                    cf_tok,
+                    preferred_model=preferred_model,
+                    negative_prompt=neg,
+                )
+                self._send_json(res)
+            except Exception as e:
+                self._send_json({"success": False, "error": str(e)}, 400 if isinstance(e, ValueError) else 500)
 
         else:
             self._send_json({"error": "Rota não encontrada"}, 404)

@@ -3124,3 +3124,88 @@ body {
     line-height: 1.4;
 }
 
+/* ========================================================
+   FÁBRICA AUTOMÁTICA DE CRIATIVOS IA (CLOUDFLARE + CANVAS)
+   ======================================================== */
+.studio-cf-card {
+    border-color: rgba(139, 92, 246, 0.35);
+}
+
+.cf-inline-creds {
+    margin-bottom: 10px;
+    padding: 10px 12px;
+    border-radius: 9px;
+    background: rgba(59, 130, 246, 0.08);
+    border: 1px solid rgba(59, 130, 246, 0.28);
+}
+
+.cf-pdf-row {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px dashed var(--border-color);
+}
+
+.cf-pdf-badges {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.cf-preview-wrap {
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border-color);
+}
+
+.cf-preview-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.cf-preview-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+    gap: 10px;
+}
+
+.cf-preview-card {
+    background: var(--bg-input);
+    border: 1px solid var(--border-color);
+    border-radius: 9px;
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.cf-preview-card-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+}
+
+.cf-preview-card img {
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    object-fit: cover;
+    border-radius: 6px;
+    background: #0f172a;
+}
+
+.cf-preview-card img.is-reels {
+    aspect-ratio: 9 / 16;
+    max-height: 360px;
+    object-fit: contain;
+}
+

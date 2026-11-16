@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>TwoD Hub — Central de Automações</title>
-    <link rel="stylesheet" href="styles.css?v=2.8">
+    <link rel="stylesheet" href="styles.css?v=2.9">
 </head>
 <body>
 
@@ -467,6 +467,100 @@
                                         </div>
 
                                         <div id="weekly-pdf-list" class="weekly-pdf-list"></div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Card 0.5: Fábrica Automática de Criativos IA (Cloudflare Grátis + Canvas Feed/Reels) -->
+                            <div class="studio-card studio-cf-card" id="cf-creative-factory-card">
+                                <div class="studio-card-header" style="margin-bottom: 10px;">
+                                    <div>
+                                        <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                                            <h3>🎨 Fábrica Automática de Criativos IA (Bloco A &amp; B)</h3>
+                                            <span id="studio-cf-status-pill" class="studio-mini-badge status-off">⚪ Configurar Cloudflare Grátis</span>
+                                        </div>
+                                        <p class="text-muted" style="font-size:12px;">Gera cenários limpos grátis via Cloudflare Workers AI (10k Neurons/dia), aplica headline + mockup + CTA no Canvas em 1:1 (1..3) e 9:16 (4..6) para PT/ES/EN e envia pro OneDrive.</p>
+                                    </div>
+                                    <button type="button" id="btn-cf-factory-toggle" class="btn btn-outline btn-sm" onclick="toggleCreativeFactoryCard()">Recolher</button>
+                                </div>
+
+                                <div id="cf-factory-body">
+                                    <div id="studio-cf-inline-wrap" class="cf-inline-creds">
+                                        <div style="font-size:12px; color:#93c5fd; margin-bottom:8px;">
+                                            ☁️ <strong>Cloudflare Workers AI (Grátis, sem cartão):</strong> Cole uma vez seu <code>Account ID</code> + <code>API Token</code> (ou salve em <em>Configurações &amp; Tema</em>).
+                                            <a href="https://dash.cloudflare.com" target="_blank" rel="noopener noreferrer" style="color:#60a5fa; margin-left:6px;">Abrir Cloudflare ↗</a>
+                                        </div>
+                                        <div class="studio-form-row" style="margin-bottom:0;">
+                                            <div class="form-group" style="flex:1; min-width:200px; margin-bottom:0;">
+                                                <input type="text" id="studio-cf-account-inline" class="twod-input" placeholder="Cloudflare Account ID (32 caracteres hex)" style="font-family:monospace; font-size:12px;">
+                                            </div>
+                                            <div class="form-group" style="flex:1; min-width:200px; margin-bottom:0;">
+                                                <input type="password" id="studio-cf-token-inline" class="twod-input" placeholder="Cloudflare API Token (Workers AI: Edit)" style="font-family:monospace; font-size:12px;">
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div class="cf-pdf-row">
+                                        <div class="cf-pdf-badges">
+                                            <input type="file" id="cf-pdf-a-input" accept="application/pdf,.pdf" style="display:none;" onchange="handleCreativePromptPdfSelected(this.files, 'A'); this.value='';">
+                                            <button type="button" class="btn btn-outline btn-sm" onclick="document.getElementById('cf-pdf-a-input').click()">📄 Subir PDF Bloco A</button>
+                                            <span id="cf-pdf-a-status" class="studio-mini-badge muted">📄 PDF Bloco A (opcional)</span>
+
+                                            <input type="file" id="cf-pdf-b-input" accept="application/pdf,.pdf" style="display:none;" onchange="handleCreativePromptPdfSelected(this.files, 'B'); this.value='';">
+                                            <button type="button" class="btn btn-outline btn-sm" onclick="document.getElementById('cf-pdf-b-input').click()">📄 Subir PDF Bloco B</button>
+                                            <span id="cf-pdf-b-status" class="studio-mini-badge muted">📄 PDF Bloco B (opcional)</span>
+                                        </div>
+                                        <div id="cf-factory-target-info" class="text-muted" style="font-size:11.5px;">Digite um Nicho/Data no Studio ou suba o PDF da Semana acima.</div>
+                                    </div>
+
+                                    <div class="studio-form-row" style="margin-top:10px;">
+                                        <div class="form-group" style="flex:1; min-width:170px;">
+                                            <label for="cf-blocks-select">Blocos de Criativos</label>
+                                            <select id="cf-blocks-select" class="twod-input">
+                                                <option value="both" selected>Bloco A (Foto) + Bloco B (Gráfico)</option>
+                                                <option value="A">Somente Bloco A (Estilo Foto)</option>
+                                                <option value="B">Somente Bloco B (Ilustração / 3D)</option>
+                                            </select>
+                                        </div>
+                                        <div class="form-group" style="flex:1.4; min-width:210px;">
+                                            <label for="cf-model-select">Modelo IA Cloudflare (Grátis)</label>
+                                            <select id="cf-model-select" class="twod-input">
+                                                <option value="@cf/black-forest-labs/flux-1-schnell" selected>⚡ Flux-1 Schnell (Rápido &amp; Realista)</option>
+                                                <option value="@cf/leonardo/phoenix-1.0">🎨 Leonardo Phoenix 1.0</option>
+                                                <option value="@cf/black-forest-labs/flux-2-klein-4b">🚀 Flux-2 Klein 4B</option>
+                                            </select>
+                                        </div>
+                                        <div class="form-group" style="flex:1; min-width:190px; display:flex; align-items:flex-end;">
+                                            <label style="display:inline-flex; align-items:center; gap:6px; font-size:12px; cursor:pointer; padding-bottom:8px;">
+                                                <input type="checkbox" id="cf-auto-upload-check" checked>
+                                                <span>☁️ Enviar automático para o OneDrive</span>
+                                            </label>
+                                        </div>
+                                    </div>
+
+                                    <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+                                        <button type="button" id="btn-cf-gen-single" class="btn btn-primary" onclick="runCreativeFactorySingle()">🎨 Gerar Criativos do Nicho Atual</button>
+                                        <button type="button" id="btn-cf-gen-week" class="btn btn-secondary" onclick="runCreativeFactoryWeeklyBatch()">🚀 Gerar Imagens da Semana Toda (PDF)</button>
+                                        <button type="button" class="btn btn-outline" onclick="uploadCurrentPreviewToOneDrive()">☁️ Salvar Prévia no OneDrive</button>
+                                        <button type="button" id="btn-cf-gen-stop" class="btn btn-outline twod-hidden" onclick="stopCreativeFactoryBatch()">⏹️ Parar</button>
+                                    </div>
+
+                                    <div id="cf-factory-progress-wrap" class="studio-render-progress twod-hidden" style="margin-top:12px;">
+                                        <div class="progress-head">
+                                            <span id="cf-factory-progress-label">Preparando...</span>
+                                            <strong id="cf-factory-progress-pct">0%</strong>
+                                        </div>
+                                        <div class="progress-bar-track">
+                                            <div class="progress-bar-fill" id="cf-factory-progress-fill" style="width:0%;"></div>
+                                        </div>
+                                    </div>
+
+                                    <div id="cf-preview-wrap" class="cf-preview-wrap twod-hidden">
+                                        <div class="cf-preview-header">
+                                            <strong id="cf-preview-title">Prévia dos Criativos</strong>
+                                            <div id="cf-preview-tabs"></div>
+                                        </div>
+                                        <div id="cf-preview-grid" class="cf-preview-grid"></div>
                                     </div>
                                 </div>
                             </div>
@@ -1588,6 +1682,19 @@
                         </div>
 
                         <div class="settings-section">
+                            <h3>🎨 Cloudflare Workers AI (Gerador Grátis de Criativos)</h3>
+                            <p class="text-muted" style="margin-bottom: 12px;">Plano gratuito (<strong>10.000 Neurons/dia</strong>, sem cartão de crédito) para gerar cenários base Flux/Phoenix automaticamente. Defina <code>CLOUDFLARE_ACCOUNT_ID</code> e <code>CLOUDFLARE_API_TOKEN</code> no Render para persistir 24/7 ou salve abaixo.</p>
+                            <div id="cloudflare-server-banner" class="twod-hidden" style="margin-bottom: 12px; padding: 10px 14px; border-radius: 8px; background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.35); color: #34d399; font-size: 12px;"></div>
+                            <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
+                                <input type="text" id="cloudflare-account-id-input" class="twod-input" placeholder="Cloudflare Account ID (32 caracteres)" style="flex: 1; min-width: 210px; font-family: monospace; font-size: 12px;">
+                                <input type="password" id="cloudflare-api-token-input" class="twod-input" placeholder="Cloudflare API Token (Workers AI: Edit)" style="flex: 1; min-width: 210px; font-family: monospace; font-size: 12px;">
+                                <button type="button" class="btn btn-primary" onclick="saveCloudflareSettingsFromUI()">💾 Salvar Cloudflare</button>
+                                <a href="https://dash.cloudflare.com" target="_blank" rel="noopener noreferrer" class="btn btn-outline" style="text-decoration:none;">🌐 Painel Cloudflare ↗</a>
+                            </div>
+                            <div id="cloudflare-save-status" class="text-muted" style="margin-top:8px; font-size:12px;"></div>
+                        </div>
+
+                        <div class="settings-section">
                             <h3>☁️ API Própria na Nuvem (OneDrive 24/7)</h3>
                             <p class="text-muted" style="margin-bottom: 16px;">Configure o endereço do servidor backend na nuvem (Render/Railway) para acessar seu OneDrive mesmo quando o PC estiver desligado.</p>
                             <div class="form-grid-2">
@@ -1699,8 +1806,9 @@
         </div>
     </div>
 
-    <script src="app.js?v=9.0"></script>
-    <script src="studio.js?v=1.5"></script>
+    <script src="app.js?v=9.1"></script>
+    <script src="studio.js?v=1.6"></script>
+    <script src="creative_gen.js?v=1.1"></script>
     <script src="campaign_builder.js?v=1.7"></script>
 </body>
 </html>

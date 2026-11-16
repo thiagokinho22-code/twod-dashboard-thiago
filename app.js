@@ -692,6 +692,17 @@ const PANEL_CHANGELOG = [
     {
         date: '16/11/2026',
         type: 'feat',
+        badge: '🎨 Fábrica de Criativos IA',
+        title: 'Criativos automáticos Bloco A & B (Cloudflare Workers AI + Canvas)',
+        summary: 'Gera cenários base grátis (Flux/Phoenix), aplica headlines/CTA em Feed (1:1) e Reels (9:16) para PT/ES/EN e envia pro OneDrive.',
+        highlights: [
+            'Lê os PDFs opcionais de Bloco A/B (ou deriva do Pacote da Semana), compõe 1..6.png com Safe Zones de Reels e permite 🔄 Regerar IA por estilo.',
+            'Salva Account ID + API Token da Cloudflare Workers AI direto em Configurações & Tema com segurança no servidor.'
+        ]
+    },
+    {
+        date: '16/11/2026',
+        type: 'feat',
         badge: '📊 Progresso Ao Vivo',
         title: 'Barrinha de progresso individual por áudio (Studio + Semana)',
         summary: 'Acompanhamento em tempo real de cada idioma/arquivo (.mp3) sendo gerado e salvo no OneDrive.',
@@ -2132,6 +2143,21 @@ function refreshGeminiServerBanner() {
     }
 }
 
+function refreshCloudflareServerBanner() {
+    const banner = document.getElementById('cloudflare-server-banner');
+    if (banner) {
+        if (metaState.hasCloudflare) {
+            banner.classList.remove('twod-hidden');
+            banner.innerHTML = `🟢 <strong>Cloudflare Workers AI ativa com segurança no Servidor (${metaState.isCloud ? 'Render' : '.env Local'}).</strong> Toda a equipe pode gerar criativos automáticos direto para o OneDrive.`;
+        } else {
+            banner.classList.add('twod-hidden');
+        }
+    }
+    if (typeof window.syncStudioCloudflareBanner === 'function') {
+        window.syncStudioCloudflareBanner();
+    }
+}
+
 // Inicializa a API do Meta
 async function initMetaApi() {
     try {
@@ -2146,6 +2172,7 @@ async function initMetaApi() {
         if (data) {
             metaState.hasServerToken = Boolean(data.has_server_token);
             metaState.hasGeminiKey = Boolean(data.has_gemini_key);
+            metaState.hasCloudflare = Boolean(data.has_cloudflare);
             metaState.isCloud = Boolean(data.is_cloud);
             if (metaState.hasServerToken) {
                 // Garante por padrão que todos usem o token permanente seguro do servidor (limpa tokens antigos do navegador)
@@ -2167,6 +2194,7 @@ async function initMetaApi() {
 
     refreshServerTokenBanner();
     refreshGeminiServerBanner();
+    refreshCloudflareServerBanner();
 
     // Renderiza abas de blocos de países
     renderBlockNav();
@@ -5645,6 +5673,67 @@ async function saveGeminiSettingsFromUI() {
     }
 }
 
+async function saveCloudflareSettingsFromUI() {
+    const accInput = document.getElementById('cloudflare-account-id-input');
+    const tokInput = document.getElementById('cloudflare-api-token-input');
+    const statusEl = document.getElementById('cloudflare-save-status');
+    const accVal = accInput ? accInput.value.trim() : '';
+    const tokVal = tokInput ? tokInput.value.trim() : '';
+
+    if ((accVal && !tokVal) || (!accVal && tokVal)) {
+        if (statusEl) {
+            statusEl.textContent = '⚠️ Informe tanto o Account ID quanto o API Token da Cloudflare.';
+            statusEl.style.color = '#fbbf24';
+        }
+        return;
+    }
+
+    if (statusEl) {
+        statusEl.textContent = '⏳ Salvando credenciais Cloudflare...';
+        statusEl.style.color = '#93c5fd';
+    }
+
+    try {
+        if (!accVal && !tokVal) {
+            if (!confirm('Os campos da Cloudflare estão vazios. Deseja remover as credenciais salvas no servidor?')) {
+                if (statusEl) statusEl.textContent = '';
+                return;
+            }
+        }
+        const resp = await apiFetch('/api/meta/config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                cloudflare_account_id: accVal,
+                cloudflare_api_token: tokVal
+            })
+        });
+        const data = await resp.json();
+        if (!resp.ok || !data.success) {
+            throw new Error(data.error || `Erro HTTP ${resp.status}`);
+        }
+        metaState.hasCloudflare = Boolean(data.has_cloudflare);
+        if (accInput) accInput.value = '';
+        if (tokInput) tokInput.value = '';
+        refreshCloudflareServerBanner();
+        if (statusEl) {
+            statusEl.textContent = metaState.hasCloudflare
+                ? (metaState.isCloud
+                    ? '✅ Salvo na sessão do Render! (Para manter após redeploy, adicione CLOUDFLARE_ACCOUNT_ID e CLOUDFLARE_API_TOKEN nas Environment Variables).'
+                    : '✅ Credenciais Cloudflare salvas no servidor (.env) com segurança!')
+                : '🗑️ Credenciais Cloudflare removidas do servidor.';
+            statusEl.style.color = metaState.hasCloudflare ? '#34d399' : '#fbbf24';
+        }
+    } catch (e) {
+        if (statusEl) {
+            statusEl.textContent = `❌ Erro ao salvar: ${e.message}`;
+            statusEl.style.color = '#f87171';
+        } else {
+            alert(`Erro ao salvar Cloudflare: ${e.message}`);
+        }
+    }
+}
+
 // Expõe funções globais para compatibilidade total com onclick
 window.switchTab = switchTab;
 window.setThemeMode = setThemeMode;
@@ -5691,6 +5780,8 @@ window.refreshLinkedPackAndNotice = refreshLinkedPackAndNotice;
 window.handleManualDuplicatorVideos = handleManualDuplicatorVideos;
 window.saveGeminiSettingsFromUI = saveGeminiSettingsFromUI;
 window.refreshGeminiServerBanner = refreshGeminiServerBanner;
+window.saveCloudflareSettingsFromUI = saveCloudflareSettingsFromUI;
+window.refreshCloudflareServerBanner = refreshCloudflareServerBanner;
 window.metaState = metaState;
 
 // ========================================================

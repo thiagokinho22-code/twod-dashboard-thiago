@@ -65,13 +65,16 @@ function updateStudioNamingPreview() {
 
     if (!fullName) {
         prevEl.innerHTML = '💡 Digite o <strong>Nicho</strong> e a <strong>Data</strong> para ver os caminhos automáticos do OneDrive.';
-        return;
+    } else {
+        const blockPart = (useBlocks && blockSel !== 'Único') ? `${blockSel}/` : '';
+        prevEl.innerHTML = `
+            📁 <strong>Áudios:</strong> <code>Arquivos de Áudio/${_studioEsc(fullName)}/${_studioEsc(slug)}_pt.mp3</code> (<code>_es</code>, <code>_en</code>...) &nbsp;•&nbsp;
+            🎬 <strong>Imagens:</strong> <code>Vídeos/${_studioEsc(fullName)}/${_studioEsc(blockPart)}${_studioEsc(imgSub)}/1.png..6.png</code>
+        `;
     }
-    const blockPart = (useBlocks && blockSel !== 'Único') ? `${blockSel}/` : '';
-    prevEl.innerHTML = `
-        📁 <strong>Áudios:</strong> <code>Arquivos de Áudio/${_studioEsc(fullName)}/${_studioEsc(slug)}_pt.mp3</code> (<code>_es</code>, <code>_en</code>...) &nbsp;•&nbsp;
-        🎬 <strong>Imagens:</strong> <code>Vídeos/${_studioEsc(fullName)}/${_studioEsc(blockPart)}${_studioEsc(imgSub)}/1.png..6.png</code>
-    `;
+    if (typeof window.refreshCfTargetSummary === 'function') {
+        window.refreshCfTargetSummary();
+    }
 }
 
 function setStudioTargetCampaign(campFullName) {
@@ -549,6 +552,9 @@ async function onStudioTabOpened() {
     const dateEl = document.getElementById('studio-date-input');
     if (dateEl && !dateEl.value) dateEl.value = getTodayIsoDate();
     initWeeklyPdfImporter();
+    if (typeof window.initCreativeFactoryUI === 'function') {
+        window.initCreativeFactoryUI();
+    }
     bindStudioDropZones();
     updateStudioNamingPreview();
     syncStudioGeminiBanner();
@@ -1536,6 +1542,7 @@ function renderWeeklyPdfPreview() {
     if (!weeklyPackState.items || weeklyPackState.items.length === 0) {
         wrap.classList.add('twod-hidden');
         listEl.innerHTML = '';
+        if (typeof window.refreshCfTargetSummary === 'function') window.refreshCfTargetSummary();
         return;
     }
 
@@ -1653,6 +1660,7 @@ function renderWeeklyPdfPreview() {
 
                 <div class="weekly-niche-actions">
                     <button type="button" class="btn btn-outline btn-sm" ${weeklyPackState.running ? 'disabled' : ''} onclick="runSingleWeeklyNiche(${idx})">🎙️ Gerar Só Este</button>
+                    <button type="button" class="btn btn-outline btn-sm" onclick="runCreativeFactoryForWeeklyIndex(${idx})">🎨 Imagens IA</button>
                     <button type="button" class="btn btn-secondary btn-sm" onclick="loadWeeklyNicheIntoStudio(${idx})">📤 Subir Imagens</button>
                 </div>
 
@@ -1671,6 +1679,7 @@ function renderWeeklyPdfPreview() {
         `;
     }).join('');
     listEl.scrollTop = prevScroll;
+    if (typeof window.refreshCfTargetSummary === 'function') window.refreshCfTargetSummary();
 }
 
 async function processSingleWeeklyItem(item, options) {
