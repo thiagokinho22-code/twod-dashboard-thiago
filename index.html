@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>TwoD Hub — Central de Automações</title>
-    <link rel="stylesheet" href="styles.css?v=3.0">
+    <link rel="stylesheet" href="styles.css?v=3.1">
 </head>
 <body>
 
@@ -597,7 +597,28 @@
                                         <h3>📤 Criar Pacote &amp; Enviar Áudios / Imagens para o OneDrive</h3>
                                         <p class="text-muted" style="font-size:12px;">Padrão exato TwoD Studio: <code>&lt;Nicho&gt; &lt;DD.MM.YY&gt;</code>, <code>Bloco A / B</code>, <code>1. Imagens</code> (nunca apagada) e <code>*_pt.mp3 / _es / _en</code>.</p>
                                     </div>
-                                    <button type="button" class="btn btn-outline btn-sm" onclick="createStudioCampaignStructure()">📁 Criar Pastas no OneDrive</button>
+                                    <button type="button" id="btn-studio-create-folders" class="btn btn-outline btn-sm" onclick="createStudioCampaignStructure()">📁 Criar Pastas no OneDrive</button>
+                                </div>
+
+                                <!-- Menu Expansível Multi-Nichos (Semana PDF / Lote) -->
+                                <div class="studio-niche-picker-wrap" id="studio-niche-picker-wrap">
+                                    <div class="studio-niche-picker-bar">
+                                        <button type="button" id="btn-studio-niche-picker" class="btn btn-outline btn-sm" onclick="toggleStudioNichePickerDrawer()">
+                                            📋 Selecionar Nichos da Semana (PDF) <span id="studio-niche-picker-arrow">▾</span>
+                                        </button>
+                                        <span id="studio-niche-picker-count" class="studio-mini-badge muted">Nenhum PDF carregado</span>
+                                        <div id="studio-niche-batch-summary" class="studio-niche-batch-summary twod-hidden"></div>
+                                    </div>
+                                    <div id="studio-niche-picker-drawer" class="studio-niche-picker-drawer twod-hidden">
+                                        <div class="studio-niche-picker-toolbar">
+                                            <span class="text-muted" style="font-size:11.5px;">Marque 1 ou vários nichos para fazer em lote (pastas, áudios IA e criativos):</span>
+                                            <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                                                <button type="button" class="btn btn-outline btn-sm" onclick="selectAllWeeklyNiches(true)">☑️ Marcar Todos</button>
+                                                <button type="button" class="btn btn-outline btn-sm" onclick="selectAllWeeklyNiches(false)">☐ Limpar</button>
+                                            </div>
+                                        </div>
+                                        <div id="studio-niche-picker-list" class="studio-niche-picker-list"></div>
+                                    </div>
                                 </div>
 
                                 <div class="studio-form-row">
@@ -1831,8 +1852,8 @@
         </div>
     </div>
 
-    <script src="app.js?v=9.2"></script>
-    <script src="studio.js?v=1.7"></script>
+    <script src="app.js?v=9.3"></script>
+    <script src="studio.js?v=1.8"></script>
     <script src="creative_gen.js?v=1.2"></script>
     <script src="campaign_builder.js?v=1.7"></script>
 </body>

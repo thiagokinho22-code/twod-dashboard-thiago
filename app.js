@@ -697,7 +697,7 @@ const PANEL_CHANGELOG = [
         summary: 'Gera cenários base grátis (Flux/Phoenix), aplica headlines/CTA em Feed (1:1) e Reels (9:16) para PT/ES/EN e envia pro OneDrive.',
         highlights: [
             'Lê os PDFs opcionais de Bloco A/B (ou deriva do Pacote da Semana), compõe 1..6.png com letras grandes para público 50+ e permite 🔄 Regerar IA por estilo.',
-            'Pula automaticamente blocos já prontos no OneDrive (retomada após cota diária), cria pasta vazia Português + 1. Imagens intacta, fila por estilo e terminal ao vivo.'
+            'Menu expansível multi-nichos no Studio (puxa os nichos do PDF da semana para criar pastas/áudios/imagens em lote), pular blocos prontos no OneDrive e terminal ao vivo.'
         ]
     },
     {

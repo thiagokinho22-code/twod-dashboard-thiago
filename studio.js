@@ -104,14 +104,168 @@ function setStudioUploadStatus(msg, type = 'info') {
     el.innerHTML = msg;
 }
 
+let _studioNichePickerExpanded = false;
+
+function getStudioBatchSelectedItems() {
+    if (typeof weeklyPackState === 'undefined' || !Array.isArray(weeklyPackState.items)) return [];
+    return weeklyPackState.items.filter(it => it && it.selected);
+}
+
+function toggleStudioNichePickerDrawer(forceState) {
+    const drawer = document.getElementById('studio-niche-picker-drawer');
+    const arrow = document.getElementById('studio-niche-picker-arrow');
+    _studioNichePickerExpanded = (typeof forceState === 'boolean') ? forceState : !_studioNichePickerExpanded;
+    if (drawer) drawer.classList.toggle('twod-hidden', !_studioNichePickerExpanded);
+    if (arrow) arrow.textContent = _studioNichePickerExpanded ? '▴' : '▾';
+}
+
+function toggleStudioPickerNiche(idx, checked) {
+    if (!weeklyPackState || !Array.isArray(weeklyPackState.items) || !weeklyPackState.items[idx]) return;
+    weeklyPackState.items[idx].selected = Boolean(checked);
+    saveWeeklyPackToStorage();
+    renderWeeklyPdfPreview();
+}
+
+function renderStudioNichePicker() {
+    const countEl = document.getElementById('studio-niche-picker-count');
+    const summaryEl = document.getElementById('studio-niche-batch-summary');
+    const listEl = document.getElementById('studio-niche-picker-list');
+    const createBtn = document.getElementById('btn-studio-create-folders');
+    const ttsBtn = document.getElementById('btn-studio-tts-generate');
+
+    const items = (typeof weeklyPackState !== 'undefined' && Array.isArray(weeklyPackState.items))
+        ? weeklyPackState.items
+        : [];
+    const selectedItems = items.filter(it => it && it.selected);
+    const selCount = selectedItems.length;
+
+    if (countEl) {
+        if (items.length > 0) {
+            countEl.textContent = `${items.length} do PDF • ${selCount} marcado(s)`;
+            countEl.className = `studio-mini-badge ${selCount > 0 ? 'ok' : 'muted'}`;
+        } else {
+            countEl.textContent = 'Nenhum PDF carregado';
+            countEl.className = 'studio-mini-badge muted';
+        }
+    }
+
+    if (createBtn) {
+        createBtn.textContent = selCount > 1
+            ? `📁 Criar Pastas (${selCount} nichos)`
+            : '📁 Criar Pastas no OneDrive';
+    }
+    if (ttsBtn && (!ttsBtn.disabled)) {
+        ttsBtn.textContent = selCount > 1
+            ? `🎙️ Gerar Áudios (${selCount} nichos em lote)`
+            : '🎙️ Gerar Áudios (.mp3) Direto no OneDrive';
+    }
+
+    if (summaryEl) {
+        if (selCount > 0) {
+            summaryEl.classList.remove('twod-hidden');
+            const previewChips = selectedItems.slice(0, 5).map(it => {
+                const origIdx = items.indexOf(it);
+                const label = `${it.slug || it.title} ${formatStudioDateShort(it.dateIso)}`;
+                return `<span class="studio-niche-chip">${_studioEsc(label)} <button type="button" onclick="toggleStudioPickerNiche(${origIdx}, false)" title="Desmarcar este nicho">×</button></span>`;
+            }).join('');
+            const more = selCount > 5 ? `<span class="text-muted">+${selCount - 5}</span>` : '';
+            summaryEl.innerHTML = `<strong style="font-size:11px;">Lote:</strong> ${previewChips}${more} <button type="button" class="btn btn-outline btn-sm" style="padding:1px 7px; font-size:10.5px;" onclick="selectAllWeeklyNiches(false)">Limpar lote</button>`;
+        } else {
+            summaryEl.classList.add('twod-hidden');
+            summaryEl.innerHTML = '';
+        }
+    }
+
+    if (listEl) {
+        if (items.length > 0) {
+            listEl.innerHTML = items.map((it, idx) => {
+                const folderName = `${it.slug || it.title || 'Nicho'} ${formatStudioDateShort(it.dateIso)}`;
+                const selCls = it.selected ? 'is-selected' : '';
+                const hasAud = it.status === 'done' || (Array.isArray(it.generatedAudios) && it.generatedAudios.length > 0);
+                const hasImg = it.imgStatus === 'done' || it.imgStatus === 'skipped';
+                const statusTags = `${hasAud ? ' 🎙️' : ''}${hasImg ? ' 🎨' : ''}`;
+                return `
+                    <div class="studio-niche-picker-item ${selCls}">
+                        <label class="studio-niche-picker-label">
+                            <input type="checkbox" ${it.selected ? 'checked' : ''} onchange="toggleStudioPickerNiche(${idx}, this.checked)">
+                            <div style="min-width:0;">
+                                <div style="font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${_studioEsc(it.slug || it.title)}${statusTags}</div>
+                                <div class="text-muted" style="font-size:10.5px;">${_studioEsc(it.dayName || '')} • ${_studioEsc(folderName)}</div>
+                            </div>
+                        </label>
+                        <button type="button" class="btn btn-outline btn-sm" style="padding:2px 8px; font-size:11px; flex-shrink:0;" onclick="loadWeeklyNicheIntoStudio(${idx})" title="Carregar este nicho nos campos abaixo">Usar</button>
+                    </div>
+                `;
+            }).join('');
+        } else {
+            const recent = (Array.isArray(studioState.campaigns) ? studioState.campaigns : []).slice(0, 8);
+            const recentHtml = recent.map(c => `
+                <div class="studio-niche-picker-item">
+                    <div style="min-width:0; flex:1;">
+                        <div style="font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">📁 ${_studioEsc(c.name)}</div>
+                    </div>
+                    <button type="button" class="btn btn-outline btn-sm" style="padding:2px 8px; font-size:11px;" onclick="setStudioTargetCampaign('${_studioEsc(c.name)}')">Usar</button>
+                </div>
+            `).join('');
+            listEl.innerHTML = `
+                <div class="studio-niche-picker-item" style="grid-column:1 / -1; justify-content:space-between;">
+                    <span class="text-muted">Suba o <strong>PDF da Semana</strong> acima para marcar vários nichos e criar tudo em lote.</span>
+                    <button type="button" class="btn btn-primary btn-sm" onclick="document.getElementById('weekly-pdf-input').click()">📄 Subir PDF da Semana</button>
+                </div>
+                ${recentHtml}
+            `;
+        }
+    }
+
+    if (typeof window.refreshCfTargetSummary === 'function') {
+        window.refreshCfTargetSummary();
+    }
+}
+
 async function createStudioCampaignStructure() {
+    const useBlocks = document.getElementById('studio-use-blocks')?.value !== 'single';
+    const batchItems = getStudioBatchSelectedItems();
+
+    if (batchItems.length > 1) {
+        setStudioUploadStatus(`⏳ Criando estrutura padrão no OneDrive para <strong>${batchItems.length} nichos em lote</strong>...`, 'info');
+        let ok = 0;
+        const failed = [];
+        for (let i = 0; i < batchItems.length; i++) {
+            const it = batchItems[i];
+            const nName = it.slug || it.title;
+            const dIso = it.dateIso || getTodayIsoDate();
+            setStudioUploadStatus(`⏳ [${i + 1}/${batchItems.length}] Criando pastas no OneDrive para <strong>${_studioEsc(nName)} (${_studioEsc(formatStudioDateShort(dIso))})</strong>...`, 'info');
+            try {
+                const resp = await window.apiFetch('/api/studio/create-campaign', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ niche: nName, date: dIso, use_blocks: useBlocks })
+                });
+                const data = await resp.json();
+                if (!data.success) throw new Error(data.error || 'Falha ao criar pastas');
+                studioState.activeCampaign = data.campaign_name;
+                studioState.selectedSet.add(data.campaign_name);
+                ok++;
+            } catch (err) {
+                failed.push(`${nName}: ${err.message}`);
+            }
+        }
+        setStudioUploadStatus(
+            failed.length === 0
+                ? `✅ <strong>${ok} estrutura(s)</strong> criada(s) no OneDrive (${useBlocks ? 'Bloco A & Bloco B + 1. Imagens + Português' : '1. Imagens + Português'}).`
+                : `⚠️ ${ok} criada(s), ${failed.length} erro(s): ${_studioEsc(failed.join(' | '))}`,
+            failed.length === 0 ? 'success' : 'warn'
+        );
+        await loadStudioCampaigns();
+        return;
+    }
+
     const { niche, dateIso, fullName } = getStudioTargetCampaignAndDate();
     if (!niche) {
-        alert('Informe o nome do Nicho/Campanha (ex: ÁudioSecreto).');
+        alert('Informe o nome do Nicho/Campanha (ex: ÁudioSecreto) ou selecione no menu "Nichos da Semana".');
         document.getElementById('studio-niche-input')?.focus();
         return;
     }
-    const useBlocks = document.getElementById('studio-use-blocks')?.value !== 'single';
     setStudioUploadStatus(`⏳ Criando estrutura padrão no OneDrive para <strong>${_studioEsc(fullName)}</strong>...`, 'info');
     try {
         const resp = await window.apiFetch('/api/studio/create-campaign', {
@@ -123,7 +277,7 @@ async function createStudioCampaignStructure() {
         if (!data.success) throw new Error(data.error || 'Falha ao criar pastas');
         studioState.activeCampaign = data.campaign_name;
         studioState.selectedSet.add(data.campaign_name);
-        setStudioUploadStatus(`✅ Pastas criadas no OneDrive: <code>${_studioEsc(data.campaign_name)}</code> (${useBlocks ? 'Bloco A & Bloco B + 1. Imagens' : 'Pasta Única + 1. Imagens'}).`, 'success');
+        setStudioUploadStatus(`✅ Pastas criadas no OneDrive: <code>${_studioEsc(data.campaign_name)}</code> (${useBlocks ? 'Bloco A & Bloco B + 1. Imagens + Português' : 'Pasta Única + 1. Imagens + Português'}).`, 'success');
         await loadStudioCampaigns();
     } catch (e) {
         setStudioUploadStatus(`❌ Erro ao criar pastas: ${_studioEsc(e.message)}`, 'error');
@@ -285,6 +439,7 @@ async function loadStudioCampaigns(limit = 20) {
 
         studioState.campaigns = data.campaigns || [];
         renderStudioCampaignsList();
+        renderStudioNichePicker();
     } catch (e) {
         listEl.innerHTML = `<div class="text-muted" style="font-size:12px; padding:10px;">⚠️ ${_studioEsc(e.message)}</div>`;
     }
@@ -871,6 +1026,102 @@ async function generateStudioAudiosWithAI() {
         .map(cb => cb.value)
         .filter(Boolean);
 
+    const hasServerKey = Boolean(window.metaState && window.metaState.hasGeminiKey);
+    if (!hasServerKey && !inlineKey) {
+        syncStudioGeminiBanner();
+        alert('Informe sua Gemini API Key gratuita (ou peça para o Admin salvar nas Configurações do servidor).');
+        if (keyInlineEl) keyInlineEl.focus();
+        return;
+    }
+
+    const batchItems = getStudioBatchSelectedItems();
+    if (batchItems.length > 1) {
+        const usableItems = batchItems.filter(it => String(it.audioScript || scriptPt || '').trim().length > 0);
+        if (usableItems.length === 0) {
+            alert('Nenhum dos nichos marcados possui roteiro preenchido.');
+            return;
+        }
+        if (langs.length === 0) {
+            alert('Selecione pelo menos 1 idioma para gerar áudio.');
+            return;
+        }
+        const totalAudios = usableItems.length * langs.length;
+        let doneTotal = 0;
+        let errTotal = 0;
+        const allSlots = [];
+
+        if (btnEl) {
+            btnEl.disabled = true;
+            btnEl.textContent = `⏳ Gerando ${usableItems.length} nicho(s) (${totalAudios} áudios)...`;
+        }
+        if (msgEl) {
+            msgEl.classList.remove('twod-hidden');
+            msgEl.style.color = '#93c5fd';
+            msgEl.textContent = `⏳ Lote: gerando áudios de ${usableItems.length} nichos no OneDrive...`;
+        }
+        if (progWrap) progWrap.classList.remove('twod-hidden');
+
+        try {
+            let priorDone = 0;
+            for (let i = 0; i < usableItems.length; i++) {
+                const it = usableItems[i];
+                const nScript = String(it.audioScript || scriptPt || '').trim();
+                const nName = it.slug || it.title;
+                const dIso = it.dateIso || dateIso;
+                const resItem = await generateAudiosSequentiallyWithProgress({
+                    campaign: nName,
+                    date: dIso,
+                    scriptPt: nScript,
+                    languages: langs,
+                    voice,
+                    style,
+                    geminiApiKey: inlineKey,
+                    onStep: ({ completed, phase, slot, slots }) => {
+                        const globalDone = priorDone + completed;
+                        const gPct = Math.round((globalDone / Math.max(1, totalAudios)) * 100);
+                        if (progPct) progPct.textContent = `${gPct}%`;
+                        if (progFill) progFill.style.width = `${gPct}%`;
+                        if (progLabel) {
+                            if (phase === 'running' && slot) {
+                                progLabel.textContent = `⏳ [${i + 1}/${usableItems.length} • ${nName}] ${slot.filename} (${slot.lang_name})...`;
+                            } else if (slot) {
+                                progLabel.textContent = `${phase === 'done' ? '✅' : '⚠️'} [${globalDone}/${totalAudios}] ${slot.filename}`;
+                            }
+                        }
+                        renderStudioTtsResultSlots(resEl, [...allSlots, ...slots]);
+                    }
+                });
+                allSlots.push(...(resItem.slots || []));
+                priorDone += langs.length;
+                doneTotal += (resItem.generated || []).length;
+                errTotal += (resItem.errors || []).length;
+                if (resItem.campaignName) studioState.selectedSet.add(resItem.campaignName);
+            }
+            if (inlineKey && keyInlineEl) keyInlineEl.value = '';
+            if (progPct) progPct.textContent = '100%';
+            if (progFill) progFill.style.width = '100%';
+            if (progLabel) progLabel.textContent = `✅ Lote concluído: ${doneTotal}/${totalAudios} áudios salvos no OneDrive`;
+            if (msgEl) {
+                msgEl.style.color = errTotal > 0 ? '#fbbf24' : '#34d399';
+                msgEl.textContent = `✅ ${doneTotal} áudio(s) de ${usableItems.length} nicho(s) salvos no OneDrive${errTotal ? ` (${errTotal} erro(s))` : ''}!`;
+            }
+            await loadStudioCampaigns();
+            if (typeof window.loadNichesFromAPI === 'function') window.loadNichesFromAPI(true);
+        } catch (e) {
+            if (msgEl) {
+                msgEl.classList.remove('twod-hidden');
+                msgEl.style.color = '#f87171';
+                msgEl.textContent = `❌ Erro no lote de áudios: ${e.message}`;
+            }
+        } finally {
+            if (btnEl) {
+                btnEl.disabled = false;
+                renderStudioNichePicker();
+            }
+        }
+        return;
+    }
+
     if (!niche) {
         alert('Informe o Nicho/Campanha no topo do Studio antes de gerar os áudios.');
         return;
@@ -881,13 +1132,6 @@ async function generateStudioAudiosWithAI() {
     }
     if (langs.length === 0) {
         alert('Selecione pelo menos 1 idioma para gerar áudio.');
-        return;
-    }
-    const hasServerKey = Boolean(window.metaState && window.metaState.hasGeminiKey);
-    if (!hasServerKey && !inlineKey) {
-        syncStudioGeminiBanner();
-        alert('Informe sua Gemini API Key gratuita (ou peça para o Admin salvar nas Configurações do servidor).');
-        if (keyInlineEl) keyInlineEl.focus();
         return;
     }
 
@@ -969,6 +1213,7 @@ async function generateStudioAudiosWithAI() {
         if (btnEl) {
             btnEl.disabled = false;
             btnEl.textContent = '🎙️ Gerar Áudios (.mp3) Direto no OneDrive';
+            renderStudioNichePicker();
         }
     }
 }
@@ -1472,6 +1717,7 @@ function toggleWeeklyItemCheck(idx, checked) {
     if (!weeklyPackState.items[idx]) return;
     weeklyPackState.items[idx].selected = Boolean(checked);
     saveWeeklyPackToStorage();
+    renderStudioNichePicker();
 }
 
 function selectAllWeeklyNiches(selected) {
@@ -1542,6 +1788,7 @@ function renderWeeklyPdfPreview() {
     if (!weeklyPackState.items || weeklyPackState.items.length === 0) {
         wrap.classList.add('twod-hidden');
         listEl.innerHTML = '';
+        renderStudioNichePicker();
         if (typeof window.refreshCfTargetSummary === 'function') window.refreshCfTargetSummary();
         return;
     }
@@ -1697,6 +1944,7 @@ function renderWeeklyPdfPreview() {
         `;
     }).join('');
     listEl.scrollTop = prevScroll;
+    renderStudioNichePicker();
     if (typeof window.refreshCfTargetSummary === 'function') window.refreshCfTargetSummary();
 }
 
@@ -1953,6 +2201,9 @@ window.runSingleWeeklyNiche = runSingleWeeklyNiche;
 window.runWeeklyPdfBatch = runWeeklyPdfBatch;
 window.stopWeeklyPdfBatch = stopWeeklyPdfBatch;
 window.syncWeeklyTtsMirrorBadge = syncWeeklyTtsMirrorBadge;
+window.toggleStudioNichePickerDrawer = toggleStudioNichePickerDrawer;
+window.toggleStudioPickerNiche = toggleStudioPickerNiche;
+window.renderStudioNichePicker = renderStudioNichePicker;
 window.twodWeeklyPdfParser = {
     clusterPdfItemsToLines,
     detectDayFromLines,
