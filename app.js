@@ -3403,27 +3403,57 @@ function extractCreativeMediaEntries(cr = {}) {
 async function fetchAdCreativeFullFields(creativeId) {
     if (!creativeId) return null;
     const baseFields = 'id,name,actor_id,object_type,effective_object_story_id,thumbnail_url,image_url,video_id,object_story_spec,asset_feed_spec';
-    try {
-        const res = await metaGraphGet(`/${META_GRAPH_VERSION}/${creativeId}?fields=${baseFields},creative_asset_groups_spec`);
-        if (res && !res.error) return res;
-    } catch (e) {
-        if (!/creative_asset_groups_spec|nonexisting field/i.test(e.message || '')) {
-            throw e;
+    const minFields = 'id,name,actor_id,object_type,effective_object_story_id,thumbnail_url,image_url,video_id,object_story_spec';
+    const tiers = [
+        `${baseFields},creative_asset_groups_spec`,
+        baseFields,
+        minFields
+    ];
+
+    let lastRes = null;
+    for (let i = 0; i < tiers.length; i++) {
+        try {
+            const res = await metaGraphGet(`/${META_GRAPH_VERSION}/${creativeId}?fields=${tiers[i]}`);
+            lastRes = res;
+            if (res && !res.error) return res;
+            const errMsg = res?.error?.message || '';
+            const isFieldErr = /creative_asset_groups_spec|asset_feed_spec|nonexisting field|\(#100\)/i.test(errMsg) || res?.error?.code === 100;
+            if (!isFieldErr) return res;
+        } catch (e) {
+            const isFieldErr = /creative_asset_groups_spec|asset_feed_spec|nonexisting field|\(#100\)/i.test(e.message || '');
+            if (!isFieldErr || i === tiers.length - 1) throw e;
         }
     }
-    return metaGraphGet(`/${META_GRAPH_VERSION}/${creativeId}?fields=${baseFields}`);
+    return lastRes;
 }
 
 async function hydrateAdSetAdsWithCreatives(adsetId) {
     const baseCrFields = 'id,name,actor_id,object_type,effective_object_story_id,thumbnail_url,image_url,video_id,object_story_spec,asset_feed_spec';
+    const minCrFields = 'id,name,actor_id,object_type,effective_object_story_id,thumbnail_url,image_url,video_id,object_story_spec';
+    const fieldTiers = [
+        `id,name,status,url_tags,creative{${baseCrFields},creative_asset_groups_spec}`,
+        `id,name,status,url_tags,creative{${baseCrFields}}`,
+        `id,name,status,url_tags,creative{${minCrFields}}`,
+        `id,name,status,url_tags,creative{id}`
+    ];
+
     let adsData = null;
-    try {
-        adsData = await metaGraphGet(`/${META_GRAPH_VERSION}/${adsetId}/ads?fields=id,name,status,url_tags,creative{${baseCrFields},creative_asset_groups_spec}&limit=50`);
-    } catch (e) {
-        if (!/creative_asset_groups_spec|nonexisting field/i.test(e.message || '')) {
-            throw e;
+    for (let i = 0; i < fieldTiers.length; i++) {
+        try {
+            const res = await metaGraphGet(`/${META_GRAPH_VERSION}/${adsetId}/ads?fields=${fieldTiers[i]}&limit=50`);
+            adsData = res;
+            if (res && !res.error) break;
+            const errMsg = res?.error?.message || '';
+            const isFieldErr = /creative_asset_groups_spec|asset_feed_spec|nonexisting field|\(#100\)/i.test(errMsg) || res?.error?.code === 100;
+            if (!isFieldErr) break;
+        } catch (e) {
+            const isFieldErr = /creative_asset_groups_spec|asset_feed_spec|nonexisting field|\(#100\)/i.test(e.message || '');
+            if (!isFieldErr || i === fieldTiers.length - 1) throw e;
         }
-        adsData = await metaGraphGet(`/${META_GRAPH_VERSION}/${adsetId}/ads?fields=id,name,status,url_tags,creative{${baseCrFields}}&limit=50`);
+    }
+
+    if (adsData?.error) {
+        throw new Error(formatMetaApiError(adsData.error));
     }
 
     const ads = Array.isArray(adsData?.data) ? adsData.data : [];
@@ -4922,6 +4952,7 @@ async function startBatchDuplication() {
 
     // Busca previamente todos os anúncios e criativos completos (hidratando asset_feed_spec e creative_asset_groups_spec)
     let baseAds = [];
+    let baseAdsLoadError = '';
     try {
         baseAds = await hydrateAdSetAdsWithCreatives(adsetId);
         logMetaTerminal(`📋 Anúncios identificados no conjunto base: ${baseAds.length} anúncio(s)`, 'info');
@@ -4934,7 +4965,9 @@ async function startBatchDuplication() {
             logMetaTerminal(`🔎 Modelo #${idx + 1} '${bAd.name || bAd.id}': ${mEntries.length} mídia(s) detectada(s) [afs_v=${afsV}, afs_i=${afsI}, cags_g=${cagsG}]`, 'info');
         });
     } catch (e) {
+        baseAdsLoadError = e.message || String(e);
         console.warn('Não foi possível ler anúncios prévios do conjunto:', e);
+        logMetaTerminal(`❌ Erro ao consultar anúncios do conjunto base: ${baseAdsLoadError}`, 'error');
     }
 
     // Pré-prepara vídeos + textos traduzidos + URLs TranslateX + AdCreatives por idioma destino pronto
@@ -4987,15 +5020,33 @@ async function startBatchDuplication() {
         return out;
     };
 
-    if (baseAds.length === 0 && (readyDiffLangs.length > 0 || countriesToDuplicate.length > 0)) {
-        logMetaTerminal(`⚠️ Nenhum anúncio encontrado no conjunto base para servir de modelo.`, 'warn');
-    }
-
     const preparedSameLangItems = [];
     const hasSameLangTargets = countriesToDuplicate.some(c => {
         const cLang = (c.langCode || (block.langCode && block.langCode !== 'multi' ? block.langCode : baseLang) || baseLang).toLowerCase();
         return cLang === baseLang;
     });
+
+    if (baseAds.length === 0 && (baseAdsLoadError || hasSameLangTargets || readyDiffLangs.length > 0)) {
+        const noAdsReason = baseAdsLoadError
+            ? `Erro na Meta API ao ler os anúncios do conjunto base:\n• ${baseAdsLoadError}`
+            : `A Meta retornou 0 anúncios no conjunto base '${adsetObj.name}'.`;
+        logMetaTerminal(`⚠️ Nenhum anúncio encontrado no conjunto base para servir de modelo. ${baseAdsLoadError || ''}`, 'warn');
+        const proceedWithoutAds = confirm(
+            `⚠️ ATENÇÃO — NENHUM ANÚNCIO ENCONTRADO NO CONJUNTO BASE:\n\n` +
+            `${noAdsReason}\n\n` +
+            `Se continuar agora, os ${countriesToDuplicate.length} conjunto(s) serão criados VAZIOS (sem nenhum anúncio).\n\n` +
+            `• Cancelar = ABORTAR AGORA (Recomendado — evita criar conjuntos sem anúncio)\n` +
+            `• OK = Continuar criando conjuntos sem anúncio`
+        );
+        if (!proceedWithoutAds) {
+            logMetaTerminal(`🛑 Duplicação cancelada antes de criar conjuntos vazios sem anúncio.`, 'warn');
+            if (termStatus) termStatus.innerText = baseAdsLoadError ? 'Erro ao ler anúncios base' : 'Cancelado';
+            if (progressStatus) progressStatus.innerText = 'Cancelado antes de criar conjuntos vazios';
+            finishDuplicationUi();
+            return;
+        }
+    }
+
     const baseHasFlexibleMulti = baseAds.some(ad => extractCreativeMediaEntries(ad.creative || {}).length > 1);
 
     if (hasSameLangTargets && baseAds.length > 0 && baseHasFlexibleMulti) {
@@ -5406,7 +5457,7 @@ async function startBatchDuplication() {
                         if (adResult.id) {
                             adsCreated++;
                         } else if (adResult.error) {
-                            logMetaTerminal(`⚠️ Anúncio '${item.adName}' em ${finalName} falhou: ${adResult.error.message}`, 'warn');
+                            logMetaTerminal(`⚠️ Anúncio '${item.adName}' em ${finalName} falhou: ${formatMetaApiError(adResult.error)}`, 'warn');
                         }
                     }
                     countryModeMsg = adsCreated > 0 ? `com ${adsCreated} anúncio(s) individuais clonado(s)` : 'sem anúncios';
@@ -5417,7 +5468,7 @@ async function startBatchDuplication() {
                             if (adResult.id) {
                                 adsCreated++;
                             } else if (adResult.error) {
-                                logMetaTerminal(`⚠️ Anúncio '${baseAd.name}' em ${finalName} falhou: ${adResult.error.message}`, 'warn');
+                                logMetaTerminal(`⚠️ Anúncio '${baseAd.name}' em ${finalName} falhou: ${formatMetaApiError(adResult.error)}`, 'warn');
                             }
                         }
                     }
@@ -5429,7 +5480,7 @@ async function startBatchDuplication() {
                     if (adResult.id) {
                         adsCreated++;
                     } else if (adResult.error) {
-                        logMetaTerminal(`⚠️ Anúncio traduzido '${item.adName}' em ${finalName} falhou: ${adResult.error.message}`, 'warn');
+                        logMetaTerminal(`⚠️ Anúncio traduzido '${item.adName}' em ${finalName} falhou: ${formatMetaApiError(adResult.error)}`, 'warn');
                     }
                 }
                 countryModeMsg = adsCreated > 0 ? `com ${adsCreated} anúncio(s) traduzido(s) (${countryLang.toUpperCase()})` : 'sem anúncios';
