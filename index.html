@@ -1,11 +1,13 @@
 <!DOCTYPE html>
 <html lang="pt-BR" data-theme="dark">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>TwoD Hub — Central de Automações</title>
-    <link rel="stylesheet" href="styles.css?v=3.1">
+    <link rel="stylesheet" href="styles.css?v=3.2">
 </head>
+
 <body>
 
     <!-- ========================================== -->
@@ -26,12 +28,14 @@
             <form id="login-form" onsubmit="event.preventDefault(); handleLogin(event); return false;">
                 <div class="form-group">
                     <label for="login-username">Usuário</label>
-                    <input type="text" id="login-username" placeholder="Digite seu usuário..." autocomplete="username" required>
+                    <input type="text" id="login-username" placeholder="Digite seu usuário..." autocomplete="username"
+                        required>
                 </div>
 
                 <div class="form-group">
                     <label for="login-password">Senha</label>
-                    <input type="password" id="login-password" placeholder="Digite sua senha..." autocomplete="current-password" required>
+                    <input type="password" id="login-password" placeholder="Digite sua senha..."
+                        autocomplete="current-password" required>
                 </div>
 
                 <div id="login-error" class="login-error-msg twod-hidden">Usuário ou senha incorretos.</div>
@@ -58,21 +62,26 @@
                 <p id="force-pwd-user-label">Primeiro acesso detectado. Crie sua senha pessoal antes de entrar.</p>
             </div>
 
-            <form id="force-password-form" onsubmit="event.preventDefault(); submitForcedPasswordChange(event); return false;">
+            <form id="force-password-form"
+                onsubmit="event.preventDefault(); submitForcedPasswordChange(event); return false;">
                 <div class="form-group">
                     <label for="force-new-pwd">Nova Senha (mín. 6 caracteres)</label>
-                    <input type="password" id="force-new-pwd" placeholder="Digite sua nova senha pessoal..." autocomplete="new-password" required>
+                    <input type="password" id="force-new-pwd" placeholder="Digite sua nova senha pessoal..."
+                        autocomplete="new-password" required>
                 </div>
 
                 <div class="form-group">
                     <label for="force-confirm-pwd">Confirmar Nova Senha</label>
-                    <input type="password" id="force-confirm-pwd" placeholder="Repita a nova senha..." autocomplete="new-password" required>
+                    <input type="password" id="force-confirm-pwd" placeholder="Repita a nova senha..."
+                        autocomplete="new-password" required>
                 </div>
 
                 <div id="force-pwd-error" class="login-error-msg twod-hidden"></div>
 
-                <button type="submit" id="btn-force-pwd-submit" class="btn btn-primary btn-block">🔒 Salvar Senha e Entrar</button>
-                <button type="button" class="btn btn-outline btn-block" onclick="showLogin()" style="margin-top: 10px;">← Voltar para o Login</button>
+                <button type="submit" id="btn-force-pwd-submit" class="btn btn-primary btn-block">🔒 Salvar Senha e
+                    Entrar</button>
+                <button type="button" class="btn btn-outline btn-block" onclick="showLogin()"
+                    style="margin-top: 10px;">← Voltar para o Login</button>
             </form>
         </div>
     </div>
@@ -81,7 +90,7 @@
     <!-- APLICAÇÃO PRINCIPAL (DASHBOARD)            -->
     <!-- ========================================== -->
     <div id="app-container" class="app-layout twod-hidden">
-        
+
         <!-- SIDEBAR LATERAL -->
         <aside class="sidebar">
             <div class="sidebar-header">
@@ -97,48 +106,82 @@
             <nav class="sidebar-nav">
                 <div class="nav-section-title">PRINCIPAL</div>
                 <button class="nav-item active" data-tab="visao-geral" onclick="switchTab('visao-geral')">
-                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline></svg>
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
+                        <polyline points="9 22 9 12 15 12 15 22"></polyline>
+                    </svg>
                     <span>Visão Geral</span>
                 </button>
 
                 <div class="nav-section-title">FERRAMENTAS</div>
                 <button class="nav-item" data-tab="criativos" onclick="switchTab('criativos')">
-                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                        <polygon points="23 7 16 12 23 17 23 7"></polygon>
+                        <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+                    </svg>
                     <span>Gerador de Criativos</span>
                 </button>
 
                 <button class="nav-item" data-tab="gerador-campanhas" onclick="switchTab('gerador-campanhas')">
-                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="16"></line><line x1="8" y1="12" x2="16" y2="12"></line></svg>
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <line x1="12" y1="8" x2="12" y2="16"></line>
+                        <line x1="8" y1="12" x2="16" y2="12"></line>
+                    </svg>
                     <span>Gerador de Campanhas</span>
-                    <span class="tag-status" style="background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3);">Padrão TwoD</span>
+                    <span class="tag-status"
+                        style="background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3);">Padrão
+                        TwoD</span>
                 </button>
 
                 <button class="nav-item" data-tab="duplicador" onclick="switchTab('duplicador')">
-                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                    </svg>
                     <span>Duplicador Meta Ads</span>
-                    <span class="tag-status" style="background: rgba(16, 185, 129, 0.15); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.3);">Online</span>
+                    <span class="tag-status"
+                        style="background: rgba(16, 185, 129, 0.15); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.3);">Online</span>
                 </button>
 
                 <button class="nav-item" data-tab="fun-digital" onclick="switchTab('fun-digital')">
-                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h8l-1 8 11-12h-8l1-8z" /></svg>
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M13 2L3 14h8l-1 8 11-12h-8l1-8z" />
+                    </svg>
                     <span>Fila FUN Digital</span>
                     <span class="badge-count" id="badge-total-sites">9</span>
                 </button>
 
                 <button class="nav-item" data-tab="wordpress" onclick="switchTab('wordpress')">
-                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><path d="M2 12h20"></path><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <path d="M2 12h20"></path>
+                        <path
+                            d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z">
+                        </path>
+                    </svg>
                     <span>WordPress (Tags/Coment.)</span>
                     <span class="tag-status">Em Breve</span>
                 </button>
 
                 <div class="nav-section-title admin-only">ADMINISTRAÇÃO</div>
                 <button class="nav-item admin-only" data-tab="usuarios" onclick="switchTab('usuarios')">
-                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                        <circle cx="9" cy="7" r="4"></circle>
+                        <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+                        <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+                    </svg>
                     <span>Gestão de Usuários</span>
                 </button>
 
                 <button class="nav-item" data-tab="configuracoes" onclick="switchTab('configuracoes')">
-                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="3"></circle>
+                        <path
+                            d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z">
+                        </path>
+                    </svg>
                     <span>Configurações & Tema</span>
                 </button>
             </nav>
@@ -151,7 +194,12 @@
                         <span class="user-role" id="current-user-role">Administrador</span>
                     </div>
                     <button class="btn-logout" id="btn-logout" title="Sair da conta">
-                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                            <polyline points="16 17 21 12 16 7"></polyline>
+                            <line x1="21" y1="12" x2="9" y2="12"></line>
+                        </svg>
                     </button>
                 </div>
             </div>
@@ -159,7 +207,7 @@
 
         <!-- CONTEÚDO PRINCIPAL (MAIN VIEW) -->
         <main class="main-content">
-            
+
             <!-- BARRA SUPERIOR (HEADER) -->
             <header class="top-header">
                 <div class="header-title">
@@ -168,16 +216,20 @@
                 </div>
 
                 <div class="header-actions">
-                    <button type="button" id="header-meta-app-pill" class="app-health-pill health-pending" onclick="openMetaAppHealthPanel()" title="Ver Status de Saúde do App Meta, DUC e Rate Limit">
+                    <button type="button" id="header-meta-app-pill" class="app-health-pill health-pending"
+                        onclick="openMetaAppHealthPanel()" title="Ver Status de Saúde do App Meta, DUC e Rate Limit">
                         <span class="health-dot"></span>
                         <span id="header-meta-app-pill-text">App Meta: Verificando...</span>
                     </button>
 
                     <!-- SELETOR RÁPIDO DE TEMA -->
                     <div class="theme-quick-toggle" title="Modo de Tema">
-                        <button class="theme-btn" id="theme-btn-light" onclick="setThemeMode('light')" title="Modo Claro">☀️</button>
-                        <button class="theme-btn" id="theme-btn-dark" onclick="setThemeMode('dark')" title="Modo Escuro">🌙</button>
-                        <button class="theme-btn" id="theme-btn-auto" onclick="setThemeMode('auto')" title="Automático por Horário">⏰</button>
+                        <button class="theme-btn" id="theme-btn-light" onclick="setThemeMode('light')"
+                            title="Modo Claro">☀️</button>
+                        <button class="theme-btn" id="theme-btn-dark" onclick="setThemeMode('dark')"
+                            title="Modo Escuro">🌙</button>
+                        <button class="theme-btn" id="theme-btn-auto" onclick="setThemeMode('auto')"
+                            title="Automático por Horário">⏰</button>
                     </div>
 
                     <div class="current-time-badge" id="live-clock">--:--:--</div>
@@ -195,15 +247,23 @@
                         <div class="status-card" id="card-onedrive-overview">
                             <div class="status-card-header">
                                 <div class="status-icon bg-blue">
-                                    <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z"/></svg>
+                                    <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+                                        <path
+                                            d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z" />
+                                    </svg>
                                 </div>
-                                <span class="badge-status status-pending" id="badge-onedrive-status">⏳ Verificando...</span>
+                                <span class="badge-status status-pending" id="badge-onedrive-status">⏳
+                                    Verificando...</span>
                             </div>
                             <h3 id="onedrive-card-heading">Microsoft OneDrive</h3>
-                            <p class="status-desc" id="onedrive-card-desc">Verificando conexão com a API na nuvem e pasta local...</p>
-                            <div class="card-footer-info" style="display: flex; justify-content: space-between; align-items: center;">
+                            <p class="status-desc" id="onedrive-card-desc">Verificando conexão com a API na nuvem e
+                                pasta local...</p>
+                            <div class="card-footer-info"
+                                style="display: flex; justify-content: space-between; align-items: center;">
                                 <span id="onedrive-card-subinfo">Consultando backend...</span>
-                                <button type="button" class="btn btn-outline" style="padding: 4px 10px; font-size: 11px;" onclick="switchTab('criativos')">Abrir Criativos 🎬</button>
+                                <button type="button" class="btn btn-outline"
+                                    style="padding: 4px 10px; font-size: 11px;" onclick="switchTab('criativos')">Abrir
+                                    Criativos 🎬</button>
                             </div>
                         </div>
 
@@ -211,15 +271,21 @@
                         <div class="status-card" id="card-meta-overview">
                             <div class="status-card-header">
                                 <div class="status-icon bg-indigo">
-                                    <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M12 2C6.477 2 2 6.477 2 12c0 4.991 3.657 9.128 8.438 9.879V14.89h-2.54V12h2.54V9.797c0-2.506 1.492-3.89 3.777-3.89 1.094 0 2.238.195 2.238.195v2.46h-1.26c-1.243 0-1.63.771-1.63 1.562V12h2.773l-.443 2.89h-2.33v6.989C18.343 21.129 22 16.99 22 12c0-5.523-4.477-10-10-10z"/></svg>
+                                    <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+                                        <path
+                                            d="M12 2C6.477 2 2 6.477 2 12c0 4.991 3.657 9.128 8.438 9.879V14.89h-2.54V12h2.54V9.797c0-2.506 1.492-3.89 3.777-3.89 1.094 0 2.238.195 2.238.195v2.46h-1.26c-1.243 0-1.63.771-1.63 1.562V12h2.773l-.443 2.89h-2.33v6.989C18.343 21.129 22 16.99 22 12c0-5.523-4.477-10-10-10z" />
+                                    </svg>
                                 </div>
                                 <span class="badge-status status-pending" id="badge-meta-status">⏳ Verificando...</span>
                             </div>
                             <h3 id="meta-user-heading">Meta Marketing API</h3>
                             <p class="status-desc" id="meta-status-desc">Verificando token salvo no navegador...</p>
-                            <div class="card-footer-info" style="display: flex; justify-content: space-between; align-items: center;">
+                            <div class="card-footer-info"
+                                style="display: flex; justify-content: space-between; align-items: center;">
                                 <span id="meta-card-subinfo">Aguardando verificação</span>
-                                <button type="button" class="btn btn-outline" style="padding: 4px 10px; font-size: 11px;" onclick="switchTab('duplicador')">Abrir Duplicador 🚀</button>
+                                <button type="button" class="btn btn-outline"
+                                    style="padding: 4px 10px; font-size: 11px;" onclick="switchTab('duplicador')">Abrir
+                                    Duplicador 🚀</button>
                             </div>
                         </div>
 
@@ -227,15 +293,21 @@
                         <div class="status-card" id="card-fun-overview">
                             <div class="status-card-header">
                                 <div class="status-icon bg-emerald">
-                                    <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M13 2L3 14h8l-1 8 11-12h-8l1-8z" /></svg>
+                                    <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+                                        <path d="M13 2L3 14h8l-1 8 11-12h-8l1-8z" />
+                                    </svg>
                                 </div>
                                 <span class="badge-status status-active" id="badge-fun-status">⚡ Extensão Ativa</span>
                             </div>
                             <h3 id="fun-card-heading">FUN Digital (9 Sites)</h3>
-                            <p class="status-desc" id="fun-card-desc">Automação de fila desenvolvida por Alexandre (TwoD AutoFill)</p>
-                            <div class="card-footer-info" style="display: flex; justify-content: space-between; align-items: center;">
+                            <p class="status-desc" id="fun-card-desc">Automação de fila desenvolvida por Alexandre (TwoD
+                                AutoFill)</p>
+                            <div class="card-footer-info"
+                                style="display: flex; justify-content: space-between; align-items: center;">
                                 <span id="fun-card-subinfo">9 sites configurados na fila diária</span>
-                                <button type="button" class="btn btn-outline" style="padding: 4px 10px; font-size: 11px;" onclick="switchTab('fun-digital')">Ver Fila ⚡</button>
+                                <button type="button" class="btn btn-outline"
+                                    style="padding: 4px 10px; font-size: 11px;" onclick="switchTab('fun-digital')">Ver
+                                    Fila ⚡</button>
                             </div>
                         </div>
 
@@ -243,15 +315,20 @@
                         <div class="status-card" id="card-wp-overview">
                             <div class="status-card-header">
                                 <div class="status-icon bg-cyan">
-                                    <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><circle cx="12" cy="12" r="10"></circle></svg>
+                                    <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+                                        <circle cx="12" cy="12" r="10"></circle>
+                                    </svg>
                                 </div>
                                 <span class="badge-status status-pending" id="badge-wp-status">🔧 Em Construção</span>
                             </div>
                             <h3>WordPress Blogs</h3>
                             <p class="status-desc">Rede de sites (Simplificandocomcafe, Twod, Kiuvix...)</p>
-                            <div class="card-footer-info" style="display: flex; justify-content: space-between; align-items: center;">
+                            <div class="card-footer-info"
+                                style="display: flex; justify-content: space-between; align-items: center;">
                                 <span id="wp-card-subinfo">Ajuste de tags e comentários em massa</span>
-                                <button type="button" class="btn btn-outline" style="padding: 4px 10px; font-size: 11px;" onclick="switchTab('wordpress')">Abrir Aba 📝</button>
+                                <button type="button" class="btn btn-outline"
+                                    style="padding: 4px 10px; font-size: 11px;" onclick="switchTab('wordpress')">Abrir
+                                    Aba 📝</button>
                             </div>
                         </div>
                     </div>
@@ -260,11 +337,15 @@
                     <div class="welcome-box">
                         <div class="welcome-text">
                             <h2>Bem-vindo à nova central da TwoD! 🚀</h2>
-                            <p>Este painel foi estruturado para substituir o uso de executáveis locais, automatizar as duplicações do Meta Ads em segundos e centralizar os comandos da equipe.</p>
+                            <p>Este painel foi estruturado para substituir o uso de executáveis locais, automatizar as
+                                duplicações do Meta Ads em segundos e centralizar os comandos da equipe.</p>
                             <div class="action-buttons-row">
-                                <button class="btn btn-primary" onclick="switchTab('duplicador')">Abrir Duplicador Meta Ads</button>
-                                <button class="btn btn-secondary" onclick="switchTab('criativos')">Abrir Gerador de Criativos</button>
-                                <button class="btn btn-outline" onclick="switchTab('fun-digital')">Ver Fila FUN Digital</button>
+                                <button class="btn btn-primary" onclick="switchTab('duplicador')">Abrir Duplicador Meta
+                                    Ads</button>
+                                <button class="btn btn-secondary" onclick="switchTab('criativos')">Abrir Gerador de
+                                    Criativos</button>
+                                <button class="btn btn-outline" onclick="switchTab('fun-digital')">Ver Fila FUN
+                                    Digital</button>
                             </div>
                         </div>
                     </div>
@@ -274,11 +355,14 @@
                         <div class="changelog-header">
                             <div>
                                 <h2>🛡️ Status do App Meta & Proteção Anti-Queda</h2>
-                                <p>Semáforo em tempo real (Token, Permissões, Cota / Rate Limit, Conta/BM, Circuit Breaker e lembrete de DUC/Alertas).</p>
+                                <p>Semáforo em tempo real (Token, Permissões, Cota / Rate Limit, Conta/BM, Circuit
+                                    Breaker e lembrete de DUC/Alertas).</p>
                             </div>
                             <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-                                <span id="meta-app-health-badge" class="app-health-badge health-pending">⏳ Verificando...</span>
-                                <button type="button" id="btn-meta-health-refresh" class="btn btn-outline btn-sm" onclick="refreshMetaAppHealth(true)">🔄 Verificar Agora</button>
+                                <span id="meta-app-health-badge" class="app-health-badge health-pending">⏳
+                                    Verificando...</span>
+                                <button type="button" id="btn-meta-health-refresh" class="btn btn-outline btn-sm"
+                                    onclick="refreshMetaAppHealth(true)">🔄 Verificar Agora</button>
                             </div>
                         </div>
 
@@ -287,15 +371,24 @@
 
                         <div class="meta-health-actions-bar">
                             <div class="meta-health-actions-group">
-                                <button type="button" id="btn-ack-duc-check" class="btn btn-primary btn-sm" onclick="ackMetaAppHealth('duc_checked')">✅ Marcar DUC / Alertas Conferidos Hoje</button>
-                                <button type="button" id="btn-toggle-backup-app" class="btn btn-outline btn-sm" onclick="ackMetaAppHealth('toggle_backup')">🛟 App Reserva: Pendente</button>
-                                <button type="button" id="btn-reset-circuit-breaker" class="btn btn-outline btn-sm twod-hidden" onclick="ackMetaAppHealth('reset_circuit')">🔓 Destravar Circuit Breaker</button>
+                                <button type="button" id="btn-ack-duc-check" class="btn btn-primary btn-sm"
+                                    onclick="ackMetaAppHealth('duc_checked')">✅ Marcar DUC / Alertas Conferidos
+                                    Hoje</button>
+                                <button type="button" id="btn-toggle-backup-app" class="btn btn-outline btn-sm"
+                                    onclick="ackMetaAppHealth('toggle_backup')">🛟 App Reserva: Pendente</button>
+                                <button type="button" id="btn-reset-circuit-breaker"
+                                    class="btn btn-outline btn-sm twod-hidden"
+                                    onclick="ackMetaAppHealth('reset_circuit')">🔓 Destravar Circuit Breaker</button>
                             </div>
                             <div class="meta-health-links-group" id="meta-app-health-links"></div>
                         </div>
 
                         <div class="meta-health-footnote">
-                            <span>ℹ️ <strong>Transparência da API:</strong> Token, permissões, cota em tempo real (<code>X-App-Usage</code> / <code>X-Business-Use-Case-Usage</code>), conta/BM e erros 190/200/1885183 são checados automaticamente na API. Como a Meta não expõe o prazo de <strong>Data Use Checkup (DUC)</strong> e <strong>Alerts Inbox</strong> via Graph API, use os atalhos diretos e confirme acima após conferir.</span>
+                            <span>ℹ️ <strong>Transparência da API:</strong> Token, permissões, cota em tempo real
+                                (<code>X-App-Usage</code> / <code>X-Business-Use-Case-Usage</code>), conta/BM e erros
+                                190/200/1885183 são checados automaticamente na API. Como a Meta não expõe o prazo de
+                                <strong>Data Use Checkup (DUC)</strong> e <strong>Alerts Inbox</strong> via Graph API,
+                                use os atalhos diretos e confirme acima após conferir.</span>
                             <span id="meta-app-health-updated">Aguardando leitura...</span>
                         </div>
                     </div>
@@ -307,7 +400,8 @@
                                 <h2>📋 Log de Atualizações do Painel</h2>
                                 <p>Resumo rápido do que foi implementado ou ajustado recentemente.</p>
                             </div>
-                            <button type="button" id="btn-changelog-toggle" class="btn btn-outline btn-sm" onclick="toggleChangelogHistory()">Ver tudo</button>
+                            <button type="button" id="btn-changelog-toggle" class="btn btn-outline btn-sm"
+                                onclick="toggleChangelogHistory()">Ver tudo</button>
                         </div>
                         <div id="changelog-list" class="changelog-list"></div>
                     </div>
@@ -323,7 +417,8 @@
                         <div class="panel-card-header">
                             <div>
                                 <h2>🎬 TWOD Criativos Studio V2 (OneDrive)</h2>
-                                <p>Gerenciamento e monitoramento de áudios, nichos e criativos (Feed 1-3 e Reels 4-6) integrados ao OneDrive</p>
+                                <p>Gerenciamento e monitoramento de áudios, nichos e criativos (Feed 1-3 e Reels 4-6)
+                                    integrados ao OneDrive</p>
                             </div>
                             <span class="badge-tag" id="onedrive-connection-badge">⚪ OneDrive Desconectado</span>
                         </div>
@@ -334,27 +429,35 @@
                                 <div class="connect-icon">📁</div>
                                 <div>
                                     <h3 id="onedrive-folder-title">Pasta de Trabalho do OneDrive</h3>
-                                    <p id="onedrive-folder-desc">Conecte a pasta <code>Documentos\Trabalho</code> (ou <code>Arquivos de Áudio</code> / <code>Vídeos</code>) para carregar todos os nichos e arquivos.</p>
+                                    <p id="onedrive-folder-desc">Conecte a pasta <code>Documentos\Trabalho</code> (ou
+                                        <code>Arquivos de Áudio</code> / <code>Vídeos</code>) para carregar todos os
+                                        nichos e arquivos.</p>
                                 </div>
                             </div>
                             <div class="onedrive-connect-actions">
-                                <button type="button" class="btn btn-primary" id="btn-auth-onedrive-cloud" onclick="connectOneDriveCloudAPI()">
+                                <button type="button" class="btn btn-primary" id="btn-auth-onedrive-cloud"
+                                    onclick="connectOneDriveCloudAPI()">
                                     ☁️ Conectar OneDrive Nuvem (API)
                                 </button>
-                                <button type="button" class="btn btn-outline" id="btn-connect-onedrive" onclick="connectOneDriveFolder()">
+                                <button type="button" class="btn btn-outline" id="btn-connect-onedrive"
+                                    onclick="connectOneDriveFolder()">
                                     📂 Pasta Local
                                 </button>
-                                <button type="button" class="btn btn-outline" id="btn-rescan-onedrive" onclick="scanOneDriveFiles()" style="display: none;">
+                                <button type="button" class="btn btn-outline" id="btn-rescan-onedrive"
+                                    onclick="scanOneDriveFiles()" style="display: none;">
                                     🔄 Re-escanear
                                 </button>
-                                <input type="file" id="onedrive-fallback-input" webkitdirectory directory multiple style="display: none;" onchange="handleFallbackDirectoryUpload(event)">
+                                <input type="file" id="onedrive-fallback-input" webkitdirectory directory multiple
+                                    style="display: none;" onchange="handleFallbackDirectoryUpload(event)">
                             </div>
                         </div>
 
                         <!-- STATS CARDS DO ONEDRIVE (APARECE QUANDO CONECTADO) -->
-                        <div class="stats-grid onedrive-stats-grid" id="onedrive-stats" style="display: none; margin: 20px 0;">
+                        <div class="stats-grid onedrive-stats-grid" id="onedrive-stats"
+                            style="display: none; margin: 20px 0;">
                             <div class="stat-card">
-                                <div class="stat-icon-wrapper" style="background: rgba(59, 130, 246, 0.15); color: #3b82f6;">📁</div>
+                                <div class="stat-icon-wrapper"
+                                    style="background: rgba(59, 130, 246, 0.15); color: #3b82f6;">📁</div>
                                 <div class="stat-content">
                                     <span class="stat-label">Nichos Mapeados</span>
                                     <h3 class="stat-value" id="stat-niches-count">0</h3>
@@ -362,7 +465,8 @@
                                 </div>
                             </div>
                             <div class="stat-card">
-                                <div class="stat-icon-wrapper" style="background: rgba(16, 185, 129, 0.15); color: #10b981;">🎵</div>
+                                <div class="stat-icon-wrapper"
+                                    style="background: rgba(16, 185, 129, 0.15); color: #10b981;">🎵</div>
                                 <div class="stat-content">
                                     <span class="stat-label">Áudios Prontos</span>
                                     <h3 class="stat-value" id="stat-audios-count">0</h3>
@@ -370,7 +474,8 @@
                                 </div>
                             </div>
                             <div class="stat-card">
-                                <div class="stat-icon-wrapper" style="background: rgba(245, 158, 11, 0.15); color: #f59e0b;">🎬</div>
+                                <div class="stat-icon-wrapper"
+                                    style="background: rgba(245, 158, 11, 0.15); color: #f59e0b;">🎬</div>
                                 <div class="stat-content">
                                     <span class="stat-label">Vídeos Renderizados</span>
                                     <h3 class="stat-value" id="stat-videos-count">0</h3>
@@ -378,7 +483,8 @@
                                 </div>
                             </div>
                             <div class="stat-card">
-                                <div class="stat-icon-wrapper" style="background: rgba(99, 102, 241, 0.15); color: #6366f1;">🌐</div>
+                                <div class="stat-icon-wrapper"
+                                    style="background: rgba(99, 102, 241, 0.15); color: #6366f1;">🌐</div>
                                 <div class="stat-content">
                                     <span class="stat-label">Idiomas Suportados</span>
                                     <h3 class="stat-value" id="stat-langs-count">PT / ES / EN</h3>
@@ -393,246 +499,47 @@
                                 <span class="audio-icon">▶️</span>
                                 <div>
                                     <strong id="now-playing-title">Nome do Áudio</strong>
-                                    <div id="now-playing-meta" class="text-muted" style="font-size: 11px;">Idioma / Nicho</div>
+                                    <div id="now-playing-meta" class="text-muted" style="font-size: 11px;">Idioma /
+                                        Nicho</div>
                                 </div>
                             </div>
                             <audio id="global-audio-element" controls style="flex: 1; max-width: 450px;"></audio>
-                            <button type="button" class="btn btn-outline btn-sm" onclick="closeAudioPlayer()">✕ Fechar</button>
+                            <button type="button" class="btn btn-outline btn-sm" onclick="closeAudioPlayer()">✕
+                                Fechar</button>
                         </div>
 
                         <!-- TWOD CRIATIVOS STUDIO V2: CRIAÇÃO, ENVIO & RENDERIZAÇÃO ONEDRIVE -->
                         <div id="studio-v2-workspace" class="studio-workspace">
-                            <!-- Card 0 (Temporário): Importador de Pacote da Semana (.PDF) -> Pastas + Áudios OneDrive -->
-                            <div class="studio-card studio-weekly-card" id="weekly-pdf-card">
-                                <div class="studio-card-header" style="margin-bottom: 10px;">
-                                    <div>
-                                        <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-                                            <h3>📄 Importar Pacote da Semana (PDF)</h3>
-                                            <span class="studio-mini-badge warn" title="Recurso provisório até toda criação da pauta ser feita direto no painel">⏳ Temporário</span>
-                                        </div>
-                                        <p class="text-muted" style="font-size:12px;">Suba o PDF semanal (Seg–Sex): extrai os 10 nichos, textos/SEO, cria as pastas no OneDrive e gera todos os áudios em lote.</p>
-                                    </div>
-                                    <button type="button" id="btn-weekly-pdf-toggle" class="btn btn-outline btn-sm" onclick="toggleWeeklyPdfCard()">Recolher</button>
-                                </div>
-
-                                <div id="weekly-pdf-body">
-                                    <div class="weekly-pdf-toolbar">
-                                        <div class="weekly-pdf-drop" id="weekly-pdf-dropzone" onclick="document.getElementById('weekly-pdf-input').click()">
-                                            <input type="file" id="weekly-pdf-input" accept="application/pdf,.pdf" style="display:none;" onchange="handleWeeklyPdfSelected(this.files); this.value='';">
-                                            <div style="font-size:13px; font-weight:700;">📥 Clique ou arraste aqui o PDF do Pacote da Semana</div>
-                                            <div id="weekly-pdf-file-info" class="text-muted" style="font-size:11.5px; margin-top:3px;">Ex.: Pacote da Semana 23 — 10 Nichos (2/dia)</div>
-                                        </div>
-                                        <div class="weekly-pdf-config">
-                                            <label for="weekly-pdf-monday" style="font-size:11.5px; font-weight:700; display:block; margin-bottom:4px;">📅 Segunda-feira da Semana</label>
-                                            <input type="date" id="weekly-pdf-monday" class="twod-input" onchange="recalculateWeeklyDatesFromMonday()">
-                                            <span class="text-muted" style="font-size:11px; display:block; margin-top:4px;">Calcula Seg→Sex automático (<code>&lt;Nicho&gt; DD.MM.YY</code>)</span>
-                                        </div>
-                                    </div>
-
-                                    <div id="weekly-pdf-preview-wrap" class="weekly-pdf-preview twod-hidden">
-                                        <div class="weekly-pdf-summary-bar">
-                                            <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-                                                <strong id="weekly-pdf-week-title">Semana extraída</strong>
-                                                <span id="weekly-pdf-count-badge" class="studio-mini-badge ok">0 nichos</span>
-                                                <span id="weekly-pdf-tts-mirror" class="studio-mini-badge muted">🎙️ PT, ES, EN • Voz: Kore</span>
-                                            </div>
-                                            <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
-                                                <label style="font-size:12px; display:inline-flex; align-items:center; gap:5px; cursor:pointer;">
-                                                    <input type="checkbox" id="weekly-pdf-create-folders" checked> Criar pastas Vídeo + Áudio no OneDrive
-                                                </label>
-                                                <button type="button" class="btn btn-outline btn-sm" onclick="selectAllWeeklyNiches(true)">Todos</button>
-                                                <button type="button" class="btn btn-outline btn-sm" onclick="selectAllWeeklyNiches(false)">Limpar</button>
-                                                <button type="button" class="btn btn-outline btn-sm" onclick="clearSavedWeeklyPack()" title="Descartar PDF carregado">🗑️ Descartar</button>
-                                            </div>
-                                        </div>
-
-                                        <div class="weekly-pdf-langs-note text-muted">
-                                            💡 Usa os idiomas, voz, estilo e chave Gemini configurados na seção <strong>🤖 Gerar Áudios (.mp3) por IA</strong> abaixo. Depois de gerar os áudios, clique em <strong>📤 Subir Imagens</strong> em cada nicho.
-                                        </div>
-
-                                        <div class="weekly-pdf-batch-actions">
-                                            <button type="button" id="btn-weekly-batch-start" class="btn btn-primary" onclick="runWeeklyPdfBatch()">🚀 Criar Pastas + Gerar Áudios da Semana no OneDrive</button>
-                                            <button type="button" id="btn-weekly-batch-stop" class="btn btn-outline twod-hidden" onclick="stopWeeklyPdfBatch()">⏹️ Parar após atual</button>
-                                            <span id="weekly-batch-status" class="text-muted" style="font-size:12px;"></span>
-                                        </div>
-
-                                        <div id="weekly-batch-progress-wrap" class="studio-render-progress twod-hidden" style="margin-top:10px; margin-bottom:10px;">
-                                            <div class="progress-head">
-                                                <span id="weekly-batch-progress-label">Preparando...</span>
-                                                <strong id="weekly-batch-progress-pct">0%</strong>
-                                            </div>
-                                            <div class="progress-bar-track">
-                                                <div class="progress-bar-fill" id="weekly-batch-progress-fill" style="width:0%;"></div>
-                                            </div>
-                                        </div>
-
-                                        <div id="weekly-pdf-list" class="weekly-pdf-list"></div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- Card 0.5: Fábrica Automática de Criativos IA (Cloudflare Grátis + Canvas Feed/Reels) -->
-                            <div class="studio-card studio-cf-card" id="cf-creative-factory-card">
-                                <div class="studio-card-header" style="margin-bottom: 10px;">
-                                    <div>
-                                        <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-                                            <h3>🎨 Fábrica Automática de Criativos IA (Bloco A &amp; B)</h3>
-                                            <span id="studio-cf-status-pill" class="studio-mini-badge status-off">⚪ Configurar Cloudflare Grátis</span>
-                                        </div>
-                                        <p class="text-muted" style="font-size:12px;">Gera cenários limpos grátis via Cloudflare Workers AI (10k Neurons/dia), aplica headline + mockup + CTA no Canvas em 1:1 (1..3) e 9:16 (4..6) para PT/ES/EN e envia pro OneDrive.</p>
-                                    </div>
-                                    <button type="button" id="btn-cf-factory-toggle" class="btn btn-outline btn-sm" onclick="toggleCreativeFactoryCard()">Recolher</button>
-                                </div>
-
-                                <div id="cf-factory-body">
-                                    <div id="studio-cf-inline-wrap" class="cf-inline-creds">
-                                        <div style="font-size:12px; color:#93c5fd; margin-bottom:8px;">
-                                            ☁️ <strong>Cloudflare Workers AI (Grátis, sem cartão):</strong> Cole uma vez seu <code>Account ID</code> + <code>API Token</code> (ou salve em <em>Configurações &amp; Tema</em>).
-                                            <a href="https://dash.cloudflare.com" target="_blank" rel="noopener noreferrer" style="color:#60a5fa; margin-left:6px;">Abrir Cloudflare ↗</a>
-                                        </div>
-                                        <div class="studio-form-row" style="margin-bottom:0;">
-                                            <div class="form-group" style="flex:1; min-width:200px; margin-bottom:0;">
-                                                <input type="text" id="studio-cf-account-inline" class="twod-input" placeholder="Cloudflare Account ID (32 caracteres hex)" style="font-family:monospace; font-size:12px;">
-                                            </div>
-                                            <div class="form-group" style="flex:1; min-width:200px; margin-bottom:0;">
-                                                <input type="password" id="studio-cf-token-inline" class="twod-input" placeholder="Cloudflare API Token (Workers AI: Edit)" style="font-family:monospace; font-size:12px;">
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    <div class="cf-pdf-row">
-                                        <div class="cf-pdf-badges">
-                                            <input type="file" id="cf-pdf-a-input" accept="application/pdf,.pdf" style="display:none;" onchange="handleCreativePromptPdfSelected(this.files, 'A'); this.value='';">
-                                            <button type="button" class="btn btn-outline btn-sm" onclick="document.getElementById('cf-pdf-a-input').click()">📄 Subir PDF Bloco A</button>
-                                            <span id="cf-pdf-a-status" class="studio-mini-badge muted">📄 PDF Bloco A (opcional)</span>
-
-                                            <input type="file" id="cf-pdf-b-input" accept="application/pdf,.pdf" style="display:none;" onchange="handleCreativePromptPdfSelected(this.files, 'B'); this.value='';">
-                                            <button type="button" class="btn btn-outline btn-sm" onclick="document.getElementById('cf-pdf-b-input').click()">📄 Subir PDF Bloco B</button>
-                                            <span id="cf-pdf-b-status" class="studio-mini-badge muted">📄 PDF Bloco B (opcional)</span>
-                                        </div>
-                                        <div id="cf-factory-target-info" class="text-muted" style="font-size:11.5px;">Digite um Nicho/Data no Studio ou suba o PDF da Semana acima.</div>
-                                    </div>
-
-                                    <div class="studio-form-row" style="margin-top:10px;">
-                                        <div class="form-group" style="flex:1; min-width:170px;">
-                                            <label for="cf-blocks-select">Blocos de Criativos</label>
-                                            <select id="cf-blocks-select" class="twod-input">
-                                                <option value="both" selected>Bloco A (Foto) + Bloco B (Gráfico)</option>
-                                                <option value="A">Somente Bloco A (Estilo Foto)</option>
-                                                <option value="B">Somente Bloco B (Ilustração / 3D)</option>
-                                            </select>
-                                        </div>
-                                        <div class="form-group" style="flex:1.4; min-width:210px;">
-                                            <label for="cf-model-select">Modelo IA Cloudflare (Grátis)</label>
-                                            <select id="cf-model-select" class="twod-input">
-                                                <option value="@cf/black-forest-labs/flux-1-schnell" selected>⚡ Flux-1 Schnell (Rápido &amp; Realista)</option>
-                                                <option value="@cf/leonardo/phoenix-1.0">🎨 Leonardo Phoenix 1.0</option>
-                                                <option value="@cf/black-forest-labs/flux-2-klein-4b">🚀 Flux-2 Klein 4B</option>
-                                            </select>
-                                        </div>
-                                        <div class="form-group" style="flex:1.2; min-width:210px; display:flex; flex-direction:column; justify-content:flex-end; gap:5px; padding-bottom:4px;">
-                                            <label style="display:inline-flex; align-items:center; gap:6px; font-size:12px; cursor:pointer;">
-                                                <input type="checkbox" id="cf-auto-upload-check" checked>
-                                                <span>☁️ Enviar automático para o OneDrive</span>
-                                            </label>
-                                            <label style="display:inline-flex; align-items:center; gap:6px; font-size:12px; cursor:pointer;" title="Consulta o OneDrive antes de chamar a Cloudflare para pular blocos já prontos e continuar de onde parou">
-                                                <input type="checkbox" id="cf-skip-existing-check" checked>
-                                                <span>⏭️ Pular blocos já prontos no OneDrive (retoma até bater cota)</span>
-                                            </label>
-                                        </div>
-                                    </div>
-
-                                    <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
-                                        <button type="button" id="btn-cf-gen-single" class="btn btn-primary" onclick="runCreativeFactorySingle()">🎨 Gerar Criativos do Nicho Atual</button>
-                                        <button type="button" id="btn-cf-gen-week" class="btn btn-secondary" onclick="runCreativeFactoryWeeklyBatch()">🚀 Gerar Imagens da Semana Toda (PDF)</button>
-                                        <button type="button" class="btn btn-outline" onclick="uploadCurrentPreviewToOneDrive()">☁️ Salvar Prévia no OneDrive</button>
-                                        <button type="button" id="btn-cf-gen-stop" class="btn btn-outline twod-hidden" onclick="stopCreativeFactoryBatch()">⏹️ Parar</button>
-                                    </div>
-
-                                    <div id="cf-factory-progress-wrap" class="studio-render-progress twod-hidden" style="margin-top:12px;">
-                                        <div class="progress-head">
-                                            <span id="cf-factory-progress-label">Preparando...</span>
-                                            <strong id="cf-factory-progress-pct">0%</strong>
-                                        </div>
-                                        <div class="progress-bar-track">
-                                            <div class="progress-bar-fill" id="cf-factory-progress-fill" style="width:0%;"></div>
-                                        </div>
-                                    </div>
-
-                                    <div id="cf-style-queue" class="studio-tts-results twod-hidden"></div>
-
-                                    <!-- Terminal Ao Vivo (Estilo Duplicador) -->
-                                    <div class="meta-terminal-wrapper cf-terminal-wrapper" id="cf-terminal-wrapper" style="margin-top:12px;">
-                                        <div class="terminal-header">
-                                            <div class="terminal-dots">
-                                                <span class="dot dot-red"></span>
-                                                <span class="dot dot-yellow"></span>
-                                                <span class="dot dot-green"></span>
-                                            </div>
-                                            <span class="terminal-title">Terminal de Execução em Tempo Real (Criativos IA + OneDrive)</span>
-                                            <div style="display:flex; align-items:center; gap:8px; margin-left:auto;">
-                                                <span class="terminal-status" id="cf-terminal-live-status">Pronto para iniciar</span>
-                                                <button type="button" class="btn btn-outline btn-sm twod-hidden" id="btn-clear-cf-log" onclick="clearCfLog()" style="padding:2px 8px; font-size:11px;">🧹 Limpar</button>
-                                            </div>
-                                        </div>
-                                        <div class="terminal-body" id="cf-terminal-body">
-                                            <div class="terminal-log-empty">Aguardando comando. O sistema verifica o OneDrive antes de gastar cota e pula automaticamente o que já estiver pronto.</div>
-                                        </div>
-                                    </div>
-
-                                    <div id="cf-preview-wrap" class="cf-preview-wrap twod-hidden">
-                                        <div class="cf-preview-header">
-                                            <strong id="cf-preview-title">Prévia dos Criativos</strong>
-                                            <div id="cf-preview-tabs"></div>
-                                        </div>
-                                        <div id="cf-preview-grid" class="cf-preview-grid"></div>
-                                    </div>
-                                </div>
-                            </div>
-
                             <!-- Card 1: Padrão <Nicho> <Data> + Uploads (Áudios, Imagens, ZIP) direto pro OneDrive -->
                             <div class="studio-card">
                                 <div class="studio-card-header">
                                     <div>
                                         <h3>📤 Criar Pacote &amp; Enviar Áudios / Imagens para o OneDrive</h3>
-                                        <p class="text-muted" style="font-size:12px;">Padrão exato TwoD Studio: <code>&lt;Nicho&gt; &lt;DD.MM.YY&gt;</code>, <code>Bloco A / B</code>, <code>1. Imagens</code> (nunca apagada) e <code>*_pt.mp3 / _es / _en</code>.</p>
+                                        <p class="text-muted" style="font-size:12px;">Padrão exato TwoD Studio:
+                                            <code>&lt;Nicho&gt; &lt;DD.MM.YY&gt;</code>, <code>Bloco A / B</code>,
+                                            <code>1. Imagens</code> (nunca apagada) e <code>*_pt.mp3 / _es / _en</code>.
+                                        </p>
                                     </div>
-                                    <button type="button" id="btn-studio-create-folders" class="btn btn-outline btn-sm" onclick="createStudioCampaignStructure()">📁 Criar Pastas no OneDrive</button>
-                                </div>
-
-                                <!-- Menu Expansível Multi-Nichos (Semana PDF / Lote) -->
-                                <div class="studio-niche-picker-wrap" id="studio-niche-picker-wrap">
-                                    <div class="studio-niche-picker-bar">
-                                        <button type="button" id="btn-studio-niche-picker" class="btn btn-outline btn-sm" onclick="toggleStudioNichePickerDrawer()">
-                                            📋 Selecionar Nichos da Semana (PDF) <span id="studio-niche-picker-arrow">▾</span>
-                                        </button>
-                                        <span id="studio-niche-picker-count" class="studio-mini-badge muted">Nenhum PDF carregado</span>
-                                        <div id="studio-niche-batch-summary" class="studio-niche-batch-summary twod-hidden"></div>
-                                    </div>
-                                    <div id="studio-niche-picker-drawer" class="studio-niche-picker-drawer twod-hidden">
-                                        <div class="studio-niche-picker-toolbar">
-                                            <span class="text-muted" style="font-size:11.5px;">Marque 1 ou vários nichos para fazer em lote (pastas, áudios IA e criativos):</span>
-                                            <div style="display:flex; gap:6px; flex-wrap:wrap;">
-                                                <button type="button" class="btn btn-outline btn-sm" onclick="selectAllWeeklyNiches(true)">☑️ Marcar Todos</button>
-                                                <button type="button" class="btn btn-outline btn-sm" onclick="selectAllWeeklyNiches(false)">☐ Limpar</button>
-                                            </div>
-                                        </div>
-                                        <div id="studio-niche-picker-list" class="studio-niche-picker-list"></div>
-                                    </div>
+                                    <button type="button" class="btn btn-outline btn-sm"
+                                        onclick="createStudioCampaignStructure()">📁 Criar Pastas no OneDrive</button>
                                 </div>
 
                                 <div class="studio-form-row">
                                     <div class="form-group" style="flex:2; min-width:180px;">
                                         <label for="studio-niche-input">Nicho / Campanha (sem data)</label>
-                                        <input type="text" id="studio-niche-input" class="twod-input" placeholder="Ex: ÁudioSecreto, 5G, ReceitasVovó..." oninput="updateStudioNamingPreview()">
+                                        <input type="text" id="studio-niche-input" class="twod-input"
+                                            placeholder="Ex: ÁudioSecreto, 5G, ReceitasVovó..."
+                                            oninput="updateStudioNamingPreview()">
                                     </div>
                                     <div class="form-group" style="flex:1; min-width:140px;">
                                         <label for="studio-date-input">Data da Campanha</label>
-                                        <input type="date" id="studio-date-input" class="twod-input" onchange="updateStudioNamingPreview()">
+                                        <input type="date" id="studio-date-input" class="twod-input"
+                                            onchange="updateStudioNamingPreview()">
                                     </div>
                                     <div class="form-group" style="flex:1; min-width:160px;">
                                         <label for="studio-use-blocks">Estrutura de Blocos</label>
-                                        <select id="studio-use-blocks" class="twod-input" onchange="updateStudioNamingPreview()">
+                                        <select id="studio-use-blocks" class="twod-input"
+                                            onchange="updateStudioNamingPreview()">
                                             <option value="blocks">Bloco A / Bloco B (Padrão)</option>
                                             <option value="single">Pasta Única (Sem Blocos)</option>
                                         </select>
@@ -660,9 +567,15 @@
                                                 <option value="hi">Hindi (_hi.mp3)</option>
                                             </select>
                                         </div>
-                                        <p class="text-muted" style="font-size:11.5px; margin-bottom:8px;">Renomeia para <code>&lt;Nicho&gt;_pt.mp3</code>, <code>_es.mp3</code>, <code>_en.mp3</code> direto em <code>Arquivos de Áudio</code>.</p>
-                                        <input type="file" id="studio-audio-files" accept=".mp3,.wav,.m4a,.aac,.ogg" multiple style="display:none;" onchange="handleStudioAudioUpload(this.files); this.value='';">
-                                        <button type="button" class="btn btn-primary btn-sm" style="width:100%;" onclick="document.getElementById('studio-audio-files').click()">☁️ Enviar Áudios p/ OneDrive</button>
+                                        <p class="text-muted" style="font-size:11.5px; margin-bottom:8px;">Renomeia para
+                                            <code>&lt;Nicho&gt;_pt.mp3</code>, <code>_es.mp3</code>,
+                                            <code>_en.mp3</code> direto em <code>Arquivos de Áudio</code>.</p>
+                                        <input type="file" id="studio-audio-files" accept=".mp3,.wav,.m4a,.aac,.ogg"
+                                            multiple style="display:none;"
+                                            onchange="handleStudioAudioUpload(this.files); this.value='';">
+                                        <button type="button" class="btn btn-primary btn-sm" style="width:100%;"
+                                            onclick="document.getElementById('studio-audio-files').click()">☁️ Enviar
+                                            Áudios p/ OneDrive</button>
                                     </div>
 
                                     <!-- Zona 2: Imagens 1..6 -->
@@ -670,12 +583,14 @@
                                         <div class="studio-drop-head">
                                             <strong>🖼️ Imagens (1–3 Feed, 4–6 Reels)</strong>
                                             <div style="display:flex; gap:4px;">
-                                                <select id="studio-img-block" class="twod-input studio-mini-select" onchange="updateStudioNamingPreview()">
+                                                <select id="studio-img-block" class="twod-input studio-mini-select"
+                                                    onchange="updateStudioNamingPreview()">
                                                     <option value="Bloco A">Bloco A</option>
                                                     <option value="Bloco B">Bloco B</option>
                                                     <option value="Único">Raiz</option>
                                                 </select>
-                                                <select id="studio-img-lang" class="twod-input studio-mini-select" onchange="updateStudioNamingPreview()">
+                                                <select id="studio-img-lang" class="twod-input studio-mini-select"
+                                                    onchange="updateStudioNamingPreview()">
                                                     <option value="pt">1. Imagens (PT Master)</option>
                                                     <option value="es">Espanhol</option>
                                                     <option value="en">Inglês</option>
@@ -685,9 +600,15 @@
                                                 </select>
                                             </div>
                                         </div>
-                                        <p class="text-muted" style="font-size:11.5px; margin-bottom:8px;">Valida PNG/JPG e padroniza <code>1.png..3.png</code> (1:1) e <code>4.png..6.png</code> (9:16) automaticamente.</p>
-                                        <input type="file" id="studio-image-files" accept=".png,.jpg,.jpeg,.webp" multiple style="display:none;" onchange="handleStudioImagesUpload(this.files); this.value='';">
-                                        <button type="button" class="btn btn-primary btn-sm" style="width:100%;" onclick="document.getElementById('studio-image-files').click()">☁️ Enviar &amp; Padronizar Imagens</button>
+                                        <p class="text-muted" style="font-size:11.5px; margin-bottom:8px;">Valida
+                                            PNG/JPG e padroniza <code>1.png..3.png</code> (1:1) e
+                                            <code>4.png..6.png</code> (9:16) automaticamente.</p>
+                                        <input type="file" id="studio-image-files" accept=".png,.jpg,.jpeg,.webp"
+                                            multiple style="display:none;"
+                                            onchange="handleStudioImagesUpload(this.files); this.value='';">
+                                        <button type="button" class="btn btn-primary btn-sm" style="width:100%;"
+                                            onclick="document.getElementById('studio-image-files').click()">☁️ Enviar
+                                            &amp; Padronizar Imagens</button>
                                     </div>
 
                                     <!-- Zona 3: ZIP GPT / Canva -->
@@ -695,9 +616,16 @@
                                         <div class="studio-drop-head">
                                             <strong>📦 Descompactar ZIP (Multi-Nichos)</strong>
                                         </div>
-                                        <p class="text-muted" style="font-size:11.5px; margin-bottom:8px;">Extrai vários nichos de uma vez (Bloco A/B, <code>1. Imagens</code>, Espanhol, Inglês) e cria as pastas de Áudio + Vídeo no OneDrive sem precisar preencher nada acima.</p>
-                                        <input type="file" id="studio-zip-file" accept=".zip" style="display:none;" onchange="handleStudioZipUpload(this.files); this.value='';">
-                                        <button type="button" class="btn btn-secondary btn-sm" style="width:100%; margin-top:auto;" onclick="document.getElementById('studio-zip-file').click()">📦 Enviar &amp; Extrair .ZIP</button>
+                                        <p class="text-muted" style="font-size:11.5px; margin-bottom:8px;">Extrai vários
+                                            nichos de uma vez (Bloco A/B, <code>1. Imagens</code>, Espanhol, Inglês) e
+                                            cria as pastas de Áudio + Vídeo no OneDrive sem precisar preencher nada
+                                            acima.</p>
+                                        <input type="file" id="studio-zip-file" accept=".zip" style="display:none;"
+                                            onchange="handleStudioZipUpload(this.files); this.value='';">
+                                        <button type="button" class="btn btn-secondary btn-sm"
+                                            style="width:100%; margin-top:auto;"
+                                            onclick="document.getElementById('studio-zip-file').click()">📦 Enviar &amp;
+                                            Extrair .ZIP</button>
                                     </div>
                                 </div>
 
@@ -707,27 +635,41 @@
                                 <div class="studio-tts-box">
                                     <div class="studio-drop-head" style="margin-bottom:8px;">
                                         <div>
-                                            <strong>🤖 Gerar Áudios (.mp3) por IA &amp; Salvar Direto no OneDrive</strong>
-                                            <span class="text-muted" style="font-size:11.5px; display:block;">Sem baixar pro PC! Cola o roteiro em Português, traduz e salva <code>&lt;Nicho&gt;_pt.mp3</code>, <code>_es.mp3</code>, <code>_en.mp3</code> direto na pasta do OneDrive.</span>
+                                            <strong>🤖 Gerar Áudios (.mp3) por IA &amp; Salvar Direto no
+                                                OneDrive</strong>
+                                            <span class="text-muted" style="font-size:11.5px; display:block;">Sem baixar
+                                                pro PC! Cola o roteiro em Português, traduz e salva
+                                                <code>&lt;Nicho&gt;_pt.mp3</code>, <code>_es.mp3</code>,
+                                                <code>_en.mp3</code> direto na pasta do OneDrive.</span>
                                         </div>
-                                        <span id="studio-gemini-status-pill" class="studio-mini-badge muted">🔑 Chave Gemini: Verificando...</span>
+                                        <span id="studio-gemini-status-pill" class="studio-mini-badge muted">🔑 Chave
+                                            Gemini: Verificando...</span>
                                     </div>
 
-                                    <textarea id="studio-tts-script" class="twod-input studio-tts-textarea" rows="3" placeholder="Cole ou digite aqui a locução (~18s) em Português. Ex: Foi tocar aquela música e o violão está totalmente desafinado? Baixe esse aplicativo grátis..."></textarea>
+                                    <textarea id="studio-tts-script" class="twod-input studio-tts-textarea" rows="3"
+                                        placeholder="Cole ou digite aqui a locução (~18s) em Português. Ex: Foi tocar aquela música e o violão está totalmente desafinado? Baixe esse aplicativo grátis..."></textarea>
 
                                     <div class="studio-tts-controls">
                                         <div class="studio-tts-langs">
-                                            <span class="text-muted" style="font-size:11.5px; font-weight:700;">Idiomas:</span>
-                                            <label><input type="checkbox" name="studio-tts-lang" value="pt" checked> 🇧🇷 PT</label>
-                                            <label><input type="checkbox" name="studio-tts-lang" value="es" checked> 🇪🇸 ES</label>
-                                            <label><input type="checkbox" name="studio-tts-lang" value="en" checked> 🇺🇸 EN</label>
-                                            <label><input type="checkbox" name="studio-tts-lang" value="fr"> 🇫🇷 FR</label>
-                                            <label><input type="checkbox" name="studio-tts-lang" value="it"> 🇮🇹 IT</label>
-                                            <label><input type="checkbox" name="studio-tts-lang" value="de"> 🇩🇪 DE</label>
+                                            <span class="text-muted"
+                                                style="font-size:11.5px; font-weight:700;">Idiomas:</span>
+                                            <label><input type="checkbox" name="studio-tts-lang" value="pt" checked>
+                                                🇧🇷 PT</label>
+                                            <label><input type="checkbox" name="studio-tts-lang" value="es" checked>
+                                                🇪🇸 ES</label>
+                                            <label><input type="checkbox" name="studio-tts-lang" value="en" checked>
+                                                🇺🇸 EN</label>
+                                            <label><input type="checkbox" name="studio-tts-lang" value="fr"> 🇫🇷
+                                                FR</label>
+                                            <label><input type="checkbox" name="studio-tts-lang" value="it"> 🇮🇹
+                                                IT</label>
+                                            <label><input type="checkbox" name="studio-tts-lang" value="de"> 🇩🇪
+                                                DE</label>
                                         </div>
 
                                         <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
-                                            <select id="studio-tts-voice" class="twod-input studio-mini-select" title="Voz do Locutor (Gemini 3.8 TTS)">
+                                            <select id="studio-tts-voice" class="twod-input studio-mini-select"
+                                                title="Voz do Locutor (Gemini 3.8 TTS)">
                                                 <option value="Kore">🗣️ Kore (Firme / Natural)</option>
                                                 <option value="Puck">⚡ Puck (Animado / Dinâmico)</option>
                                                 <option value="Orus">🎙️ Orus (Grave / Autoridade)</option>
@@ -736,28 +678,28 @@
                                                 <option value="Sulafat">🤝 Sulafat (Acolhedora)</option>
                                                 <option value="Charon">📢 Charon (Informativa)</option>
                                             </select>
-                                            <input type="text" id="studio-tts-style" class="twod-input" style="max-width:250px; padding:6px 10px; font-size:12px;" value="Locução publicitária dinâmica, clara e natural" placeholder="Estilo da locução...">
+                                            <input type="text" id="studio-tts-style" class="twod-input"
+                                                style="max-width:250px; padding:6px 10px; font-size:12px;"
+                                                value="Locução publicitária dinâmica, clara e natural"
+                                                placeholder="Estilo da locução...">
                                         </div>
                                     </div>
 
                                     <div id="studio-gemini-key-inline-wrap" class="studio-gemini-inline twod-hidden">
-                                        <input type="password" id="studio-gemini-key-inline" class="twod-input" style="flex:1; min-width:220px; font-family:monospace; font-size:12px;" placeholder="Cole sua chave gratuita do Google AI Studio (AIza...) ou configure em Configurações">
-                                        <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener" class="btn btn-outline btn-sm" style="text-decoration:none;">🔑 Pegar Chave Grátis ↗</a>
+                                        <input type="password" id="studio-gemini-key-inline" class="twod-input"
+                                            style="flex:1; min-width:220px; font-family:monospace; font-size:12px;"
+                                            placeholder="Cole sua chave gratuita do Google AI Studio (AIza...) ou configure em Configurações">
+                                        <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener"
+                                            class="btn btn-outline btn-sm" style="text-decoration:none;">🔑 Pegar Chave
+                                            Grátis ↗</a>
                                     </div>
 
-                                    <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:10px;">
-                                        <button type="button" id="btn-studio-tts-generate" class="btn btn-primary btn-sm" onclick="generateStudioAudiosWithAI()">🎙️ Gerar Áudios (.mp3) Direto no OneDrive</button>
+                                    <div
+                                        style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:10px;">
+                                        <button type="button" id="btn-studio-tts-generate"
+                                            class="btn btn-primary btn-sm" onclick="generateStudioAudiosWithAI()">🎙️
+                                            Gerar Áudios (.mp3) Direto no OneDrive</button>
                                         <span id="studio-tts-msg" class="text-muted" style="font-size:12px;"></span>
-                                    </div>
-
-                                    <div id="studio-tts-progress-wrap" class="studio-render-progress twod-hidden" style="margin-top:10px;">
-                                        <div class="progress-head">
-                                            <span id="studio-tts-progress-label">Preparando geração de áudios...</span>
-                                            <strong id="studio-tts-progress-pct">0%</strong>
-                                        </div>
-                                        <div class="progress-bar-track">
-                                            <div class="progress-bar-fill" id="studio-tts-progress-fill" style="width:0%;"></div>
-                                        </div>
                                     </div>
 
                                     <div id="studio-tts-results" class="studio-tts-results twod-hidden"></div>
@@ -769,41 +711,60 @@
                                 <div class="studio-card-header">
                                     <div>
                                         <h3>🎬 Renderizador em Lote Studio V2 (FFmpeg ➔ 1.mp4 a 6.mp4 no OneDrive)</h3>
-                                        <p class="text-muted" style="font-size:12px;">Selecione os nichos do dia, rode a auditoria pré-voo e gere os vídeos em nuvem com H.264 + AAC + <code>math.ceil</code> + <code>apad</code>.</p>
+                                        <p class="text-muted" style="font-size:12px;">Selecione os nichos do dia, rode a
+                                            auditoria pré-voo e gere os vídeos em nuvem com H.264 + AAC +
+                                            <code>math.ceil</code> + <code>apad</code>.</p>
                                     </div>
                                     <div style="display:flex; gap:6px; flex-wrap:wrap;">
-                                        <button type="button" class="btn btn-outline btn-sm" onclick="selectStudioCampaignsPreset('top3')">⚡ 3 Mais Recentes</button>
-                                        <button type="button" class="btn btn-outline btn-sm" onclick="selectStudioCampaignsPreset('all')">☑️ Marcar Todos</button>
-                                        <button type="button" class="btn btn-outline btn-sm" onclick="selectStudioCampaignsPreset('none')">⬜ Desmarcar</button>
-                                        <button type="button" class="btn btn-outline btn-sm" onclick="loadStudioCampaigns(30)">🔄 Atualizar</button>
+                                        <button type="button" class="btn btn-outline btn-sm"
+                                            onclick="selectStudioCampaignsPreset('top3')">⚡ 3 Mais Recentes</button>
+                                        <button type="button" class="btn btn-outline btn-sm"
+                                            onclick="selectStudioCampaignsPreset('all')">☑️ Marcar Todos</button>
+                                        <button type="button" class="btn btn-outline btn-sm"
+                                            onclick="selectStudioCampaignsPreset('none')">⬜ Desmarcar</button>
+                                        <button type="button" class="btn btn-outline btn-sm"
+                                            onclick="loadStudioCampaigns(30)">🔄 Atualizar</button>
                                     </div>
                                 </div>
 
                                 <div style="display:flex; gap:8px; margin-bottom:10px;">
-                                    <input type="text" id="studio-camp-search" class="twod-input" placeholder="🔍 Pesquisar nicho ou data no Studio (ex: ÁudioSecreto, 05.11)..." oninput="loadStudioCampaigns(25)">
+                                    <input type="text" id="studio-camp-search" class="twod-input"
+                                        placeholder="🔍 Pesquisar nicho ou data no Studio (ex: ÁudioSecreto, 05.11)..."
+                                        oninput="loadStudioCampaigns(25)">
                                 </div>
 
                                 <div id="studio-campaigns-list" class="studio-campaigns-list"></div>
 
                                 <div id="studio-audit-box" class="studio-audit-box twod-hidden">
-                                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                                    <div
+                                        style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
                                         <strong>🔍 Auditoria Pré-Voo (Blocos, Imagens &amp; Áudios)</strong>
-                                        <button type="button" class="btn btn-outline btn-sm" onclick="document.getElementById('studio-audit-box').classList.add('twod-hidden')">Fechar</button>
+                                        <button type="button" class="btn btn-outline btn-sm"
+                                            onclick="document.getElementById('studio-audit-box').classList.add('twod-hidden')">Fechar</button>
                                     </div>
                                     <div id="studio-audit-results"></div>
                                 </div>
 
                                 <div class="studio-options-box">
-                                    <label><input type="checkbox" id="studio-opt-round" checked> Arredondar duração do áudio para cima (<code>math.ceil</code> + silêncio suave <code>-af apad</code>)</label>
-                                    <label><input type="checkbox" id="studio-opt-cleanup" checked> Apagar imagens brutas de <strong>Espanhol / Inglês</strong> após 100% de sucesso (<strong>1. Imagens</strong> NUNCA é apagada)</label>
-                                    <label><input type="checkbox" id="studio-opt-overwrite"> Sobrescrever vídeos <code>1.mp4..6.mp4</code> já renderizados</label>
+                                    <label><input type="checkbox" id="studio-opt-round" checked> Arredondar duração do
+                                        áudio para cima (<code>math.ceil</code> + silêncio suave
+                                        <code>-af apad</code>)</label>
+                                    <label><input type="checkbox" id="studio-opt-cleanup" checked> Apagar imagens brutas
+                                        de <strong>Espanhol / Inglês</strong> após 100% de sucesso (<strong>1.
+                                            Imagens</strong> NUNCA é apagada)</label>
+                                    <label><input type="checkbox" id="studio-opt-overwrite"> Sobrescrever vídeos
+                                        <code>1.mp4..6.mp4</code> já renderizados</label>
                                 </div>
 
                                 <div class="studio-render-actions">
-                                    <button type="button" id="btn-studio-render-start" class="btn btn-primary" onclick="startStudioBatchRender()">🚀 Renderizar Lote MP4 no OneDrive</button>
-                                    <button type="button" class="btn btn-outline" onclick="auditStudioCampaigns()">🔍 Verificar Arquivos (Auditoria)</button>
-                                    <button type="button" id="btn-studio-render-pause" class="btn btn-outline" disabled onclick="pauseStudioRender()">⏸️ Pausar</button>
-                                    <button type="button" id="btn-studio-render-cancel" class="btn btn-outline" disabled onclick="cancelStudioRender()">⏹️ Cancelar</button>
+                                    <button type="button" id="btn-studio-render-start" class="btn btn-primary"
+                                        onclick="startStudioBatchRender()">🚀 Renderizar Lote MP4 no OneDrive</button>
+                                    <button type="button" class="btn btn-outline" onclick="auditStudioCampaigns()">🔍
+                                        Verificar Arquivos (Auditoria)</button>
+                                    <button type="button" id="btn-studio-render-pause" class="btn btn-outline" disabled
+                                        onclick="pauseStudioRender()">⏸️ Pausar</button>
+                                    <button type="button" id="btn-studio-render-cancel" class="btn btn-outline" disabled
+                                        onclick="cancelStudioRender()">⏹️ Cancelar</button>
                                 </div>
 
                                 <div id="studio-render-progress-wrap" class="studio-render-progress twod-hidden">
@@ -812,7 +773,8 @@
                                         <strong id="studio-render-pct">0%</strong>
                                     </div>
                                     <div class="progress-bar-bg">
-                                        <div class="progress-bar-fill" id="studio-render-progress-fill" style="width:0%;"></div>
+                                        <div class="progress-bar-fill" id="studio-render-progress-fill"
+                                            style="width:0%;"></div>
                                     </div>
                                     <pre id="studio-render-logs" class="studio-terminal"></pre>
                                     <div id="studio-render-errors" class="studio-error-banner twod-hidden"></div>
@@ -823,7 +785,9 @@
                         <!-- FILTROS E BUSCA DE NICHOS -->
                         <div class="table-controls" id="onedrive-filter-bar" style="display: none; margin-top: 20px;">
                             <div class="search-box">
-                                <input type="text" id="niche-search-input" placeholder="🔍 Buscar por nome do nicho ou data (ex: 5G, 05.08)..." oninput="filterNichesTable()">
+                                <input type="text" id="niche-search-input"
+                                    placeholder="🔍 Buscar por nome do nicho ou data (ex: 5G, 05.08)..."
+                                    oninput="filterNichesTable()">
                             </div>
                             <div class="filter-actions">
                                 <select id="filter-status-select" onchange="filterNichesTable()">
@@ -836,7 +800,8 @@
                         </div>
 
                         <!-- TABELA DE NICHOS E ARQUIVOS MAPEADOS -->
-                        <div class="table-responsive" id="onedrive-table-container" style="display: none; margin-top: 15px;">
+                        <div class="table-responsive" id="onedrive-table-container"
+                            style="display: none; margin-top: 15px;">
                             <table class="twod-table">
                                 <thead>
                                     <tr>
@@ -857,9 +822,12 @@
                         <div id="onedrive-empty-state" class="render-preview-box">
                             <div class="render-status-title">Aguardando Conexão com o OneDrive:</div>
                             <div class="queue-status-indicator">
-                                <span class="dot-idle" style="background: var(--text-muted);"></span> Nenhuma pasta selecionada ainda.
+                                <span class="dot-idle" style="background: var(--text-muted);"></span> Nenhuma pasta
+                                selecionada ainda.
                             </div>
-                            <p class="text-muted">Clique no botão <strong>"📂 Conectar Pasta OneDrive"</strong> acima e selecione a pasta <code>Documentos\Trabalho</code> do seu computador. A dashboard lerá todos os nichos de áudios e vídeos instantaneamente pelo navegador.</p>
+                            <p class="text-muted">Clique no botão <strong>"📂 Conectar Pasta OneDrive"</strong> acima e
+                                selecione a pasta <code>Documentos\Trabalho</code> do seu computador. A dashboard lerá
+                                todos os nichos de áudios e vídeos instantaneamente pelo navegador.</p>
                         </div>
                     </div>
                 </section>
@@ -873,48 +841,71 @@
                     <div class="meta-status-banner">
                         <div class="meta-banner-info">
                             <div class="meta-avatar-icon">
-                                <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M12 2C6.477 2 2 6.477 2 12c0 4.991 3.657 9.128 8.438 9.879V14.89h-2.54V12h2.54V9.797c0-2.506 1.492-3.89 3.777-3.89 1.094 0 2.238.195 2.238.195v2.46h-1.26c-1.243 0-1.63.771-1.63 1.562V12h2.773l-.443 2.89h-2.33v6.989C18.343 21.129 22 16.99 22 12c0-5.523-4.477-10-10-10z"/></svg>
+                                <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor">
+                                    <path
+                                        d="M12 2C6.477 2 2 6.477 2 12c0 4.991 3.657 9.128 8.438 9.879V14.89h-2.54V12h2.54V9.797c0-2.506 1.492-3.89 3.777-3.89 1.094 0 2.238.195 2.238.195v2.46h-1.26c-1.243 0-1.63.771-1.63 1.562V12h2.773l-.443 2.89h-2.33v6.989C18.343 21.129 22 16.99 22 12c0-5.523-4.477-10-10-10z" />
+                                </svg>
                             </div>
                             <div>
                                 <div class="meta-banner-title">
                                     <strong id="cb-user-name">Gerador de Campanhas Padrão TwoD</strong>
-                                    <span class="badge-status status-pending" id="cb-api-badge">⏳ Verificando Token...</span>
+                                    <span class="badge-status status-pending" id="cb-api-badge">⏳ Verificando
+                                        Token...</span>
                                 </div>
-                                <span class="meta-banner-sub" id="cb-user-sub">Conecte o Access Token da Meta para carregar Contas, Pixels e Páginas da BM.</span>
+                                <span class="meta-banner-sub" id="cb-user-sub">Conecte o Access Token da Meta para
+                                    carregar Contas, Pixels e Páginas da BM.</span>
                             </div>
                         </div>
                         <div class="meta-banner-actions">
-                            <a href="https://developers.facebook.com/tools/explorer/" target="_blank" rel="noopener noreferrer" class="btn btn-outline btn-sm" style="text-decoration: none; display: inline-flex; align-items: center; gap: 4px;" title="Abrir Graph API Explorer para gerar um novo token da Meta">
+                            <a href="https://developers.facebook.com/tools/explorer/" target="_blank"
+                                rel="noopener noreferrer" class="btn btn-outline btn-sm"
+                                style="text-decoration: none; display: inline-flex; align-items: center; gap: 4px;"
+                                title="Abrir Graph API Explorer para gerar um novo token da Meta">
                                 🌐 Gerar Token ↗
                             </a>
                             <button type="button" class="btn btn-outline btn-sm" onclick="reloadMetaAccounts(true)">
                                 🔄 Recarregar Contas
                             </button>
-                            <button type="button" class="btn btn-secondary btn-sm" onclick="toggleCampaignBuilderTokenBox()">
+                            <button type="button" class="btn btn-secondary btn-sm"
+                                onclick="toggleCampaignBuilderTokenBox()">
                                 🔑 Conectar / Token
                             </button>
                         </div>
                     </div>
 
                     <!-- CONEXÃO RÁPIDA DE TOKEN META DENTRO DO GERADOR -->
-                    <div id="cb-token-box" class="panel-card twod-hidden" style="margin-bottom: 24px; border: 1px solid rgba(59, 130, 246, 0.35);">
+                    <div id="cb-token-box" class="panel-card twod-hidden"
+                        style="margin-bottom: 24px; border: 1px solid rgba(59, 130, 246, 0.35);">
                         <div class="panel-card-header" style="margin-bottom: 14px;">
                             <div>
                                 <h2 style="font-size: 16px;">🔑 Conectar API do Facebook (Meta Ads)</h2>
                                 <p>O mesmo token serve para o Gerador de Campanhas e para o Duplicador em Massa.</p>
                             </div>
-                            <button type="button" class="btn btn-outline btn-sm" onclick="toggleCampaignBuilderTokenBox(false)">✕ Fechar</button>
+                            <button type="button" class="btn btn-outline btn-sm"
+                                onclick="toggleCampaignBuilderTokenBox(false)">✕ Fechar</button>
                         </div>
                         <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
-                            <input type="password" id="cb-token-input" class="twod-input" placeholder="Cole seu Access Token da Meta aqui (EAA...)" style="flex: 1; min-width: 240px; font-family: monospace; font-size: 12px;">
-                            <button type="button" class="btn btn-outline btn-sm" id="btn-toggle-cb-token-vis" onclick="toggleTokenVisibility('cb-token-input', 'btn-toggle-cb-token-vis')">👁️ Ver</button>
-                            <button type="button" class="btn btn-primary btn-sm" onclick="saveMetaSettingsFromUI('campaign_builder')">💾 Conectar & Salvar</button>
-                            <button type="button" class="btn btn-outline btn-sm" onclick="testMetaTokenFromUI('cb-token-input', 'cb-token-test-result')">🔍 Testar</button>
-                            <a href="https://developers.facebook.com/tools/explorer/" target="_blank" rel="noopener noreferrer" class="btn btn-outline btn-sm" style="text-decoration: none; display: inline-flex; align-items: center; gap: 4px;" title="Abrir Graph API Explorer no Meta Developers">
+                            <input type="password" id="cb-token-input" class="twod-input"
+                                placeholder="Cole seu Access Token da Meta aqui (EAA...)"
+                                style="flex: 1; min-width: 240px; font-family: monospace; font-size: 12px;">
+                            <button type="button" class="btn btn-outline btn-sm" id="btn-toggle-cb-token-vis"
+                                onclick="toggleTokenVisibility('cb-token-input', 'btn-toggle-cb-token-vis')">👁️
+                                Ver</button>
+                            <button type="button" class="btn btn-primary btn-sm"
+                                onclick="saveMetaSettingsFromUI('campaign_builder')">💾 Conectar & Salvar</button>
+                            <button type="button" class="btn btn-outline btn-sm"
+                                onclick="testMetaTokenFromUI('cb-token-input', 'cb-token-test-result')">🔍
+                                Testar</button>
+                            <a href="https://developers.facebook.com/tools/explorer/" target="_blank"
+                                rel="noopener noreferrer" class="btn btn-outline btn-sm"
+                                style="text-decoration: none; display: inline-flex; align-items: center; gap: 4px;"
+                                title="Abrir Graph API Explorer no Meta Developers">
                                 🌐 Abrir Gerador de Token (Meta) ↗
                             </a>
                         </div>
-                        <div id="cb-token-test-result" class="twod-hidden" style="margin-top: 12px; padding: 12px 16px; border-radius: 8px; font-size: 13px; line-height: 1.5;"></div>
+                        <div id="cb-token-test-result" class="twod-hidden"
+                            style="margin-top: 12px; padding: 12px 16px; border-radius: 8px; font-size: 13px; line-height: 1.5;">
+                        </div>
                     </div>
 
                     <!-- PASSO 1: CONTA, PIXEL, PÁGINAS DA BM & LEITOR DE MODELO -->
@@ -922,7 +913,8 @@
                         <div class="panel-card-header">
                             <div>
                                 <h2>1. Conta, Pixel (ad_click) & Páginas da BM</h2>
-                                <p>Páginas são filtradas estritamente pela BM da conta selecionada e alternadas automaticamente para pulverizar volume.</p>
+                                <p>Páginas são filtradas estritamente pela BM da conta selecionada e alternadas
+                                    automaticamente para pulverizar volume.</p>
                             </div>
                             <span class="badge-tag">Passo 1 de 4</span>
                         </div>
@@ -930,7 +922,8 @@
                         <div class="cb-fixed-rules-bar">
                             <span class="cb-rule-pill">🎯 Objetivo: <strong>Sales (AUCTION)</strong></span>
                             <span class="cb-rule-pill">💰 Budget: <strong>ABO ($1.00 USD/dia)</strong></span>
-                            <span class="cb-rule-pill">🌐 Conversão: <strong>Website • Max Value • ad_click</strong></span>
+                            <span class="cb-rule-pill">🌐 Conversão: <strong>Website • Max Value •
+                                    ad_click</strong></span>
                             <span class="cb-rule-pill">🛡️ Transparency: <strong>Futuretech Dynamics LLC</strong></span>
                             <span class="cb-rule-pill">🚫 Chamadas & Advantage+: <strong>Desativados</strong></span>
                             <span class="cb-rule-pill">⬇️ CTA: <strong>Download</strong></span>
@@ -942,7 +935,8 @@
                                     <strong>Conta de Anúncios:</strong>
                                     <span class="text-muted" id="cb-bm-badge"></span>
                                 </label>
-                                <select id="cb-account-select" class="twod-select" onchange="onCampaignBuilderAccountChanged()">
+                                <select id="cb-account-select" class="twod-select"
+                                    onchange="onCampaignBuilderAccountChanged()">
                                     <option value="">Conecte seu Token Meta acima...</option>
                                 </select>
                             </div>
@@ -961,12 +955,18 @@
                                 <label for="cb-model-campaign-select">
                                     <strong>Copiar Ajustes Internos de Modelo (Opcional):</strong>
                                 </label>
-                                <input type="search" id="cb-model-campaign-search" class="twod-input" placeholder="🔍 Filtrar modelo por PostID ou nome..." oninput="filterBuilderModelCampaigns()" style="margin-bottom: 6px; padding: 7px 10px; font-size: 13px;">
+                                <input type="search" id="cb-model-campaign-search" class="twod-input"
+                                    placeholder="🔍 Filtrar modelo por PostID ou nome..."
+                                    oninput="filterBuilderModelCampaigns()"
+                                    style="margin-bottom: 6px; padding: 7px 10px; font-size: 13px;">
                                 <div style="display: flex; gap: 8px;">
                                     <select id="cb-model-campaign-select" class="twod-select" style="flex: 1;">
                                         <option value="">Selecione uma campanha existente...</option>
                                     </select>
-                                    <button type="button" class="btn btn-outline btn-sm" onclick="inspectModelCampaign()" title="Faz apenas leitura (GET) sem alterar nada na campanha">🔎 Ler Modelo</button>
+                                    <button type="button" class="btn btn-outline btn-sm"
+                                        onclick="inspectModelCampaign()"
+                                        title="Faz apenas leitura (GET) sem alterar nada na campanha">🔎 Ler
+                                        Modelo</button>
                                 </div>
                             </div>
                         </div>
@@ -974,18 +974,24 @@
                         <div id="cb-model-inspector-box" class="cb-model-inspector-box twod-hidden"></div>
 
                         <div style="margin-top: 16px;">
-                            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+                            <div
+                                style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
                                 <div>
                                     <strong>📄 Páginas da BM para Rotação Automática</strong>
-                                    <span class="text-muted" id="cb-pages-meta" style="font-size: 12px; margin-left: 6px;">Instagram & Threads: Usar Página selecionada</span>
+                                    <span class="text-muted" id="cb-pages-meta"
+                                        style="font-size: 12px; margin-left: 6px;">Instagram & Threads: Usar Página
+                                        selecionada</span>
                                 </div>
                                 <div style="display: flex; gap: 8px;">
-                                    <button type="button" class="btn-chip" onclick="toggleAllBuilderPages(true)">✓ Marcar Todas da BM</button>
-                                    <button type="button" class="btn-chip" onclick="toggleAllBuilderPages(false)">✕ Limpar</button>
+                                    <button type="button" class="btn-chip" onclick="toggleAllBuilderPages(true)">✓
+                                        Marcar Todas da BM</button>
+                                    <button type="button" class="btn-chip" onclick="toggleAllBuilderPages(false)">✕
+                                        Limpar</button>
                                 </div>
                             </div>
                             <div id="cb-pages-grid" class="cb-pages-grid">
-                                <div class="text-muted" style="font-size: 12px;">Selecione uma Conta de Anúncios para listar as páginas desta BM...</div>
+                                <div class="text-muted" style="font-size: 12px;">Selecione uma Conta de Anúncios para
+                                    listar as páginas desta BM...</div>
                             </div>
                         </div>
                     </div>
@@ -995,7 +1001,8 @@
                         <div class="panel-card-header">
                             <div>
                                 <h2>2. Identificação da Campanha & URL (TranslateX)</h2>
-                                <p>Padrão TwoD: <code>PostID,NomeDoNicho,XXX-NOMEDOSITE-00,Quempostou,TIPODECAMPANHA-00</code></p>
+                                <p>Padrão TwoD:
+                                    <code>PostID,NomeDoNicho,XXX-NOMEDOSITE-00,Quempostou,TIPODECAMPANHA-00</code></p>
                             </div>
                             <span class="badge-tag">Passo 2 de 4</span>
                         </div>
@@ -1003,63 +1010,86 @@
                         <div class="form-grid-2" style="gap: 14px; margin-bottom: 14px;">
                             <div class="form-group">
                                 <label for="cb-post-id"><strong>PostID:</strong></label>
-                                <input type="text" id="cb-post-id" class="twod-input" placeholder="Ex: 25079" oninput="updateCampaignNamePreview()">
+                                <input type="text" id="cb-post-id" class="twod-input" placeholder="Ex: 25079"
+                                    oninput="updateCampaignNamePreview()">
                             </div>
                             <div class="form-group">
                                 <label for="cb-niche-slug"><strong>NomeDoNicho (PascalCase):</strong></label>
-                                <input type="text" id="cb-niche-slug" class="twod-input" placeholder="Ex: ReceitasDaVovo" oninput="updateCampaignNamePreview()">
+                                <input type="text" id="cb-niche-slug" class="twod-input"
+                                    placeholder="Ex: ReceitasDaVovo" oninput="updateCampaignNamePreview()">
                             </div>
                             <div class="form-group">
                                 <label for="cb-account-code"><strong>XXX-NOMEDOSITE-00 (Conta):</strong></label>
-                                <input type="text" id="cb-account-code" class="twod-input" placeholder="Ex: MON-TWODCOMPANY-01" oninput="updateCampaignNamePreview()">
+                                <input type="text" id="cb-account-code" class="twod-input"
+                                    placeholder="Ex: MON-TWODCOMPANY-01" oninput="updateCampaignNamePreview()">
                             </div>
                             <div class="form-group">
                                 <label for="cb-author"><strong>Quem postou:</strong></label>
-                                <input type="text" id="cb-author" class="twod-input" placeholder="Ex: Thiago ou Alexandre" oninput="updateCampaignNamePreview()">
+                                <input type="text" id="cb-author" class="twod-input"
+                                    placeholder="Ex: Thiago ou Alexandre" oninput="updateCampaignNamePreview()">
                             </div>
                             <div class="form-group">
                                 <label for="cb-campaign-type"><strong>TIPODECAMPANHA-00:</strong></label>
                                 <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-                                    <input type="text" id="cb-campaign-type" class="twod-input" value="PostID-01" style="flex: 1; min-width: 140px;" oninput="onCampaignTypeChanged()">
-                                    <button type="button" class="btn-chip" onclick="setCampaignTypePreset('PostID-01')">PostID-01</button>
-                                    <button type="button" class="btn-chip" onclick="setCampaignTypePreset('UTM-01')">UTM-01</button>
+                                    <input type="text" id="cb-campaign-type" class="twod-input" value="PostID-01"
+                                        style="flex: 1; min-width: 140px;" oninput="onCampaignTypeChanged()">
+                                    <button type="button" class="btn-chip"
+                                        onclick="setCampaignTypePreset('PostID-01')">PostID-01</button>
+                                    <button type="button" class="btn-chip"
+                                        onclick="setCampaignTypePreset('UTM-01')">UTM-01</button>
                                 </div>
                             </div>
                             <div class="form-group">
                                 <label for="cb-advertiser-name"><strong>Ad Transparency (Advertiser):</strong></label>
-                                <input type="text" id="cb-advertiser-name" class="twod-input" value="Futuretech Dynamics LLC">
+                                <input type="text" id="cb-advertiser-name" class="twod-input"
+                                    value="Futuretech Dynamics LLC">
                             </div>
                         </div>
 
                         <div class="cb-name-preview-box">
-                            <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap;">
-                                <strong style="font-size: 12px; color: var(--accent-primary);">🏷️ NOME FINAL DA CAMPANHA (editável):</strong>
+                            <div
+                                style="display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap;">
+                                <strong style="font-size: 12px; color: var(--accent-primary);">🏷️ NOME FINAL DA
+                                    CAMPANHA (editável):</strong>
                                 <span id="cb-utm-status-tag" class="cb-rule-pill">Sem UTM</span>
                             </div>
-                            <input type="text" id="cb-campaign-name-preview" class="twod-input" style="font-weight: 700; font-family: monospace;" placeholder="25079,ReceitasDaVovo,MON-TWODCOMPANY-01,Thiago,PostID-01">
+                            <input type="text" id="cb-campaign-name-preview" class="twod-input"
+                                style="font-weight: 700; font-family: monospace;"
+                                placeholder="25079,ReceitasDaVovo,MON-TWODCOMPANY-01,Thiago,PostID-01">
                         </div>
 
                         <div class="form-grid-2" style="gap: 14px; margin-top: 16px;">
                             <div class="form-group">
-                                <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap;">
-                                    <label for="cb-base-url" style="margin-bottom: 0;"><strong>URL Base do Artigo (TranslateX):</strong></label>
-                                    <select id="cb-site-native-lang" class="twod-select" style="width: auto; padding: 4px 10px; font-size: 12px;" onchange="onSiteNativeLangChanged()">
+                                <div
+                                    style="display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap;">
+                                    <label for="cb-base-url" style="margin-bottom: 0;"><strong>URL Base do Artigo
+                                            (TranslateX):</strong></label>
+                                    <select id="cb-site-native-lang" class="twod-select"
+                                        style="width: auto; padding: 4px 10px; font-size: 12px;"
+                                        onchange="onSiteNativeLangChanged()">
                                         <option value="pt">🇧🇷 Site Nativo: Português (sem /pt/)</option>
                                         <option value="es">🇪🇸 Site Nativo: Espanhol — Twod/Kiuvix (sem /es/)</option>
                                         <option value="en">🇺🇸 Site Nativo: Inglês (sem /en/)</option>
                                         <option value="always">🌐 Sempre inserir tag (/pt/, /es/, /en/...)</option>
                                     </select>
                                 </div>
-                                <input type="url" id="cb-base-url" class="twod-input" style="margin-top: 6px;" placeholder="https://twodcompany.com/25079/descarga-app-cocina..." oninput="updateUrlPreview(true)">
-                                <span class="help-text" id="cb-localized-url-preview">Todos os sites mantêm PT sem <code>/pt/</code>, exceto Twod e Kiuvix (ES) que mantêm ES limpo e inserem <code>/pt/</code> no Brasil.</span>
+                                <input type="url" id="cb-base-url" class="twod-input" style="margin-top: 6px;"
+                                    placeholder="https://twodcompany.com/25079/descarga-app-cocina..."
+                                    oninput="updateUrlPreview(true)">
+                                <span class="help-text" id="cb-localized-url-preview">Todos os sites mantêm PT sem
+                                    <code>/pt/</code>, exceto Twod e Kiuvix (ES) que mantêm ES limpo e inserem
+                                    <code>/pt/</code> no Brasil.</span>
                             </div>
                             <div class="form-group">
                                 <label><strong>Parâmetro UTM (para campanhas UTM):</strong></label>
-                                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; margin-bottom: 6px; font-size: 13px;">
+                                <label
+                                    style="display: flex; align-items: center; gap: 8px; cursor: pointer; margin-bottom: 6px; font-size: 13px;">
                                     <input type="checkbox" id="cb-use-utm" onchange="updateUrlPreview()">
                                     <span>Ativar rastreamento UTM no Anúncio</span>
                                 </label>
-                                <input type="text" id="cb-utm-params" class="twod-input" value="utm_source={{site_source_name}}&utm_medium={{placement}}&utm_campaign={{adset.id}}&utm_content={{ad.id}}" style="font-family: monospace; font-size: 11px;">
+                                <input type="text" id="cb-utm-params" class="twod-input"
+                                    value="utm_source={{site_source_name}}&utm_medium={{placement}}&utm_campaign={{adset.id}}&utm_content={{ad.id}}"
+                                    style="font-family: monospace; font-size: 11px;">
                             </div>
                         </div>
                     </div>
@@ -1069,7 +1099,9 @@
                         <div class="panel-card-header">
                             <div>
                                 <h2>3. Mídias do OneDrive (1 Criativo por Anúncio)</h2>
-                                <p>Cada vídeo selecionado vira um anúncio individual (<code>01</code>, <code>02</code>... até <code>06</code>). Slots <code>07–09 (4x3)</code> reservados para o novo formato.</p>
+                                <p>Cada vídeo selecionado vira um anúncio individual (<code>01</code>,
+                                    <code>02</code>... até <code>06</code>). Slots <code>07–09 (4x3)</code> reservados
+                                    para o novo formato.</p>
                             </div>
                             <span class="badge-tag">Passo 3 de 4</span>
                         </div>
@@ -1080,23 +1112,34 @@
                                     <strong>Nicho no OneDrive:</strong>
                                     <span class="text-muted" id="cb-niche-count-label">(Carregando nichos...)</span>
                                 </label>
-                                <input type="text" id="cb-niche-search" list="cb-niche-datalist" class="twod-input" placeholder="Digite para buscar o nicho no OneDrive..." onchange="onCampaignBuilderNicheSelected()" oninput="onCampaignBuilderNicheInput()">
+                                <input type="text" id="cb-niche-search" list="cb-niche-datalist" class="twod-input"
+                                    placeholder="Digite para buscar o nicho no OneDrive..."
+                                    onchange="onCampaignBuilderNicheSelected()" oninput="onCampaignBuilderNicheInput()">
                                 <datalist id="cb-niche-datalist"></datalist>
                             </div>
                             <div class="form-group">
-                                <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
-                                    <label for="cb-video-lang-select" style="margin-bottom: 0;"><strong>Pasta de Idioma dos Vídeos:</strong></label>
-                                    <button type="button" class="btn-chip" onclick="forceHydrateSelectedNicheFromCloud()" title="Buscar vídeos deste nicho direto no OneDrive Nuvem">☁️ Atualizar Nuvem</button>
+                                <div
+                                    style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
+                                    <label for="cb-video-lang-select" style="margin-bottom: 0;"><strong>Pasta de Idioma
+                                            dos Vídeos:</strong></label>
+                                    <button type="button" class="btn-chip"
+                                        onclick="forceHydrateSelectedNicheFromCloud()"
+                                        title="Buscar vídeos deste nicho direto no OneDrive Nuvem">☁️ Atualizar
+                                        Nuvem</button>
                                 </div>
-                                <select id="cb-video-lang-select" class="twod-select" style="margin-top: 6px;" onchange="renderBuilderCreativesGrid()">
+                                <select id="cb-video-lang-select" class="twod-select" style="margin-top: 6px;"
+                                    onchange="renderBuilderCreativesGrid()">
                                     <option value="AUTO">✨ Automático (pelo idioma do conjunto/bloco)</option>
                                 </select>
-                                <span class="help-text" id="cb-creatives-summary">Selecione um nicho do OneDrive para visualizar os vídeos 1–6.</span>
+                                <span class="help-text" id="cb-creatives-summary">Selecione um nicho do OneDrive para
+                                    visualizar os vídeos 1–6.</span>
                             </div>
                         </div>
 
                         <div id="cb-creatives-grid" class="cb-creative-grid">
-                            <div class="text-muted" style="font-size: 13px; grid-column: 1 / -1;">Escolha um nicho do OneDrive acima para listar Feed (01–03), Reels (04–06) e 4x3 (07–09 Em construção).</div>
+                            <div class="text-muted" style="font-size: 13px; grid-column: 1 / -1;">Escolha um nicho do
+                                OneDrive acima para listar Feed (01–03), Reels (04–06) e 4x3 (07–09 Em construção).
+                            </div>
                         </div>
                     </div>
 
@@ -1105,14 +1148,17 @@
                         <div class="panel-card-header">
                             <div>
                                 <h2>4. Textos (2 - 3 - 2), Países & Publicação</h2>
-                                <p>Modelo padrão 2 Textos Principais, 3 Headlines, 2 Descrições • 📅 Gerador Semanal Automático de Textos: <em>Em Breve</em></p>
+                                <p>Modelo padrão 2 Textos Principais, 3 Headlines, 2 Descrições • 📅 Gerador Semanal
+                                    Automático de Textos: <em>Em Breve</em></p>
                             </div>
                             <span class="badge-tag">Passo 4 de 4</span>
                         </div>
 
-                        <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; padding: 10px 12px; border-radius: 8px; background: var(--bg-page); border: 1px solid var(--border-color);">
+                        <div
+                            style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; padding: 10px 12px; border-radius: 8px; background: var(--bg-page); border: 1px solid var(--border-color);">
                             <strong style="font-size: 12px;">🌐 Traduzir textos atuais (2-3-2) para revisão:</strong>
-                            <select id="cb-translate-lang-select" class="twod-select" style="width: auto; min-width: 170px;">
+                            <select id="cb-translate-lang-select" class="twod-select"
+                                style="width: auto; min-width: 170px;">
                                 <option value="es">Espanhol (es)</option>
                                 <option value="en">Inglês (en)</option>
                                 <option value="fr">Francês (fr)</option>
@@ -1128,8 +1174,10 @@
                                 <option value="id">Indonésio (id)</option>
                                 <option value="hi">Hindi (hi)</option>
                             </select>
-                            <button type="button" class="btn btn-outline btn-sm" id="btn-cb-translate" onclick="translateBuilderTexts()">🌐 Traduzir Agora</button>
-                            <label style="display: flex; align-items: center; gap: 6px; font-size: 12px; margin-left: auto; cursor: pointer;">
+                            <button type="button" class="btn btn-outline btn-sm" id="btn-cb-translate"
+                                onclick="translateBuilderTexts()">🌐 Traduzir Agora</button>
+                            <label
+                                style="display: flex; align-items: center; gap: 6px; font-size: 12px; margin-left: auto; cursor: pointer;">
                                 <input type="checkbox" id="cb-auto-translate-per-country" checked>
                                 <span>Traduzir automaticamente por idioma de cada país em blocos multi-idioma</span>
                             </label>
@@ -1139,15 +1187,18 @@
                             <div class="cb-text-col">
                                 <div style="display: flex; justify-content: space-between; align-items: center;">
                                     <strong>Primary text (2 de 5)</strong>
-                                    <button type="button" class="btn-chip" onclick="uppercasePrimaryText1()">AA Maiúsculo</button>
+                                    <button type="button" class="btn-chip" onclick="uppercasePrimaryText1()">AA
+                                        Maiúsculo</button>
                                 </div>
                                 <div class="form-group">
                                     <label style="font-size: 11px;">Texto Principal 1 (TODO MAIÚSCULO):</label>
-                                    <textarea id="cb-primary-1" class="twod-input" rows="2" placeholder="TEXTO AQUI SOBRE O NICHO EM MAIÚSCULO"></textarea>
+                                    <textarea id="cb-primary-1" class="twod-input" rows="2"
+                                        placeholder="TEXTO AQUI SOBRE O NICHO EM MAIÚSCULO"></textarea>
                                 </div>
                                 <div class="form-group">
                                     <label style="font-size: 11px;">Texto Principal 2 (Escrito normal):</label>
-                                    <textarea id="cb-primary-2" class="twod-input" rows="2" placeholder="Texto aqui escrito normalmente sobre o aplicativo..."></textarea>
+                                    <textarea id="cb-primary-2" class="twod-input" rows="2"
+                                        placeholder="Texto aqui escrito normalmente sobre o aplicativo..."></textarea>
                                 </div>
                             </div>
 
@@ -1155,15 +1206,18 @@
                                 <strong>Headline (3 de 5)</strong>
                                 <div class="form-group">
                                     <label style="font-size: 11px;">Headline 1 (Emoji do nicho + frase curta):</label>
-                                    <input type="text" id="cb-headline-1" class="twod-input" placeholder="🔥 TEXTO AQUI">
+                                    <input type="text" id="cb-headline-1" class="twod-input"
+                                        placeholder="🔥 TEXTO AQUI">
                                 </div>
                                 <div class="form-group">
                                     <label style="font-size: 11px;">Headline 2 (Emoji do nicho + variação 2):</label>
-                                    <input type="text" id="cb-headline-2" class="twod-input" placeholder="🔥 TEXTO AQUI 2">
+                                    <input type="text" id="cb-headline-2" class="twod-input"
+                                        placeholder="🔥 TEXTO AQUI 2">
                                 </div>
                                 <div class="form-group">
                                     <label style="font-size: 11px;">Headline 3 (Fixo padrão):</label>
-                                    <input type="text" id="cb-headline-3" class="twod-input" value="✅ APLICATIVO GRÁTIS">
+                                    <input type="text" id="cb-headline-3" class="twod-input"
+                                        value="✅ APLICATIVO GRÁTIS">
                                 </div>
                             </div>
 
@@ -1186,22 +1240,34 @@
 
                         <!-- PRESETS DE PAÍSES / BLOCOS -->
                         <div style="margin-bottom: 14px;">
-                            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 10px;">
-                                <strong>🌍 Conjuntos (Países) que serão criados dentro desta Campanha ($1.00 USD/dia cada):</strong>
+                            <div
+                                style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 10px;">
+                                <strong>🌍 Conjuntos (Países) que serão criados dentro desta Campanha ($1.00 USD/dia
+                                    cada):</strong>
                                 <span class="badge-count" id="cb-selected-countries-badge">1 selecionado</span>
                             </div>
                             <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px;">
-                                <button type="button" class="btn-chip" onclick="applyBuilderCountryPreset('BR')">🇧🇷 Brasil (PT)</button>
-                                <button type="button" class="btn-chip" onclick="applyBuilderCountryPreset('US_EN')">🇺🇸 Estados Unidos (Inglês)</button>
-                                <button type="button" class="btn-chip" onclick="applyBuilderCountryPreset('US_ES')">🇺🇸 Estados Unidos (Espanhol • Spanish All)</button>
-                                <button type="button" class="btn-chip" onclick="applyBuilderCountryPreset('BLOCO-01')">🇪🇸 Bloco 01 (Espanhol)</button>
-                                <button type="button" class="btn-chip" onclick="applyBuilderCountryPreset('BLOCO-02')">🇪🇺 Bloco 02 (Multi)</button>
-                                <button type="button" class="btn-chip" onclick="applyBuilderCountryPreset('BLOCO-03')">🇫🇷 Bloco 03 (Francês)</button>
-                                <button type="button" class="btn-chip" onclick="applyBuilderCountryPreset('BLOCO-04')">🇷🇺 Bloco 04 (Russo)</button>
-                                <button type="button" class="btn-chip" onclick="applyBuilderCountryPreset('BLOCO-05')">🇸🇦 Bloco 05 (Árabe)</button>
-                                <button type="button" class="btn-chip" onclick="applyBuilderCountryPreset('BLOCO-06')">🇬🇧 Bloco 06 (Inglês)</button>
+                                <button type="button" class="btn-chip" onclick="applyBuilderCountryPreset('BR')">🇧🇷
+                                    Brasil (PT)</button>
+                                <button type="button" class="btn-chip" onclick="applyBuilderCountryPreset('US_EN')">🇺🇸
+                                    Estados Unidos (Inglês)</button>
+                                <button type="button" class="btn-chip" onclick="applyBuilderCountryPreset('US_ES')">🇺🇸
+                                    Estados Unidos (Espanhol • Spanish All)</button>
+                                <button type="button" class="btn-chip"
+                                    onclick="applyBuilderCountryPreset('BLOCO-01')">🇪🇸 Bloco 01 (Espanhol)</button>
+                                <button type="button" class="btn-chip"
+                                    onclick="applyBuilderCountryPreset('BLOCO-02')">🇪🇺 Bloco 02 (Multi)</button>
+                                <button type="button" class="btn-chip"
+                                    onclick="applyBuilderCountryPreset('BLOCO-03')">🇫🇷 Bloco 03 (Francês)</button>
+                                <button type="button" class="btn-chip"
+                                    onclick="applyBuilderCountryPreset('BLOCO-04')">🇷🇺 Bloco 04 (Russo)</button>
+                                <button type="button" class="btn-chip"
+                                    onclick="applyBuilderCountryPreset('BLOCO-05')">🇸🇦 Bloco 05 (Árabe)</button>
+                                <button type="button" class="btn-chip"
+                                    onclick="applyBuilderCountryPreset('BLOCO-06')">🇬🇧 Bloco 06 (Inglês)</button>
                             </div>
-                            <div id="cb-countries-grid" class="countries-grid-container" style="max-height: 220px; overflow-y: auto;"></div>
+                            <div id="cb-countries-grid" class="countries-grid-container"
+                                style="max-height: 220px; overflow-y: auto;"></div>
                         </div>
 
                         <div class="duplication-settings-row" style="margin-bottom: 16px;">
@@ -1214,17 +1280,20 @@
                             </div>
                             <div class="form-group" style="flex: 1; min-width: 220px;">
                                 <label><strong>Resumo da Publicação:</strong></label>
-                                <div id="cb-launch-summary" class="cb-rule-pill" style="display: block; padding: 10px 12px; border-radius: 8px; font-size: 13px;">
+                                <div id="cb-launch-summary" class="cb-rule-pill"
+                                    style="display: block; padding: 10px 12px; border-radius: 8px; font-size: 13px;">
                                     1 Campanha • 1 Conjunto ($1/dia) • até 6 Anúncios
                                 </div>
                             </div>
                         </div>
 
                         <div class="execution-trigger-bar">
-                            <button type="button" class="btn btn-primary btn-lg" id="btn-cb-launch" onclick="launchStandardCampaign()" style="flex: 1;">
+                            <button type="button" class="btn btn-primary btn-lg" id="btn-cb-launch"
+                                onclick="launchStandardCampaign()" style="flex: 1;">
                                 🚀 CRIAR CAMPANHA PADRÃO + CONJUNTOS + ANÚNCIOS VIA API
                             </button>
-                            <button type="button" class="btn btn-outline" id="btn-cb-clear-log" onclick="clearBuilderTerminal()" style="display: none;">
+                            <button type="button" class="btn btn-outline" id="btn-cb-clear-log"
+                                onclick="clearBuilderTerminal()" style="display: none;">
                                 Limpar Log
                             </button>
                         </div>
@@ -1246,7 +1315,8 @@
                                 <span class="term-status" id="cb-terminal-status">Aguardando configuração</span>
                             </div>
                             <div class="terminal-body" id="cb-terminal-body">
-                                <div class="terminal-log-empty">Preencha os passos 1 a 4 e clique no botão acima para criar sua campanha padrão no Meta Ads...</div>
+                                <div class="terminal-log-empty">Preencha os passos 1 a 4 e clique no botão acima para
+                                    criar sua campanha padrão no Meta Ads...</div>
                             </div>
                         </div>
                     </div>
@@ -1257,23 +1327,31 @@
                 <!-- ABA 4: DUPLICADOR META ADS                     -->
                 <!-- ============================================== -->
                 <section id="tab-duplicador" class="tab-pane">
-                    
+
                     <!-- BANNER SUPERIOR DE STATUS META -->
                     <div class="meta-status-banner">
                         <div class="meta-banner-info">
                             <div class="meta-avatar-icon">
-                                <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M12 2C6.477 2 2 6.477 2 12c0 4.991 3.657 9.128 8.438 9.879V14.89h-2.54V12h2.54V9.797c0-2.506 1.492-3.89 3.777-3.89 1.094 0 2.238.195 2.238.195v2.46h-1.26c-1.243 0-1.63.771-1.63 1.562V12h2.773l-.443 2.89h-2.33v6.989C18.343 21.129 22 16.99 22 12c0-5.523-4.477-10-10-10z"/></svg>
+                                <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor">
+                                    <path
+                                        d="M12 2C6.477 2 2 6.477 2 12c0 4.991 3.657 9.128 8.438 9.879V14.89h-2.54V12h2.54V9.797c0-2.506 1.492-3.89 3.777-3.89 1.094 0 2.238.195 2.238.195v2.46h-1.26c-1.243 0-1.63.771-1.63 1.562V12h2.773l-.443 2.89h-2.33v6.989C18.343 21.129 22 16.99 22 12c0-5.523-4.477-10-10-10z" />
+                                </svg>
                             </div>
                             <div>
                                 <div class="meta-banner-title">
                                     <strong id="duplicador-user-name">Thiago DuploCanto</strong>
-                                    <span class="badge-status status-active" id="duplicador-api-badge">🟢 Meta API v21.0 Online</span>
+                                    <span class="badge-status status-active" id="duplicador-api-badge">🟢 Meta API v21.0
+                                        Online</span>
                                 </div>
-                                <span class="meta-banner-sub" id="duplicador-user-sub">Token Ativo • Permissões: ads_management, ads_read, business_management</span>
+                                <span class="meta-banner-sub" id="duplicador-user-sub">Token Ativo • Permissões:
+                                    ads_management, ads_read, business_management</span>
                             </div>
                         </div>
                         <div class="meta-banner-actions">
-                            <a href="https://developers.facebook.com/tools/explorer/" target="_blank" rel="noopener noreferrer" class="btn btn-outline btn-sm" style="text-decoration: none; display: inline-flex; align-items: center; gap: 4px;" title="Abrir Graph API Explorer para gerar um novo token da Meta">
+                            <a href="https://developers.facebook.com/tools/explorer/" target="_blank"
+                                rel="noopener noreferrer" class="btn btn-outline btn-sm"
+                                style="text-decoration: none; display: inline-flex; align-items: center; gap: 4px;"
+                                title="Abrir Graph API Explorer para gerar um novo token da Meta">
                                 🌐 Gerar Token ↗
                             </a>
                             <button type="button" class="btn btn-outline btn-sm" onclick="reloadMetaAccounts(true)">
@@ -1286,24 +1364,39 @@
                     </div>
 
                     <!-- CONEXÃO RÁPIDA DA API META (DENTRO DO DUPLICADOR) -->
-                    <div id="duplicador-token-box" class="panel-card twod-hidden" style="margin-bottom: 24px; border: 1px solid rgba(59, 130, 246, 0.35);">
+                    <div id="duplicador-token-box" class="panel-card twod-hidden"
+                        style="margin-bottom: 24px; border: 1px solid rgba(59, 130, 246, 0.35);">
                         <div class="panel-card-header" style="margin-bottom: 14px;">
                             <div>
                                 <h2 style="font-size: 16px;">🔑 Conectar API do Facebook (Meta Ads)</h2>
-                                <p>Cole seu Access Token abaixo para conectar suas contas e campanhas direto por aqui (salvo com segurança apenas no seu navegador).</p>
+                                <p>Cole seu Access Token abaixo para conectar suas contas e campanhas direto por aqui
+                                    (salvo com segurança apenas no seu navegador).</p>
                             </div>
-                            <button type="button" class="btn btn-outline btn-sm" onclick="toggleDuplicatorTokenBox(false)">✕ Fechar</button>
+                            <button type="button" class="btn btn-outline btn-sm"
+                                onclick="toggleDuplicatorTokenBox(false)">✕ Fechar</button>
                         </div>
                         <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
-                            <input type="password" id="duplicador-token-input" class="twod-input" placeholder="Cole seu Access Token da Meta aqui (EAA...)" style="flex: 1; min-width: 240px; font-family: monospace; font-size: 12px;">
-                            <button type="button" class="btn btn-outline btn-sm" id="btn-toggle-dup-token-vis" onclick="toggleTokenVisibility('duplicador-token-input', 'btn-toggle-dup-token-vis')">👁️ Ver</button>
-                            <button type="button" class="btn btn-primary btn-sm" onclick="saveMetaSettingsFromUI('duplicador')">💾 Conectar & Salvar</button>
-                            <button type="button" class="btn btn-outline btn-sm" onclick="testMetaTokenFromUI('duplicador-token-input', 'duplicador-token-test-result')">🔍 Testar</button>
-                            <a href="https://developers.facebook.com/tools/explorer/" target="_blank" rel="noopener noreferrer" class="btn btn-outline btn-sm" style="text-decoration: none; display: inline-flex; align-items: center; gap: 4px;" title="Abrir Graph API Explorer no Meta Developers">
+                            <input type="password" id="duplicador-token-input" class="twod-input"
+                                placeholder="Cole seu Access Token da Meta aqui (EAA...)"
+                                style="flex: 1; min-width: 240px; font-family: monospace; font-size: 12px;">
+                            <button type="button" class="btn btn-outline btn-sm" id="btn-toggle-dup-token-vis"
+                                onclick="toggleTokenVisibility('duplicador-token-input', 'btn-toggle-dup-token-vis')">👁️
+                                Ver</button>
+                            <button type="button" class="btn btn-primary btn-sm"
+                                onclick="saveMetaSettingsFromUI('duplicador')">💾 Conectar & Salvar</button>
+                            <button type="button" class="btn btn-outline btn-sm"
+                                onclick="testMetaTokenFromUI('duplicador-token-input', 'duplicador-token-test-result')">🔍
+                                Testar</button>
+                            <a href="https://developers.facebook.com/tools/explorer/" target="_blank"
+                                rel="noopener noreferrer" class="btn btn-outline btn-sm"
+                                style="text-decoration: none; display: inline-flex; align-items: center; gap: 4px;"
+                                title="Abrir Graph API Explorer no Meta Developers">
                                 🌐 Abrir Gerador de Token (Meta) ↗
                             </a>
                         </div>
-                        <div id="duplicador-token-test-result" class="twod-hidden" style="margin-top: 12px; padding: 12px 16px; border-radius: 8px; font-size: 13px; line-height: 1.5;"></div>
+                        <div id="duplicador-token-test-result" class="twod-hidden"
+                            style="margin-top: 12px; padding: 12px 16px; border-radius: 8px; font-size: 13px; line-height: 1.5;">
+                        </div>
                     </div>
 
                     <!-- ETAPA 1: SELEÇÃO DE CONTA, CAMPANHA E CONJUNTO BASE -->
@@ -1311,7 +1404,8 @@
                         <div class="panel-card-header">
                             <div>
                                 <h2>1. Selecione a Origem do Anúncio</h2>
-                                <p>Escolha a Conta de Anúncios, a Campanha ativa e o Conjunto Base (origem dos anúncios e criativos).</p>
+                                <p>Escolha a Conta de Anúncios, a Campanha ativa e o Conjunto Base (origem dos anúncios
+                                    e criativos).</p>
                             </div>
                             <span class="badge-tag">Passo 1 de 3</span>
                         </div>
@@ -1334,8 +1428,12 @@
                                     <strong>Campanha Ativa:</strong>
                                     <span class="text-muted" id="label-campaign-count"></span>
                                 </label>
-                                <input type="search" id="search-meta-campaign" class="twod-input" placeholder="🔍 Digite o PostID ou nome da campanha..." oninput="filterMetaCampaigns()" style="margin-bottom: 6px; padding: 7px 10px; font-size: 13px;" disabled>
-                                <select id="select-meta-campaign" class="twod-select" onchange="onMetaCampaignSelected()" disabled>
+                                <input type="search" id="search-meta-campaign" class="twod-input"
+                                    placeholder="🔍 Digite o PostID ou nome da campanha..."
+                                    oninput="filterMetaCampaigns()"
+                                    style="margin-bottom: 6px; padding: 7px 10px; font-size: 13px;" disabled>
+                                <select id="select-meta-campaign" class="twod-select"
+                                    onchange="onMetaCampaignSelected()" disabled>
                                     <option value="">Selecione uma conta primeiro...</option>
                                 </select>
                             </div>
@@ -1346,7 +1444,8 @@
                                     <strong>Conjunto Base (Origem):</strong>
                                     <span class="text-muted" id="label-adset-count"></span>
                                 </label>
-                                <select id="select-meta-adset" class="twod-select" onchange="onMetaAdSetSelected()" disabled>
+                                <select id="select-meta-adset" class="twod-select" onchange="onMetaAdSetSelected()"
+                                    disabled>
                                     <option value="">Selecione uma campanha primeiro...</option>
                                 </select>
                             </div>
@@ -1358,7 +1457,8 @@
                                 <span class="adset-icon">📦</span>
                                 <div style="flex: 1;">
                                     <strong id="preview-adset-name">Nome do Conjunto</strong>
-                                    <div class="text-muted" id="preview-adset-meta">Orçamento: $1.00 | Segmentação detectada</div>
+                                    <div class="text-muted" id="preview-adset-meta">Orçamento: $1.00 | Segmentação
+                                        detectada</div>
                                 </div>
                             </div>
                             <div class="adset-preview-tags" id="preview-adset-tags">
@@ -1370,10 +1470,13 @@
                                 <div class="meta-creative-header">
                                     <div style="display:flex; align-items:center; gap:8px;">
                                         <span style="font-size:16px;">🎬</span>
-                                        <strong style="font-size:13px; color:#e2e8f0;">Criativos no Facebook (Conjunto Base)</strong>
-                                        <span class="badge-tag" id="badge-fb-ads-count" style="font-size:11px;">Buscando...</span>
+                                        <strong style="font-size:13px; color:#e2e8f0;">Criativos no Facebook (Conjunto
+                                            Base)</strong>
+                                        <span class="badge-tag" id="badge-fb-ads-count"
+                                            style="font-size:11px;">Buscando...</span>
                                     </div>
-                                    <span class="text-muted" style="font-size:11px;" id="fb-ads-thumb-status">Consultando anúncios na Meta...</span>
+                                    <span class="text-muted" style="font-size:11px;"
+                                        id="fb-ads-thumb-status">Consultando anúncios na Meta...</span>
                                 </div>
                                 <div class="creative-thumbs-row" id="fb-ads-thumbs-row">
                                     <!-- Miniaturas dos anúncios puxadas da Meta API -->
@@ -1382,23 +1485,35 @@
 
                             <!-- IDENTIFICAÇÃO E VÍNCULO COM O PACOTE DO ONEDRIVE -->
                             <div class="campaign-creative-link-box" id="campaign-creative-link-box">
-                                <div class="creative-link-header" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+                                <div class="creative-link-header"
+                                    style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
                                     <div style="display:flex; align-items:center; gap:8px;">
                                         <span style="font-size:16px;">📁</span>
-                                        <strong style="font-size:13px; color:#e2e8f0;">Vínculo com Pacote do OneDrive</strong>
-                                        <span id="campaign-creative-badge" class="badge-tag" style="background:#3b82f620; color:#60a5fa; border:1px solid #3b82f640;">Não vinculado</span>
+                                        <strong style="font-size:13px; color:#e2e8f0;">Vínculo com Pacote do
+                                            OneDrive</strong>
+                                        <span id="campaign-creative-badge" class="badge-tag"
+                                            style="background:#3b82f620; color:#60a5fa; border:1px solid #3b82f640;">Não
+                                            vinculado</span>
                                     </div>
                                     <div id="campaign-link-actions" style="display:flex; gap:8px; flex-wrap:wrap;">
-                                        <button type="button" class="btn btn-secondary btn-sm" id="btn-search-niche-packs" onclick="loadNicheCandidatePacks(true, false)" style="padding:4px 10px; font-size:11px;">🔍 Buscar Pastas no OneDrive</button>
-                                        <button type="button" class="btn btn-secondary btn-sm" id="btn-sync-niche-packs" onclick="loadNicheCandidatePacks(true, true)" style="padding:4px 10px; font-size:11px;">🔄 Sincronizar OneDrive</button>
+                                        <button type="button" class="btn btn-secondary btn-sm"
+                                            id="btn-search-niche-packs" onclick="loadNicheCandidatePacks(true, false)"
+                                            style="padding:4px 10px; font-size:11px;">🔍 Buscar Pastas no
+                                            OneDrive</button>
+                                        <button type="button" class="btn btn-secondary btn-sm" id="btn-sync-niche-packs"
+                                            onclick="loadNicheCandidatePacks(true, true)"
+                                            style="padding:4px 10px; font-size:11px;">🔄 Sincronizar OneDrive</button>
                                     </div>
                                 </div>
-                                <div id="campaign-creative-summary" class="text-muted" style="font-size:12px; margin-top:4px;">
-                                    Vincule esta campanha a um pacote de criativos do OneDrive para identificar facilmente e duplicar para outros idiomas sem procurar.
+                                <div id="campaign-creative-summary" class="text-muted"
+                                    style="font-size:12px; margin-top:4px;">
+                                    Vincule esta campanha a um pacote de criativos do OneDrive para identificar
+                                    facilmente e duplicar para outros idiomas sem procurar.
                                 </div>
 
                                 <!-- SELETOR DE PACOTES CANDIDATOS DO ONEDRIVE COM PREVIEW -->
-                                <div id="onedrive-candidate-packs-container" class="candidate-packs-container twod-hidden" style="margin-top:12px;">
+                                <div id="onedrive-candidate-packs-container"
+                                    class="candidate-packs-container twod-hidden" style="margin-top:12px;">
                                     <!-- Cards de cada pasta do nicho no OneDrive com thumbs -->
                                 </div>
                             </div>
@@ -1410,13 +1525,15 @@
                         <div class="panel-card-header">
                             <div>
                                 <h2>2. Escolha o Bloco de Países & Configurações</h2>
-                                <p>Selecione o bloco de expansão internacional. Cada país marcado gerará um novo conjunto idêntico ao base.</p>
+                                <p>Selecione o bloco de expansão internacional. Cada país marcado gerará um novo
+                                    conjunto idêntico ao base.</p>
                             </div>
                             <span class="badge-tag">Passo 2 de 3</span>
                         </div>
 
                         <!-- BANNER DE AVISO DE IDIOMA E VÍDEOS -->
-                        <div id="duplicator-lang-notice" class="duplicator-lang-notice twod-hidden" style="margin-bottom:16px;">
+                        <div id="duplicator-lang-notice" class="duplicator-lang-notice twod-hidden"
+                            style="margin-bottom:16px;">
                             <!-- Preenchido dinamicamente quando o idioma do bloco diferir da base -->
                         </div>
 
@@ -1435,12 +1552,17 @@
                                 </div>
                             </div>
                             <div class="block-quick-actions">
-                                <button type="button" class="btn-chip btn-chip-primary" onclick="selectMissingCountriesOnly()" title="Marca apenas os países que ainda NÃO foram criados nesta campanha">
+                                <button type="button" class="btn-chip btn-chip-primary"
+                                    onclick="selectMissingCountriesOnly()"
+                                    title="Marca apenas os países que ainda NÃO foram criados nesta campanha">
                                     ⚡ Marcar Apenas Faltantes
                                 </button>
-                                <button type="button" class="btn-chip" onclick="toggleAllCountriesInBlock(true)">✓ Marcar Todos</button>
-                                <button type="button" class="btn-chip" onclick="toggleAllCountriesInBlock(false)">✕ Desmarcar Todos</button>
-                                <button type="button" class="btn-chip" onclick="selectPriorityCountriesOnly()">⭐ Apenas Prioritários</button>
+                                <button type="button" class="btn-chip" onclick="toggleAllCountriesInBlock(true)">✓
+                                    Marcar Todos</button>
+                                <button type="button" class="btn-chip" onclick="toggleAllCountriesInBlock(false)">✕
+                                    Desmarcar Todos</button>
+                                <button type="button" class="btn-chip" onclick="selectPriorityCountriesOnly()">⭐ Apenas
+                                    Prioritários</button>
                             </div>
                         </div>
 
@@ -1457,7 +1579,9 @@
                                 </label>
                                 <div class="input-with-prefix">
                                     <span class="input-prefix" id="currency-prefix">$</span>
-                                    <input type="text" id="input-daily-budget" value="1.00" class="twod-input" readonly style="font-weight: 700; color: #10b981; background: var(--bg-card); cursor: default;" title="Orçamento padrão fixo da TwoD: $1.00 USD">
+                                    <input type="text" id="input-daily-budget" value="1.00" class="twod-input" readonly
+                                        style="font-weight: 700; color: #10b981; background: var(--bg-card); cursor: default;"
+                                        title="Orçamento padrão fixo da TwoD: $1.00 USD">
                                 </div>
                                 <span class="help-text">Sempre fixo em <strong>$1.00 USD</strong></span>
                             </div>
@@ -1492,16 +1616,19 @@
                         <div class="panel-card-header">
                             <div>
                                 <h2>3. Executar Duplicação em Massa</h2>
-                                <p>Disparo instantâneo via Meta Marketing API. Nenhum clique manual em tela é necessário.</p>
+                                <p>Disparo instantâneo via Meta Marketing API. Nenhum clique manual em tela é
+                                    necessário.</p>
                             </div>
                             <span class="badge-tag">Passo 3 de 3</span>
                         </div>
 
                         <div class="execution-trigger-bar">
-                            <button type="button" class="btn btn-primary btn-lg" id="btn-start-duplication" onclick="startBatchDuplication()">
+                            <button type="button" class="btn btn-primary btn-lg" id="btn-start-duplication"
+                                onclick="startBatchDuplication()">
                                 🚀 Iniciar Duplicação via Meta API
                             </button>
-                            <button type="button" class="btn btn-outline" id="btn-clear-meta-log" onclick="clearMetaLog()" style="display: none;">
+                            <button type="button" class="btn btn-outline" id="btn-clear-meta-log"
+                                onclick="clearMetaLog()" style="display: none;">
                                 🧹 Limpar Terminal
                             </button>
                         </div>
@@ -1525,11 +1652,15 @@
                                     <span class="dot dot-yellow"></span>
                                     <span class="dot dot-green"></span>
                                 </div>
-                                <span class="terminal-title">Terminal de Execução em Tempo Real (Meta Marketing API)</span>
+                                <span class="terminal-title">Terminal de Execução em Tempo Real (Meta Marketing
+                                    API)</span>
                                 <span class="terminal-status" id="terminal-live-status">Pronto para iniciar</span>
+                                <button type="button" class="terminal-copy-btn" id="btn-copy-meta-log"
+                                    onclick="copyMetaLog()" title="Copiar todo o log do terminal">📋 Copiar Terminal</button>
                             </div>
                             <div class="terminal-body" id="meta-terminal-body">
-                                <div class="terminal-log-empty">Nenhuma duplicação iniciada ainda. Selecione os países acima e clique em "Iniciar Duplicação".</div>
+                                <div class="terminal-log-empty">Nenhuma duplicação iniciada ainda. Selecione os países
+                                    acima e clique em "Iniciar Duplicação".</div>
                             </div>
                         </div>
                     </div>
@@ -1543,7 +1674,8 @@
                         <div class="panel-card-header">
                             <div>
                                 <h2>⚡ Fila FUN Digital — Gestão de Sites</h2>
-                                <p>Gerencie os sites atendidos pela automação do Alexandre. Oculte projetos em teste (Beta) para não poluir a tela operacional.</p>
+                                <p>Gerencie os sites atendidos pela automação do Alexandre. Oculte projetos em teste
+                                    (Beta) para não poluir a tela operacional.</p>
                             </div>
                             <button class="btn btn-primary" onclick="openAddSiteModal()">+ Adicionar Novo Site</button>
                         </div>
@@ -1585,7 +1717,9 @@
                         <div class="construction-icon">📝</div>
                         <h2>Ajuste em Massa no WordPress</h2>
                         <span class="badge-wip">EM CONSTRUÇÃO</span>
-                        <p>Integração com a WP REST API para aplicar tags, ativar/desativar comentários e atualizar taxonomias em todos os posts da rede (Simplificandocomcafe, Twod, Kiuvix, etc.) sem abrir o painel /wp-admin de cada um.</p>
+                        <p>Integração com a WP REST API para aplicar tags, ativar/desativar comentários e atualizar
+                            taxonomias em todos os posts da rede (Simplificandocomcafe, Twod, Kiuvix, etc.) sem abrir o
+                            painel /wp-admin de cada um.</p>
                     </div>
                 </section>
 
@@ -1633,7 +1767,8 @@
                             <h3>Tema & Agendamento de Horário</h3>
                             <div class="theme-picker-group">
                                 <label class="radio-card">
-                                    <input type="radio" name="theme-choice" value="light" onchange="updateThemeSettings(this.value)">
+                                    <input type="radio" name="theme-choice" value="light"
+                                        onchange="updateThemeSettings(this.value)">
                                     <div class="radio-card-content">
                                         <span class="icon">☀️</span>
                                         <strong>Modo Claro</strong>
@@ -1642,7 +1777,8 @@
                                 </label>
 
                                 <label class="radio-card">
-                                    <input type="radio" name="theme-choice" value="dark" onchange="updateThemeSettings(this.value)">
+                                    <input type="radio" name="theme-choice" value="dark"
+                                        onchange="updateThemeSettings(this.value)">
                                     <div class="radio-card-content">
                                         <span class="icon">🌙</span>
                                         <strong>Modo Escuro</strong>
@@ -1651,7 +1787,8 @@
                                 </label>
 
                                 <label class="radio-card">
-                                    <input type="radio" name="theme-choice" value="auto" onchange="updateThemeSettings(this.value)">
+                                    <input type="radio" name="theme-choice" value="auto"
+                                        onchange="updateThemeSettings(this.value)">
                                     <div class="radio-card-content">
                                         <span class="icon">⏰</span>
                                         <strong>Programar por Horário</strong>
@@ -1666,36 +1803,53 @@
                                 <div class="schedule-inputs-row">
                                     <div class="form-group">
                                         <label>Início (Modo Claro):</label>
-                                        <input type="time" id="schedule-start" value="06:00" onchange="saveScheduleTimes()">
+                                        <input type="time" id="schedule-start" value="06:00"
+                                            onchange="saveScheduleTimes()">
                                     </div>
                                     <div class="form-group">
                                         <label>Término (Mudar para Escuro):</label>
-                                        <input type="time" id="schedule-end" value="18:00" onchange="saveScheduleTimes()">
+                                        <input type="time" id="schedule-end" value="18:00"
+                                            onchange="saveScheduleTimes()">
                                     </div>
                                 </div>
-                                <span class="help-text">Ex: Das 06:00 às 18:00 o sistema ficará Claro. Fora desse intervalo, mudará automaticamente para Escuro.</span>
+                                <span class="help-text">Ex: Das 06:00 às 18:00 o sistema ficará Claro. Fora desse
+                                    intervalo, mudará automaticamente para Escuro.</span>
                             </div>
                         </div>
 
                         <div class="settings-section">
                             <h3>Meta Marketing API (Facebook Ads)</h3>
-                            <p class="text-muted" style="margin-bottom: 12px;">Quando <code>META_ACCESS_TOKEN</code> está configurado nas variáveis de ambiente do servidor (Render), o token definitivo fica protegido somente no backend sem ser exposto no navegador.</p>
-                            <div id="meta-server-token-banner" class="twod-hidden" style="margin-bottom: 14px; padding: 10px 14px; border-radius: 8px; background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.35); color: #34d399; font-size: 12px; line-height: 1.5;"></div>
-                            
+                            <p class="text-muted" style="margin-bottom: 12px;">Quando <code>META_ACCESS_TOKEN</code>
+                                está configurado nas variáveis de ambiente do servidor (Render), o token definitivo fica
+                                protegido somente no backend sem ser exposto no navegador.</p>
+                            <div id="meta-server-token-banner" class="twod-hidden"
+                                style="margin-bottom: 14px; padding: 10px 14px; border-radius: 8px; background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.35); color: #34d399; font-size: 12px; line-height: 1.5;">
+                            </div>
+
                             <div class="form-group" style="margin-bottom: 14px;">
-                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; flex-wrap: wrap; gap: 6px;">
+                                <div
+                                    style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; flex-wrap: wrap; gap: 6px;">
                                     <label for="meta-token-input" style="margin-bottom: 0;">
-                                        <strong>Token Temporário / Substituto Manual (Opcional neste navegador):</strong>
+                                        <strong>Token Temporário / Substituto Manual (Opcional neste
+                                            navegador):</strong>
                                     </label>
-                                    <a href="https://business.facebook.com/settings/system-users" target="_blank" rel="noopener noreferrer" class="btn btn-outline btn-sm" style="text-decoration: none; display: inline-flex; align-items: center; gap: 4px; font-size: 11px; padding: 4px 10px;" title="Gerar System User Token definitivo no Business Manager">
+                                    <a href="https://business.facebook.com/settings/system-users" target="_blank"
+                                        rel="noopener noreferrer" class="btn btn-outline btn-sm"
+                                        style="text-decoration: none; display: inline-flex; align-items: center; gap: 4px; font-size: 11px; padding: 4px 10px;"
+                                        title="Gerar System User Token definitivo no Business Manager">
                                         🔑 Usuário do Sistema (Token Definitivo BM) ↗
                                     </a>
                                 </div>
                                 <div style="display: flex; gap: 8px;">
-                                    <input type="password" id="meta-token-input" class="twod-input" placeholder="Deixe vazio para usar o token seguro do servidor (ou cole EAA...)" style="flex: 1; font-family: monospace; font-size: 12px;">
-                                    <button type="button" class="btn btn-outline" id="btn-toggle-token-vis" onclick="toggleTokenVisibility()">👁️ Ver</button>
+                                    <input type="password" id="meta-token-input" class="twod-input"
+                                        placeholder="Deixe vazio para usar o token seguro do servidor (ou cole EAA...)"
+                                        style="flex: 1; font-family: monospace; font-size: 12px;">
+                                    <button type="button" class="btn btn-outline" id="btn-toggle-token-vis"
+                                        onclick="toggleTokenVisibility()">👁️ Ver</button>
                                 </div>
-                                <span class="help-text">Para token definitivo 100% privado, defina <code>META_ACCESS_TOKEN</code> nas Environment Variables do Render (sem colar aqui).</span>
+                                <span class="help-text">Para token definitivo 100% privado, defina
+                                    <code>META_ACCESS_TOKEN</code> nas Environment Variables do Render (sem colar
+                                    aqui).</span>
                             </div>
 
                             <div class="form-grid-2" style="margin-bottom: 16px;">
@@ -1703,54 +1857,61 @@
                                     <label for="meta-default-account-input">
                                         <strong>Conta de Anúncio Padrão (ID):</strong>
                                     </label>
-                                    <input type="text" id="meta-default-account-input" class="twod-input" placeholder="act_522793227047438">
+                                    <input type="text" id="meta-default-account-input" class="twod-input"
+                                        placeholder="act_522793227047438">
                                     <span class="help-text">ID da conta pré-selecionada no Duplicador.</span>
                                 </div>
                                 <div class="form-group" style="align-self: flex-end; display: flex; gap: 10px;">
-                                    <button type="button" class="btn btn-primary" onclick="saveMetaSettingsFromUI()">💾 Salvar Token</button>
-                                    <button type="button" class="btn btn-outline" onclick="testMetaTokenFromUI()">🔍 Testar Conexão</button>
+                                    <button type="button" class="btn btn-primary" onclick="saveMetaSettingsFromUI()">💾
+                                        Salvar Token</button>
+                                    <button type="button" class="btn btn-outline" onclick="testMetaTokenFromUI()">🔍
+                                        Testar Conexão</button>
                                 </div>
                             </div>
 
-                            <div id="meta-token-test-result" class="twod-hidden" style="padding: 12px 16px; border-radius: 8px; font-size: 13px; line-height: 1.5;"></div>
+                            <div id="meta-token-test-result" class="twod-hidden"
+                                style="padding: 12px 16px; border-radius: 8px; font-size: 13px; line-height: 1.5;">
+                            </div>
                         </div>
 
                         <div class="settings-section">
                             <h3>🤖 Google Gemini API (Áudios TTS Grátis &amp; IA na Nuvem)</h3>
-                            <p class="text-muted" style="margin-bottom: 12px;">Chave gratuita do <strong>Google AI Studio</strong> para gerar locuções MP3 direto no OneDrive sem baixar arquivos no PC. Defina <code>GEMINI_API_KEY</code> no Render para persistir 24/7 ou salve abaixo para esta instância.</p>
-                            <div id="gemini-server-key-banner" class="twod-hidden" style="margin-bottom: 12px; padding: 10px 14px; border-radius: 8px; background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.35); color: #34d399; font-size: 12px;"></div>
-                            <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
-                                <input type="password" id="gemini-api-key-input" class="twod-input" placeholder="Cole sua Google Gemini API Key (AIza...)" style="flex: 1; min-width: 240px; font-family: monospace; font-size: 12px;">
-                                <button type="button" class="btn btn-primary" onclick="saveGeminiSettingsFromUI()">💾 Salvar Chave Gemini</button>
-                                <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer" class="btn btn-outline" style="text-decoration:none;">🌐 Criar Chave Grátis ↗</a>
+                            <p class="text-muted" style="margin-bottom: 12px;">Chave gratuita do <strong>Google AI
+                                    Studio</strong> para gerar locuções MP3 direto no OneDrive sem baixar arquivos no
+                                PC. Defina <code>GEMINI_API_KEY</code> no Render para persistir 24/7 ou salve abaixo
+                                para esta instância.</p>
+                            <div id="gemini-server-key-banner" class="twod-hidden"
+                                style="margin-bottom: 12px; padding: 10px 14px; border-radius: 8px; background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.35); color: #34d399; font-size: 12px;">
                             </div>
-                            <div id="gemini-key-save-status" class="text-muted" style="margin-top:8px; font-size:12px;"></div>
-                        </div>
-
-                        <div class="settings-section">
-                            <h3>🎨 Cloudflare Workers AI (Gerador Grátis de Criativos)</h3>
-                            <p class="text-muted" style="margin-bottom: 12px;">Plano gratuito (<strong>10.000 Neurons/dia</strong>, sem cartão de crédito) para gerar cenários base Flux/Phoenix automaticamente. Defina <code>CLOUDFLARE_ACCOUNT_ID</code> e <code>CLOUDFLARE_API_TOKEN</code> no Render para persistir 24/7 ou salve abaixo.</p>
-                            <div id="cloudflare-server-banner" class="twod-hidden" style="margin-bottom: 12px; padding: 10px 14px; border-radius: 8px; background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.35); color: #34d399; font-size: 12px;"></div>
                             <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
-                                <input type="text" id="cloudflare-account-id-input" class="twod-input" placeholder="Cloudflare Account ID (32 caracteres)" style="flex: 1; min-width: 210px; font-family: monospace; font-size: 12px;">
-                                <input type="password" id="cloudflare-api-token-input" class="twod-input" placeholder="Cloudflare API Token (Workers AI: Edit)" style="flex: 1; min-width: 210px; font-family: monospace; font-size: 12px;">
-                                <button type="button" class="btn btn-primary" onclick="saveCloudflareSettingsFromUI()">💾 Salvar Cloudflare</button>
-                                <a href="https://dash.cloudflare.com" target="_blank" rel="noopener noreferrer" class="btn btn-outline" style="text-decoration:none;">🌐 Painel Cloudflare ↗</a>
+                                <input type="password" id="gemini-api-key-input" class="twod-input"
+                                    placeholder="Cole sua Google Gemini API Key (AIza...)"
+                                    style="flex: 1; min-width: 240px; font-family: monospace; font-size: 12px;">
+                                <button type="button" class="btn btn-primary" onclick="saveGeminiSettingsFromUI()">💾
+                                    Salvar Chave Gemini</button>
+                                <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer"
+                                    class="btn btn-outline" style="text-decoration:none;">🌐 Criar Chave Grátis ↗</a>
                             </div>
-                            <div id="cloudflare-save-status" class="text-muted" style="margin-top:8px; font-size:12px;"></div>
+                            <div id="gemini-key-save-status" class="text-muted" style="margin-top:8px; font-size:12px;">
+                            </div>
                         </div>
 
                         <div class="settings-section">
                             <h3>☁️ API Própria na Nuvem (OneDrive 24/7)</h3>
-                            <p class="text-muted" style="margin-bottom: 16px;">Configure o endereço do servidor backend na nuvem (Render/Railway) para acessar seu OneDrive mesmo quando o PC estiver desligado.</p>
+                            <p class="text-muted" style="margin-bottom: 16px;">Configure o endereço do servidor backend
+                                na nuvem (Render/Railway) para acessar seu OneDrive mesmo quando o PC estiver desligado.
+                            </p>
                             <div class="form-grid-2">
                                 <div class="form-group">
                                     <label for="backend-url-input"><strong>URL do Servidor Backend:</strong></label>
-                                    <input type="url" id="backend-url-input" class="twod-input" placeholder="https://twod-dashboard-thiago.onrender.com">
-                                    <span class="help-text">Deixe em branco para usar automaticamente a nuvem (Render) ou localhost:8000 localmente.</span>
+                                    <input type="url" id="backend-url-input" class="twod-input"
+                                        placeholder="https://twod-dashboard-thiago.onrender.com">
+                                    <span class="help-text">Deixe em branco para usar automaticamente a nuvem (Render)
+                                        ou localhost:8000 localmente.</span>
                                 </div>
                                 <div class="form-group" style="align-self: flex-end; display: flex; gap: 10px;">
-                                    <button type="button" class="btn btn-primary" onclick="saveBackendUrlFromUI()">💾 Salvar & Reconectar</button>
+                                    <button type="button" class="btn btn-primary" onclick="saveBackendUrlFromUI()">💾
+                                        Salvar & Reconectar</button>
                                 </div>
                             </div>
                         </div>
@@ -1760,15 +1921,18 @@
                             <div class="form-grid-2">
                                 <div class="form-group">
                                     <label for="change-current-pwd-input">Senha Atual</label>
-                                    <input type="password" id="change-current-pwd-input" placeholder="Digite sua senha atual..." autocomplete="current-password">
+                                    <input type="password" id="change-current-pwd-input"
+                                        placeholder="Digite sua senha atual..." autocomplete="current-password">
                                 </div>
                                 <div class="form-group">
                                     <label for="change-pwd-input">Nova Senha (mín. 6 caracteres)</label>
-                                    <input type="password" id="change-pwd-input" placeholder="Digite a nova senha..." autocomplete="new-password">
+                                    <input type="password" id="change-pwd-input" placeholder="Digite a nova senha..."
+                                        autocomplete="new-password">
                                 </div>
                             </div>
                             <div style="margin-top: 10px;">
-                                <button type="button" class="btn btn-secondary" onclick="changeMyPassword()">🔒 Salvar Nova Senha</button>
+                                <button type="button" class="btn btn-secondary" onclick="changeMyPassword()">🔒 Salvar
+                                    Nova Senha</button>
                             </div>
                         </div>
                     </div>
@@ -1824,7 +1988,8 @@
                 </div>
                 <div class="form-group">
                     <label>Senha Provisória (será trocada no 1º acesso)</label>
-                    <input type="password" id="new-user-pwd" placeholder="Mín. 6 caracteres (ex: 123456)..." value="123456" required>
+                    <input type="password" id="new-user-pwd" placeholder="Mín. 6 caracteres (ex: 123456)..."
+                        value="123456" required>
                 </div>
                 <div class="form-group">
                     <label>Cargo / Permissão</label>
@@ -1841,7 +2006,8 @@
         </div>
     </div>
 
-    <div id="dup-thumb-zoom-modal" class="thumb-zoom-backdrop twod-hidden" onclick="if(event.target===this) closeThumbZoomModal()">
+    <div id="dup-thumb-zoom-modal" class="thumb-zoom-backdrop twod-hidden"
+        onclick="if(event.target===this) closeThumbZoomModal()">
         <div class="thumb-zoom-card">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
                 <strong id="dup-thumb-zoom-title" style="color:#f8fafc; font-size:14px;">Prévia do Criativo</strong>
@@ -1852,10 +2018,10 @@
         </div>
     </div>
 
-    <script src="app.js?v=9.4"></script>
+    <script src="app.js?v=9.5"></script>
     <script src="studio.js?v=1.8"></script>
     <script src="creative_gen.js?v=1.2"></script>
     <script src="campaign_builder.js?v=1.7"></script>
 </body>
-</html>
 
+</html>

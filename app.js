@@ -4781,6 +4781,61 @@ function clearMetaLog() {
     if (clearBtn) clearBtn.style.display = 'none';
 }
 
+function getMetaLogPlainText() {
+    const terminal = document.getElementById('meta-terminal-body');
+    if (!terminal) return '';
+    const entries = terminal.querySelectorAll('.terminal-entry');
+    if (entries.length > 0) {
+        return Array.from(entries).map(el => {
+            const tm = (el.querySelector('.term-time')?.textContent || '').trim();
+            const tx = (el.querySelector('.term-text')?.textContent || '').trim();
+            return tm && tx ? `${tm} ${tx}` : (el.textContent || '').trim();
+        }).filter(Boolean).join('\n');
+    }
+    return (terminal.innerText || terminal.textContent || '').trim();
+}
+
+async function copyMetaLog() {
+    const btn = document.getElementById('btn-copy-meta-log');
+    const txt = getMetaLogPlainText();
+    if (!txt) {
+        alert('O terminal ainda está vazio.');
+        return;
+    }
+
+    let copied = false;
+    try {
+        if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+            await navigator.clipboard.writeText(txt);
+            copied = true;
+        }
+    } catch (e) { }
+
+    if (!copied) {
+        const ta = document.createElement('textarea');
+        ta.value = txt;
+        ta.setAttribute('readonly', '');
+        ta.style.position = 'fixed';
+        ta.style.top = '-9999px';
+        document.body.appendChild(ta);
+        ta.select();
+        try {
+            copied = document.execCommand('copy');
+        } catch (e) { }
+        document.body.removeChild(ta);
+    }
+
+    if (btn) {
+        const origText = btn.dataset.origLabel || btn.textContent || '📋 Copiar Terminal';
+        btn.dataset.origLabel = origText;
+        btn.textContent = copied ? '✅ Copiado!' : '⚠️ Selecione e copie manualmente';
+        clearTimeout(btn._copyTimer);
+        btn._copyTimer = setTimeout(() => {
+            btn.textContent = origText;
+        }, 2200);
+    }
+}
+
 // ========================================================
 // MOTOR DE DUPLICAÇÃO EM MASSA (META MARKETING API)
 // ========================================================
@@ -5052,6 +5107,8 @@ async function startBatchDuplication() {
     if (hasSameLangTargets && baseAds.length > 0 && baseHasFlexibleMulti) {
         let sameLangErr = '';
         let sameLangDevBlock = false;
+        let sameLangPageBlock = false;
+        let sameLangBlockedPageId = '';
         let expectedExpandedCount = 0;
         const expandedItems = [];
 
@@ -5119,13 +5176,15 @@ async function startBatchDuplication() {
                     } else {
                         sameLangErr = formatMetaApiError(crRes.error || crRes);
                         logMetaTerminal(`⚠️ Falha ao expandir criativo ${adCode} (${baseLang.toUpperCase()}): ${sameLangErr}`, 'error');
-                        if (crRes.error?.error_subcode === 1885183) {
-                            sameLangDevBlock = true;
+                        if (crRes.error?.error_subcode === 1885183 || crRes.error?.error_subcode === 3858749 || /Missing Page permission/i.test(crRes.error?.message || '')) {
+                            sameLangDevBlock = crRes.error?.error_subcode === 1885183;
+                            sameLangPageBlock = crRes.error?.error_subcode === 3858749 || /Missing Page permission/i.test(crRes.error?.message || '');
+                            sameLangBlockedPageId = spec.pageId || '';
                             break;
                         }
                     }
                 }
-                if (sameLangDevBlock) break;
+                if (sameLangDevBlock || sameLangPageBlock) break;
             }
         } catch (expErr) {
             sameLangErr = expErr.message || String(expErr);
@@ -5143,7 +5202,9 @@ async function startBatchDuplication() {
             creativePrepFailures.push({
                 lang: baseLang,
                 error: sameLangErr || `Expansão incompleta (${expandedItems.length}/${expectedExpandedCount} criativos do anúncio flexível).`,
-                isDevMode: sameLangDevBlock
+                isDevMode: sameLangDevBlock,
+                isPagePerm: sameLangPageBlock,
+                pageId: sameLangBlockedPageId
             });
         }
     }
@@ -5164,6 +5225,8 @@ async function startBatchDuplication() {
             const translatedTemplateCache = {};
             let lastLangError = '';
             let hitDevModeBlock = false;
+            let hitPagePermBlock = false;
+            let blockedPageId = '';
 
             try {
                 if (progressStatus) progressStatus.innerText = `🎬 Preparando criativos e tradução para ${tLang.toUpperCase()}...`;
@@ -5260,8 +5323,15 @@ async function startBatchDuplication() {
                     } else {
                         lastLangError = formatMetaApiError(crRes.error || crRes);
                         logMetaTerminal(`⚠️ Falha ao criar AdCreative ${mItem.adName} (${tLang.toUpperCase()}): ${lastLangError}`, 'error');
-                        if (crRes.error?.error_subcode === 1885183) {
+                        const errSub = crRes.error?.error_subcode;
+                        const errMsgTxt = crRes.error?.message || '';
+                        if (errSub === 1885183) {
                             hitDevModeBlock = true;
+                            break;
+                        }
+                        if (errSub === 3858749 || /Missing Page permission/i.test(errMsgTxt)) {
+                            hitPagePermBlock = true;
+                            blockedPageId = trData.spec.pageId || '';
                             break;
                         }
                     }
@@ -5274,14 +5344,16 @@ async function startBatchDuplication() {
                     creativePrepFailures.push({
                         lang: tLang,
                         error: lastLangError || 'Nenhum AdCreative pôde ser criado.',
-                        isDevMode: hitDevModeBlock
+                        isDevMode: hitDevModeBlock,
+                        isPagePerm: hitPagePermBlock,
+                        pageId: blockedPageId
                     });
                 }
             } catch (prepErr) {
                 console.error(`Erro preparando idioma ${tLang}:`, prepErr);
                 const errMsg = prepErr.message || String(prepErr);
                 logMetaTerminal(`❌ Erro ao preparar criativos em ${tLang.toUpperCase()}: ${errMsg}`, 'error');
-                creativePrepFailures.push({ lang: tLang, error: errMsg, isDevMode: false });
+                creativePrepFailures.push({ lang: tLang, error: errMsg, isDevMode: false, isPagePerm: false, pageId: '' });
             }
         }
     }
@@ -5289,17 +5361,25 @@ async function startBatchDuplication() {
     // BLOQUEIO DE SEGURANÇA: nunca cria conjuntos vazios silenciosamente se a criação de AdCreative falhou
     if (creativePrepFailures.length > 0) {
         const hasDevMode = creativePrepFailures.some(f => f.isDevMode);
+        const pagePermItem = creativePrepFailures.find(f => f.isPagePerm || /3858749|Missing Page permission/i.test(f.error || ''));
         const failLines = creativePrepFailures.map(f => `• ${f.lang.toUpperCase()}: ${f.error}`).join('\n');
         const devHint = hasDevMode
-            ? `\n\n📌 COMO RESOLVER AGORA:\n` +
-              `Seu App da Meta ("twod-dashboard-thiago") está em Modo de Desenvolvimento (erro 1885183), por isso a Meta bloqueia a criação de novos anúncios via API.\n` +
+            ? `\n\n📌 COMO RESOLVER AGORA (Modo Desenvolvimento):\n` +
+              `Seu App da Meta está em Modo de Desenvolvimento (erro 1885183), por isso a Meta bloqueia a criação de novos anúncios via API.\n` +
               `1. Acesse https://developers.facebook.com/apps/ e abra seu app.\n` +
               `2. Em Configurações > Básico, preencha uma URL de Privacidade (ex: https://thiagokinho22-code.github.io/twod-dashboard-thiago/privacy.html).\n` +
               `3. No topo da tela, mude a chave de "Desenvolvimento" para "Ao Vivo / Público" (Live) — ou use um Token de Usuário do Sistema no Business Manager.`
             : '';
+        const pagePermHint = pagePermItem
+            ? `\n\n📌 COMO LIBERAR A PÁGINA DO FACEBOOK (erro 3858749):\n` +
+              `O Token/Usuário do Sistema atual não tem função de Anunciante na Página ${pagePermItem.pageId || '(da campanha)'}.\n` +
+              `1. Abra https://business.facebook.com/settings/system-users\n` +
+              `2. Selecione o Usuário do Sistema do token salvo no servidor -> clique em "Atribuir Ativos" > "Páginas".\n` +
+              `3. Marque a Página ${pagePermItem.pageId || 'da campanha'} e ative "Criar anúncios" / "Gerenciar Página" -> Salvar.`
+            : '';
 
         const proceedEmpty = confirm(
-            `❌ FALHA AO CRIAR OS ANÚNCIOS TRADUZIDOS NA META:\n\n${failLines}${devHint}\n\n` +
+            `❌ FALHA AO CRIAR OS ANÚNCIOS TRADUZIDOS NA META:\n\n${failLines}${devHint}${pagePermHint}\n\n` +
             `Deseja MESMO ASSIM criar os conjuntos vazios (apenas estrutura em PAUSED, sem anúncio)?\n\n` +
             `• Cancelar = ABORTAR AGORA (Recomendado — evita criar conjuntos sem anúncio)\n` +
             `• OK = Continuar criando conjuntos sem anúncio`
@@ -5307,7 +5387,7 @@ async function startBatchDuplication() {
 
         if (!proceedEmpty) {
             logMetaTerminal(`🛑 Operação cancelada antes de criar conjuntos vazios sem anúncio.`, 'warn');
-            if (termStatus) termStatus.innerText = hasDevMode ? 'Bloqueado (App Meta em Desenvolvimento)' : 'Cancelado';
+            if (termStatus) termStatus.innerText = hasDevMode ? 'Bloqueado (App Meta em Desenvolvimento)' : (pagePermItem ? 'Bloqueado (Permissão da Página)' : 'Cancelado');
             if (progressStatus) progressStatus.innerText = 'Cancelado antes de criar conjuntos vazios';
             finishDuplicationUi();
             return;
@@ -5815,6 +5895,7 @@ window.selectPriorityCountriesOnly = selectPriorityCountriesOnly;
 window.selectMissingCountriesOnly = selectMissingCountriesOnly;
 window.startBatchDuplication = startBatchDuplication;
 window.clearMetaLog = clearMetaLog;
+window.copyMetaLog = copyMetaLog;
 window.toggleDuplicatorTokenBox = toggleDuplicatorTokenBox;
 window.toggleTokenVisibility = toggleTokenVisibility;
 window.testMetaTokenFromUI = testMetaTokenFromUI;
