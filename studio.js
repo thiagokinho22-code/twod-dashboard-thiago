@@ -449,7 +449,7 @@ async function handleStudioZipUpload(fileList) {
     }
 }
 
-async function loadStudioCampaigns(limit = 20) {
+async function loadStudioCampaigns(limit = 30) {
     const listEl = document.getElementById('studio-campaigns-list');
     if (!listEl) return;
     const search = (document.getElementById('studio-camp-search')?.value || '').trim();
@@ -485,6 +485,12 @@ function renderStudioCampaignsList() {
         const vidBadge = c.has_videos_folder
             ? '<span class="studio-mini-badge ok">🎬 Vídeos/Img OK</span>'
             : '<span class="studio-mini-badge muted">🎬 Sem pasta vídeo</span>';
+        let modTip = '';
+        if (c.modified_at) {
+            try {
+                modTip = `Modificado no OneDrive: ${new Date(c.modified_at).toLocaleString('pt-BR')}`;
+            } catch (e) { modTip = c.modified_at; }
+        }
 
         return `
             <div class="studio-camp-row ${checked ? 'selected' : ''}">
@@ -493,7 +499,7 @@ function renderStudioCampaignsList() {
                     <span class="studio-camp-name">${_studioEsc(c.name)}</span>
                 </label>
                 <div class="studio-camp-meta">
-                    <span class="studio-date-pill">📅 ${_studioEsc(c.date_label)}</span>
+                    <span class="studio-date-pill" title="${_studioEsc(modTip)}">📅 ${_studioEsc(c.date_label)}</span>
                     ${audBadge}
                     ${vidBadge}
                     <button type="button" class="btn btn-outline btn-sm" style="padding:3px 9px; font-size:11px;" data-camp="${_studioEsc(c.name)}" onclick="setStudioTargetCampaign(this.dataset.camp)">📥 Selecionar p/ Envio</button>

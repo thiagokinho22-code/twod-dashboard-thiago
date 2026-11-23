@@ -638,6 +638,16 @@ def _collect_audios_in_folder(audio_folder_id, tok):
 # LISTAGEM, CRIAÇÃO E AUDITORIA PRÉ-VOO NO ONEDRIVE
 # ============================================================
 
+def _parse_graph_iso_ts(iso_str):
+    raw = str(iso_str or "").strip()
+    if not raw:
+        return 0.0
+    try:
+        return datetime.fromisoformat(raw.replace("Z", "+00:00")).timestamp()
+    except Exception:
+        return 0.0
+
+
 def list_studio_campaigns_cloud(tok, find_work_ids_fn, search="", limit=15):
     _, audios_root_id, videos_root_id = find_work_ids_fn(tok)
     if not videos_root_id and not audios_root_id:
@@ -653,6 +663,12 @@ def list_studio_campaigns_cloud(tok, find_work_ids_fn, search="", limit=15):
         dt = extract_campaign_date(name)
         dt_sort = dt if dt else (1970, 1, 1)
         dt_label = f"{dt[2]:02d}.{dt[1]:02d}.{str(dt[0])[-2:]}" if dt else "Sem data"
+        vid_mod = (vid_obj or {}).get("lastModifiedDateTime", "") or ""
+        aud_mod = (aud_obj or {}).get("lastModifiedDateTime", "") or ""
+        vid_ts = _parse_graph_iso_ts(vid_mod)
+        aud_ts = _parse_graph_iso_ts(aud_mod)
+        mod_ts = max(vid_ts, aud_ts)
+        modified_at = vid_mod if vid_ts >= aud_ts else aud_mod
         rows.append({
             "name": name,
             "date_tuple": dt_sort,
@@ -662,7 +678,8 @@ def list_studio_campaigns_cloud(tok, find_work_ids_fn, search="", limit=15):
             "audio_folder_name": aud_obj.get("name") if aud_obj else None,
             "has_videos_folder": bool(vid_obj),
             "has_audios_folder": bool(aud_obj),
-            "modified_at": (vid_obj or aud_obj or {}).get("lastModifiedDateTime", ""),
+            "modified_at": modified_at,
+            "mod_ts": mod_ts,
         })
 
     for vf in vid_folders:
@@ -677,7 +694,7 @@ def list_studio_campaigns_cloud(tok, find_work_ids_fn, search="", limit=15):
             seen_keys.add(k)
             _add_row(af["name"], None, af)
 
-    rows.sort(key=lambda r: (r["date_tuple"], r["name"].lower()), reverse=True)
+    rows.sort(key=lambda r: (r["mod_ts"], r["date_tuple"], r["name"].lower()), reverse=True)
 
     q_norm = normalize_text(search)
     if q_norm:
@@ -687,9 +704,10 @@ def list_studio_campaigns_cloud(tok, find_work_ids_fn, search="", limit=15):
     if limit and limit > 0:
         rows = rows[:limit]
 
-    # Limpa tuple não serializável se precisar
+    # Limpa campos internos de ordenação antes de serializar
     for r in rows:
         r.pop("date_tuple", None)
+        r.pop("mod_ts", None)
 
     return {
         "success": True,
