@@ -864,33 +864,42 @@ def audit_campaign_cloud(camp_name, tok, find_work_ids_fn):
 # CRIAÇÃO DE CAMPANHA + UPLOADS PADRONIZADOS PARA O ONEDRIVE
 # ============================================================
 
-def create_campaign_folders_cloud(niche_name, date_str, use_blocks, tok, find_work_ids_fn):
+def create_campaign_folders_cloud(niche_name, date_str, use_blocks, tok, find_work_ids_fn, create_audio=True, create_video=True):
     folder_name = format_campaign_folder_name(niche_name, date_str)
     if not folder_name:
         raise ValueError("Nome do nicho obrigatório.")
+    if not create_audio and not create_video:
+        raise ValueError("Selecione ao menos pastas de Áudio ou de Vídeo para criar.")
 
     _, audios_root_id, videos_root_id = find_work_ids_fn(tok)
-    if not audios_root_id or not videos_root_id:
-        raise RuntimeError("Pastas raiz 'Arquivos de Áudio' ou 'Vídeos' não localizadas no OneDrive.")
+    if create_audio and not audios_root_id:
+        raise RuntimeError("Pasta raiz 'Arquivos de Áudio' não localizada no OneDrive.")
+    if create_video and not videos_root_id:
+        raise RuntimeError("Pasta raiz 'Vídeos' não localizada no OneDrive.")
 
-    aud_folder = graph_ensure_folder(audios_root_id, folder_name, tok)
-    vid_folder = graph_ensure_folder(videos_root_id, folder_name, tok)
+    aud_folder = graph_ensure_folder(audios_root_id, folder_name, tok) if create_audio else None
+    vid_folder = None
 
-    if use_blocks:
-        for b_name in ("Bloco A", "Bloco B"):
-            b_obj = graph_ensure_folder(vid_folder["id"], b_name, tok)
-            graph_ensure_folder(b_obj["id"], "1. Imagens", tok)
-            graph_ensure_folder(b_obj["id"], "Português", tok)
-    else:
-        graph_ensure_folder(vid_folder["id"], "1. Imagens", tok)
-        graph_ensure_folder(vid_folder["id"], "Português", tok)
+    if create_video:
+        vid_folder = graph_ensure_folder(videos_root_id, folder_name, tok)
+        if use_blocks:
+            for b_name in ("Bloco A", "Bloco B"):
+                b_obj = graph_ensure_folder(vid_folder["id"], b_name, tok)
+                graph_ensure_folder(b_obj["id"], "1. Imagens", tok)
+                graph_ensure_folder(b_obj["id"], "Português", tok)
+        else:
+            graph_ensure_folder(vid_folder["id"], "1. Imagens", tok)
+            graph_ensure_folder(vid_folder["id"], "Português", tok)
 
+    ref_folder = vid_folder or aud_folder
     return {
         "success": True,
-        "campaign_name": vid_folder["name"],
-        "audio_folder_id": aud_folder["id"],
-        "video_folder_id": vid_folder["id"],
+        "campaign_name": ref_folder["name"],
+        "audio_folder_id": aud_folder["id"] if aud_folder else "",
+        "video_folder_id": vid_folder["id"] if vid_folder else "",
         "use_blocks": bool(use_blocks),
+        "created_audio": bool(create_audio),
+        "created_video": bool(create_video),
     }
 
 

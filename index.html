@@ -436,9 +436,12 @@
                                                 <span id="weekly-pdf-count-badge" class="studio-mini-badge ok">0 nichos</span>
                                                 <span id="weekly-pdf-tts-mirror" class="studio-mini-badge muted">🎙️ PT, ES, EN • Voz: Kore</span>
                                             </div>
-                                            <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
+                                            <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
                                                 <label style="font-size:12px; display:inline-flex; align-items:center; gap:5px; cursor:pointer;">
-                                                    <input type="checkbox" id="weekly-pdf-create-folders" checked> Criar pastas Vídeo + Áudio no OneDrive
+                                                    <input type="checkbox" id="weekly-pdf-create-audio-folders" checked> Criar pastas de Áudio
+                                                </label>
+                                                <label style="font-size:12px; display:inline-flex; align-items:center; gap:5px; cursor:pointer;" title="Deixe desmarcado se for subir o .ZIP de imagens depois (o .ZIP já cria as pastas de vídeo)">
+                                                    <input type="checkbox" id="weekly-pdf-create-video-folders"> Criar pastas de Vídeo (Bloco A/B)
                                                 </label>
                                                 <button type="button" class="btn btn-outline btn-sm" onclick="selectAllWeeklyNiches(true)">Todos</button>
                                                 <button type="button" class="btn btn-outline btn-sm" onclick="selectAllWeeklyNiches(false)">Limpar</button>
@@ -1854,7 +1857,7 @@
     </div>
 
     <script src="app.js?v=9.5"></script>
-    <script src="studio.js?v=1.8"></script>
+    <script src="studio.js?v=1.9"></script>
     <script src="creative_gen.js?v=1.2"></script>
     <script src="campaign_builder.js?v=1.7"></script>
 </body>

@@ -1949,25 +1949,37 @@ function renderWeeklyPdfPreview() {
 }
 
 async function processSingleWeeklyItem(item, options) {
-    const { createFolders, languages, voice, style, geminiApiKey, onAudioProgress, shouldStop } = options;
+    const {
+        createAudioFolders = true,
+        createVideoFolders = false,
+        languages,
+        voice,
+        style,
+        geminiApiKey,
+        onAudioProgress,
+        shouldStop
+    } = options;
+    const createAnyFolder = Boolean(createAudioFolders || createVideoFolders);
 
     item.status = 'running';
-    item.statusDetail = createFolders ? 'Criando pastas...' : 'Preparando...';
+    item.statusDetail = createAnyFolder ? 'Criando pastas...' : 'Preparando...';
     item.progressTotal = languages.length;
     item.progressDone = 0;
-    item.progressLabel = createFolders ? 'Criando pastas no OneDrive...' : 'Iniciando...';
+    item.progressLabel = createAnyFolder ? 'Criando pastas no OneDrive...' : 'Iniciando...';
     renderWeeklyPdfPreview();
 
     try {
         let audioFolderId = '';
-        if (createFolders) {
+        if (createAnyFolder) {
             const folderResp = await window.apiFetch('/api/studio/create-campaign', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     niche: item.slug || item.title,
                     date: item.dateIso,
-                    use_blocks: true
+                    use_blocks: true,
+                    create_audio: createAudioFolders,
+                    create_video: createVideoFolders
                 })
             });
             const folderData = await folderResp.json();
@@ -2056,11 +2068,13 @@ async function runSingleWeeklyNiche(idx) {
         return;
     }
 
-    const createFolders = Boolean(document.getElementById('weekly-pdf-create-folders')?.checked);
+    const createAudioFolders = Boolean(document.getElementById('weekly-pdf-create-audio-folders')?.checked);
+    const createVideoFolders = Boolean(document.getElementById('weekly-pdf-create-video-folders')?.checked);
     weeklyPackState.running = true;
     try {
         await processSingleWeeklyItem(item, {
-            createFolders,
+            createAudioFolders,
+            createVideoFolders,
             languages,
             voice,
             style,
@@ -2098,7 +2112,8 @@ async function runWeeklyPdfBatch() {
         return;
     }
 
-    const createFolders = Boolean(document.getElementById('weekly-pdf-create-folders')?.checked);
+    const createAudioFolders = Boolean(document.getElementById('weekly-pdf-create-audio-folders')?.checked);
+    const createVideoFolders = Boolean(document.getElementById('weekly-pdf-create-video-folders')?.checked);
     const startBtn = document.getElementById('btn-weekly-batch-start');
     const stopBtn = document.getElementById('btn-weekly-batch-stop');
     const statusEl = document.getElementById('weekly-batch-status');
@@ -2129,7 +2144,8 @@ async function runWeeklyPdfBatch() {
             if (statusEl) statusEl.textContent = `Áudio ${completedPriorAudios + 1}/${totalWeekAudios} • ${item.slug}...`;
 
             await processSingleWeeklyItem(item, {
-                createFolders,
+                createAudioFolders,
+                createVideoFolders,
                 languages,
                 voice,
                 style,

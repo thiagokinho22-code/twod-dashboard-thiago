@@ -3227,11 +3227,16 @@ class APIHandler(BaseHTTPRequestHandler):
                 niche = (payload.get("niche") or "").strip()
                 date_str = (payload.get("date") or "").strip()
                 use_blocks = bool(payload.get("use_blocks", True))
+                create_audio = bool(payload.get("create_audio", True))
+                create_video = bool(payload.get("create_video", True))
                 tok, err = get_graph_access_token()
                 if not tok:
                     self._send_json({"success": False, "error": err or "OneDrive não autenticado"}, 401)
                     return
-                res = studio_engine.create_campaign_folders_cloud(niche, date_str, use_blocks, tok, _find_work_folder_ids)
+                res = studio_engine.create_campaign_folders_cloud(
+                    niche, date_str, use_blocks, tok, _find_work_folder_ids,
+                    create_audio=create_audio, create_video=create_video,
+                )
                 threading.Thread(target=start_graph_sync_background, kwargs={"force_full": False}, daemon=True).start()
                 self._send_json(res)
             except Exception as e:
