@@ -386,42 +386,66 @@ async function handleStudioImagesUpload(fileList) {
 }
 
 async function handleStudioZipUpload(fileList) {
-    const zipFile = Array.from(fileList || []).find(f => /\.zip$/i.test(f.name));
-    if (!zipFile) {
-        alert('Selecione um arquivo .ZIP válido.');
+    const zipFiles = Array.from(fileList || []).filter(f => /\.zip$/i.test(f.name));
+    if (zipFiles.length === 0) {
+        alert('Selecione ao menos um arquivo .ZIP válido.');
         return;
     }
     const { niche, dateIso } = getStudioTargetCampaignAndDate();
-    setStudioUploadStatus(`⏳ Descompactando <strong>${_studioEsc(zipFile.name)}</strong>, criando pastas de Vídeo + Áudio e padronizando 1–6 no OneDrive...`, 'info');
-    try {
-        const q = new URLSearchParams({ campaign: niche || '', date: dateIso || '' });
-        const resp = await window.apiFetch(`/api/studio/import-zip?${q.toString()}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/octet-stream' },
-            body: zipFile
-        });
-        const data = await resp.json();
-        if (!data.success) throw new Error(data.error || 'Erro ao importar ZIP');
+    const totalZips = zipFiles.length;
+    const allCamps = [];
+    const failedZips = [];
+    let totalImages = 0;
 
-        const camps = Array.isArray(data.campaigns) && data.campaigns.length > 0
-            ? data.campaigns
-            : [{ campaign_name: data.campaign_name, total_images: data.total_images || 0, existing_audios_count: 0, folders_imported: data.folders_imported || [] }];
+    for (let i = 0; i < totalZips; i++) {
+        const zipFile = zipFiles[i];
+        const prefix = totalZips > 1 ? `[${i + 1}/${totalZips}] ` : '';
+        setStudioUploadStatus(`⏳ ${prefix}Descompactando <strong>${_studioEsc(zipFile.name)}</strong>, organizando Bloco A/B e enviando para o OneDrive...`, 'info');
+        try {
+            const q = new URLSearchParams({ campaign: niche || '', date: dateIso || '' });
+            const resp = await window.apiFetch(`/api/studio/import-zip?${q.toString()}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/octet-stream' },
+                body: zipFile
+            });
+            const data = await resp.json();
+            if (!resp.ok || !data.success) throw new Error(data.error || `Erro HTTP ${resp.status}`);
 
-        const campNames = camps.map(c => c.campaign_name).filter(Boolean);
-        campNames.forEach(nm => studioState.selectedSet.add(nm));
+            const camps = Array.isArray(data.campaigns) && data.campaigns.length > 0
+                ? data.campaigns
+                : [{ campaign_name: data.campaign_name, total_images: data.total_images || 0, existing_audios_count: 0, folders_imported: data.folders_imported || [] }];
 
-        const lines = camps.map(c => {
-            const audTxt = c.existing_audios_count > 0 ? `🎙️ ${c.existing_audios_count} áudio(s) OK` : '🎙️ Pasta de áudio pronta (envie os MP3)';
-            return `• <strong>${_studioEsc(c.campaign_name)}</strong> (${c.total_images} img em ${(c.folders_imported || []).length} pastas) — ${audTxt}`;
-        }).join('<br>');
+            camps.forEach(c => {
+                if (c.campaign_name) studioState.selectedSet.add(c.campaign_name);
+                allCamps.push({ ...c, source_zip: zipFile.name });
+                totalImages += Number(c.total_images || 0);
+            });
+        } catch (e) {
+            failedZips.push({ name: zipFile.name, error: e.message || String(e) });
+        }
+    }
 
-        setStudioUploadStatus(`✅ Pacote ZIP descompactado no OneDrive (${data.total_images || 0} imagens em ${camps.length} nicho(s)):<br>${lines}`, 'success');
+    const campNames = Array.from(new Set(allCamps.map(c => c.campaign_name).filter(Boolean)));
+    const lines = allCamps.map(c => {
+        const audTxt = c.existing_audios_count > 0 ? `🎙️ ${c.existing_audios_count} áudio(s) OK` : '🎙️ Pasta de áudio pronta';
+        return `• <strong>${_studioEsc(c.campaign_name)}</strong> (${c.total_images} img em ${(c.folders_imported || []).length} pastas) — ${audTxt}`;
+    });
+    failedZips.forEach(fz => {
+        lines.push(`• ❌ <strong>${_studioEsc(fz.name)}</strong>: ${_studioEsc(fz.error)}`);
+    });
+
+    if (allCamps.length > 0) {
+        const zipWord = totalZips > 1 ? `${totalZips - failedZips.length}/${totalZips} ZIP(s)` : 'Pacote ZIP';
+        setStudioUploadStatus(
+            `${failedZips.length ? '⚠️' : '✅'} ${zipWord} extraído(s) para o OneDrive (${totalImages} imagens em ${campNames.length} nicho(s)):<br>${lines.join('<br>')}`,
+            failedZips.length ? 'warn' : 'success'
+        );
         await loadStudioCampaigns();
         if (campNames.length > 0) {
-            auditStudioCampaigns(campNames);
+            await auditStudioCampaigns(campNames);
         }
-    } catch (e) {
-        setStudioUploadStatus(`❌ Erro ao importar ZIP: ${_studioEsc(e.message)}`, 'error');
+    } else {
+        setStudioUploadStatus(`❌ Erro ao importar ZIP(s):<br>${lines.join('<br>')}`, 'error');
     }
 }
 

@@ -696,11 +696,11 @@
                                     <!-- Zona 3: ZIP GPT / Canva -->
                                     <div class="studio-drop-box">
                                         <div class="studio-drop-head">
-                                            <strong>📦 Descompactar ZIP (Multi-Nichos)</strong>
+                                            <strong>📦 Descompactar ZIPs (Multi-Nichos)</strong>
                                         </div>
-                                        <p class="text-muted" style="font-size:11.5px; margin-bottom:8px;">Extrai vários nichos de uma vez (Bloco A/B, <code>1. Imagens</code>, Espanhol, Inglês) e cria as pastas de Áudio + Vídeo no OneDrive sem precisar preencher nada acima.</p>
-                                        <input type="file" id="studio-zip-file" accept=".zip" style="display:none;" onchange="handleStudioZipUpload(this.files); this.value='';">
-                                        <button type="button" class="btn btn-secondary btn-sm" style="width:100%; margin-top:auto;" onclick="document.getElementById('studio-zip-file').click()">📦 Enviar &amp; Extrair .ZIP</button>
+                                        <p class="text-muted" style="font-size:11.5px; margin-bottom:8px;">Selecione <strong>1 ou vários arquivos .ZIP</strong> de uma vez (Bloco A/B, <code>1. Imagens</code>, idiomas) para enviar ao OneDrive sem preencher nada acima.</p>
+                                        <input type="file" id="studio-zip-file" accept=".zip" multiple style="display:none;" onchange="handleStudioZipUpload(this.files); this.value='';">
+                                        <button type="button" class="btn btn-secondary btn-sm" style="width:100%; margin-top:auto;" onclick="document.getElementById('studio-zip-file').click()">📦 Enviar &amp; Extrair .ZIP(s)</button>
                                     </div>
                                 </div>
 
@@ -1857,7 +1857,7 @@
     </div>
 
     <script src="app.js?v=9.5"></script>
-    <script src="studio.js?v=1.9"></script>
+    <script src="studio.js?v=1.10"></script>
     <script src="creative_gen.js?v=1.2"></script>
     <script src="campaign_builder.js?v=1.7"></script>
 </body>
