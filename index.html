@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>TwoD Hub — Central de Automações</title>
-    <link rel="stylesheet" href="styles.css?v=3.2">
+    <link rel="stylesheet" href="styles.css?v=3.3">
 </head>
 <body>
 
@@ -1181,8 +1181,14 @@
                                     <input type="text" id="cb-desc-2" class="twod-input" value="⬇️ BAIXE AGORA">
                                 </div>
                                 <div class="form-group">
-                                    <label style="font-size: 11px;">Agendamento (Opcional — vazio = imediato):</label>
-                                    <input type="datetime-local" id="cb-schedule-start" class="twod-input">
+                                    <div style="display:flex; justify-content:space-between; align-items:center; gap:6px;">
+                                        <label style="font-size: 11px; margin-bottom:0;">Agendamento (vazio = imediato):</label>
+                                        <div style="display:flex; gap:4px;">
+                                            <button type="button" class="btn-chip" style="padding:1px 7px; font-size:10.5px;" onclick="setCbSchedulePreset('01:00')">🌙 01:00</button>
+                                            <button type="button" class="btn-chip" style="padding:1px 7px; font-size:10.5px;" onclick="document.getElementById('cb-schedule-start').value=''">✕ Agora</button>
+                                        </div>
+                                    </div>
+                                    <input type="datetime-local" id="cb-schedule-start" class="twod-input" style="margin-top:4px;">
                                 </div>
                             </div>
                         </div>
@@ -1487,6 +1493,22 @@
                                 </select>
                                 <span class="help-text">Identificação no Gerenciador de Anúncios</span>
                             </div>
+
+                            <div class="form-group" style="flex: 1.2; min-width: 250px;">
+                                <label for="select-dup-schedule-mode">
+                                    <strong>⏰ Início / Agendamento:</strong>
+                                </label>
+                                <select id="select-dup-schedule-mode" class="twod-select" onchange="onDupScheduleModeChanged()">
+                                    <option value="ask" selected>❓ Perguntar ao Iniciar (Instantâneo ou 01:00)</option>
+                                    <option value="scheduled">🌙 Programar Horário (Ex: 01:00 da manhã)</option>
+                                    <option value="instant">⚡ Começar Instantâneo (Agora)</option>
+                                </select>
+                                <div id="dup-inline-schedule-box" class="twod-hidden" style="margin-top: 6px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
+                                    <input type="datetime-local" id="input-dup-schedule-dt" class="twod-input" style="flex: 1; min-width: 175px; font-size: 12px; padding: 6px 8px;">
+                                    <button type="button" class="btn-chip btn-chip-primary" onclick="presetDupInlineTime('01:00')" title="Programar para 01:00 da próxima madrugada">🌙 01:00</button>
+                                </div>
+                                <span class="help-text">Ao programar, a Meta deixa "Programado" e liga sozinho no horário</span>
+                            </div>
                         </div>
                     </div>
 
@@ -1506,6 +1528,8 @@
                                 <span>🛑 <strong>Trava Anti-Conjunto Vazio:</strong> parar lote imediatamente no 1º erro de anúncio e excluir o conjunto incompleto</span>
                             </label>
                         </div>
+
+                        <div id="dup-click-feedback" class="twod-hidden" style="margin-bottom: 12px; padding: 10px 14px; border-radius: 8px; font-size: 12.5px;"></div>
 
                         <div class="execution-trigger-bar">
                             <button type="button" class="btn btn-primary btn-lg" id="btn-start-duplication" onclick="startBatchDuplication()">
@@ -1855,6 +1879,75 @@
         </div>
     </div>
 
+    <!-- ============================================== -->
+    <!-- MODAL: CONFIRMAÇÃO & AGENDAMENTO DO DUPLICADOR -->
+    <!-- ============================================== -->
+    <div id="modal-dup-launch" class="modal-overlay twod-hidden" onclick="if(event.target===this) resolveDuplicatorLaunchModal(null)">
+        <div class="modal-card dup-launch-modal-card">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:8px;">
+                <h3 style="margin:0;">🚀 Confirmar &amp; Escolher Início da Duplicação</h3>
+                <button type="button" class="btn btn-outline btn-sm" onclick="resolveDuplicatorLaunchModal(null)">✕</button>
+            </div>
+            <div id="dup-launch-summary" class="dup-launch-summary"></div>
+
+            <div id="dup-launch-missing-warn" class="dup-launch-warn twod-hidden">
+                <div id="dup-launch-missing-text" style="margin-bottom:8px;"></div>
+                <label style="display:flex; align-items:flex-start; gap:8px; cursor:pointer; font-weight:600;">
+                    <input type="checkbox" id="dup-launch-missing-ack" style="margin-top:3px;">
+                    <span>Confirmo criar apenas a estrutura em PAUSED (sem anúncios) para os idiomas sem criativo pronto</span>
+                </label>
+            </div>
+
+            <div class="dup-schedule-choice-section">
+                <div style="font-weight:700; font-size:13px; margin-bottom:8px; color:var(--text-primary);">⏰ Quando os novos conjuntos devem começar a rodar?</div>
+                <div class="dup-schedule-cards">
+                    <label class="dup-schedule-card" id="dup-card-instant">
+                        <input type="radio" name="dup-launch-mode" id="dup-launch-radio-instant" value="instant" onchange="syncDupLaunchModalScheduleUI()">
+                        <div>
+                            <strong>⚡ Começar Instantâneo (Agora)</strong>
+                            <span id="dup-instant-sub">Segue o status selecionado na tela (Pausado ou Ativo imediato).</span>
+                        </div>
+                    </label>
+                    <label class="dup-schedule-card" id="dup-card-scheduled">
+                        <input type="radio" name="dup-launch-mode" id="dup-launch-radio-scheduled" value="scheduled" onchange="syncDupLaunchModalScheduleUI()">
+                        <div>
+                            <strong>🌙 Programar Horário de Início (Ex: 01:00 da manhã)</strong>
+                            <span>Cria agora e começa a rodar sozinho a partir da data/hora programada.</span>
+                        </div>
+                    </label>
+                </div>
+
+                <div id="dup-launch-schedule-panel" class="dup-launch-schedule-panel twod-hidden">
+                    <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                        <div style="flex:1; min-width:200px;">
+                            <label for="dup-launch-schedule-dt" style="font-size:11.5px; font-weight:700; display:block; margin-bottom:4px;">📅 Data e Horário de Início:</label>
+                            <input type="datetime-local" id="dup-launch-schedule-dt" class="twod-input">
+                        </div>
+                        <div style="display:flex; flex-direction:column; gap:4px;">
+                            <span style="font-size:11px; color:var(--text-muted);">Atalhos rápidos:</span>
+                            <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                                <button type="button" class="btn-chip btn-chip-primary" onclick="applyDupModalTimePreset('01:00')">🌙 01:00</button>
+                                <button type="button" class="btn-chip" onclick="applyDupModalTimePreset('04:00')">🌅 04:00</button>
+                                <button type="button" class="btn-chip" onclick="applyDupModalTimePreset('06:00')">☀️ 06:00</button>
+                            </div>
+                        </div>
+                    </div>
+                    <label style="display:flex; align-items:flex-start; gap:8px; margin-top:10px; font-size:12px; cursor:pointer; color:#34d399;">
+                        <input type="checkbox" id="dup-launch-auto-active" checked style="margin-top:3px;">
+                        <span><strong>Ativar agendamento automático ("Programado" na Meta):</strong> publica conjunto e anúncios como <code>ACTIVE</code> com <code>start_time</code> futuro (gasto $0 agora, entra no ar sozinho no horário).</span>
+                    </label>
+                </div>
+            </div>
+
+            <div id="dup-launch-error" class="twod-hidden" style="margin-top:10px; padding:8px 12px; border-radius:7px; background:rgba(239,68,68,0.14); border:1px solid rgba(239,68,68,0.4); color:#f87171; font-size:12px;"></div>
+
+            <div class="modal-actions" style="margin-top:16px;">
+                <button type="button" class="btn btn-outline" onclick="resolveDuplicatorLaunchModal(null)">Cancelar</button>
+                <button type="button" class="btn btn-primary" id="btn-dup-modal-confirm" onclick="confirmDuplicatorLaunchModal()">🚀 Confirmar e Iniciar Duplicação</button>
+            </div>
+        </div>
+    </div>
+
     <div id="dup-thumb-zoom-modal" class="thumb-zoom-backdrop twod-hidden" onclick="if(event.target===this) closeThumbZoomModal()">
         <div class="thumb-zoom-card">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
@@ -1866,10 +1959,10 @@
         </div>
     </div>
 
-    <script src="app.js?v=9.6"></script>
+    <script src="app.js?v=9.7"></script>
     <script src="studio.js?v=1.11"></script>
     <script src="creative_gen.js?v=1.2"></script>
-    <script src="campaign_builder.js?v=1.8"></script>
+    <script src="campaign_builder.js?v=1.9"></script>
 </body>
 </html>
 

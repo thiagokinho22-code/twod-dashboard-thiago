@@ -1482,7 +1482,13 @@ async function launchStandardCampaign() {
                 adSetPayload.dsa_payor = advertiserName;
             }
             if (scheduleRaw) {
-                adSetPayload.start_time = new Date(scheduleRaw).toISOString();
+                adSetPayload.start_time = (typeof window.formatMetaStartTimeIso === 'function')
+                    ? window.formatMetaStartTimeIso(scheduleRaw)
+                    : new Date(scheduleRaw).toISOString();
+                if (adSetPayload.status === 'PAUSED') {
+                    adSetPayload.status = 'ACTIVE';
+                    logBuilderTerminal(`🕐 Conjunto '${country.adSetName}' programado com status ACTIVE para iniciar automaticamente em ${adSetPayload.start_time}.`, 'info');
+                }
             }
 
             const adSetRes = await createAdSetWithFallbacks(accountId, adSetPayload, token);
@@ -1560,7 +1566,7 @@ async function launchStandardCampaign() {
                     name: asset.adName,
                     adset_id: adSetId,
                     creative: { creative_id: creativeRes.id },
-                    status: initialStatus
+                    status: scheduleRaw ? 'ACTIVE' : initialStatus
                 };
                 if (useUtm && utmParams) {
                     adPayload.url_tags = utmParams;
@@ -1618,5 +1624,14 @@ window.toggleBuilderCreativeSlot = toggleBuilderCreativeSlot;
 window.uppercasePrimaryText1 = uppercasePrimaryText1;
 window.translateBuilderTexts = translateBuilderTexts;
 window.applyBuilderCountryPreset = applyBuilderCountryPreset;
+function setCbSchedulePreset(hhmm = '01:00') {
+    const el = document.getElementById('cb-schedule-start');
+    if (!el) return;
+    if (typeof window.getNextTargetTimeLocalInput === 'function') {
+        el.value = window.getNextTargetTimeLocalInput(hhmm);
+    }
+}
+
 window.launchStandardCampaign = launchStandardCampaign;
 window.clearBuilderTerminal = clearBuilderTerminal;
+window.setCbSchedulePreset = setCbSchedulePreset;

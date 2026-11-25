@@ -691,13 +691,13 @@ const tabTitles = {
 const PANEL_CHANGELOG = [
     {
         date: '25/11/2026',
-        type: 'fix',
-        badge: '🛑 Trava Duplicador',
-        title: 'Parada imediata no 1º erro + Rollback automático de conjunto sem anúncio',
-        summary: 'Impede que o Duplicador e o Gerador de Campanhas criem vários conjuntos vazios quando a Meta bloqueia o anúncio (ex.: permissão de Página 1885499).',
+        type: 'feat',
+        badge: '⏰ Agendar 01h & Trava',
+        title: 'Agendamento de conjuntos (Instantâneo vs Programar 01:00) + Trava Anti-Conjunto Vazio',
+        summary: 'Modal próprio de disparo perguntando se deve iniciar agora ou programar (ex.: 01:00 da manhã) e rollback automático no 1º erro.',
         highlights: [
-            'Ao falhar o anúncio no 1º país, exclui automaticamente o conjunto recém-clonado vazio na Meta API, mantém os países marcados e interrompe o lote na hora.',
-            'Diagnóstico direto para erro 1885499 / 3858749 (No Advertiser Permission On Page) + botão ⏹️ Parar Após Atual durante a duplicação.'
+            'Opção de programar start_time na Meta API (com atalhos 01:00, 04:00, 06:00) publicando como Programado sem gastar antes do horário.',
+            'Substitui diálogos nativos bloqueáveis pelo navegador e, se o anúncio falhar (ex.: 1885499), exclui o conjunto vazio na hora e para o lote.'
         ]
     },
     {
@@ -3022,6 +3022,240 @@ function stopBatchDuplication() {
     }
 }
 
+function getNextTargetTimeLocalInput(hhmm = '01:00') {
+    const [hh, mm] = String(hhmm || '01:00').split(':').map(n => parseInt(n, 10) || 0);
+    const now = new Date();
+    const target = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hh, mm, 0, 0);
+    if (target.getTime() <= now.getTime() + 10 * 60 * 1000) {
+        target.setDate(target.getDate() + 1);
+    }
+    const pad = (v) => String(v).padStart(2, '0');
+    return `${target.getFullYear()}-${pad(target.getMonth() + 1)}-${pad(target.getDate())}T${pad(target.getHours())}:${pad(target.getMinutes())}`;
+}
+
+function formatMetaStartTimeIso(localDtInputVal) {
+    const raw = String(localDtInputVal || '').trim();
+    if (!raw) return '';
+    const d = new Date(raw);
+    if (isNaN(d.getTime())) return '';
+    const pad = (v) => String(v).padStart(2, '0');
+    const offMin = -d.getTimezoneOffset();
+    const sign = offMin >= 0 ? '+' : '-';
+    const absMin = Math.abs(offMin);
+    const offH = pad(Math.floor(absMin / 60));
+    const offM = pad(absMin % 60);
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}${sign}${offH}${offM}`;
+}
+
+function formatPtBrDateTime(localDtInputVal) {
+    const d = new Date(String(localDtInputVal || '').trim());
+    if (isNaN(d.getTime())) return String(localDtInputVal || '');
+    const pad = (v) => String(v).padStart(2, '0');
+    return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} às ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function onDupScheduleModeChanged() {
+    const sel = document.getElementById('select-dup-schedule-mode');
+    const box = document.getElementById('dup-inline-schedule-box');
+    const dtInput = document.getElementById('input-dup-schedule-dt');
+    if (!sel || !box) return;
+    if (sel.value === 'scheduled') {
+        box.classList.remove('twod-hidden');
+        if (dtInput && !dtInput.value) {
+            dtInput.value = getNextTargetTimeLocalInput('01:00');
+        }
+    } else {
+        box.classList.add('twod-hidden');
+    }
+}
+
+function presetDupInlineTime(hhmm = '01:00') {
+    const dtInput = document.getElementById('input-dup-schedule-dt');
+    const sel = document.getElementById('select-dup-schedule-mode');
+    if (sel) sel.value = 'scheduled';
+    if (dtInput) dtInput.value = getNextTargetTimeLocalInput(hhmm);
+    onDupScheduleModeChanged();
+}
+
+function showDupClickFeedback(msg, level = 'warn') {
+    const box = document.getElementById('dup-click-feedback');
+    if (box) {
+        const styles = {
+            info: { bg: 'rgba(59,130,246,0.12)', bd: 'rgba(59,130,246,0.4)', fg: '#93c5fd' },
+            warn: { bg: 'rgba(245,158,11,0.14)', bd: 'rgba(245,158,11,0.45)', fg: '#fcd34d' },
+            error: { bg: 'rgba(239,68,68,0.14)', bd: 'rgba(239,68,68,0.45)', fg: '#f87171' },
+            success: { bg: 'rgba(16,185,129,0.14)', bd: 'rgba(16,185,129,0.45)', fg: '#34d399' }
+        }[level] || { bg: 'rgba(245,158,11,0.14)', bd: 'rgba(245,158,11,0.45)', fg: '#fcd34d' };
+        box.style.background = styles.bg;
+        box.style.border = `1px solid ${styles.bd}`;
+        box.style.color = styles.fg;
+        box.innerHTML = msg;
+        box.classList.remove('twod-hidden');
+        box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+    const plain = String(msg || '').replace(/<[^>]+>/g, '');
+    logMetaTerminal(plain, level === 'error' ? 'error' : (level === 'info' ? 'info' : 'warn'));
+}
+
+function clearDupClickFeedback() {
+    const box = document.getElementById('dup-click-feedback');
+    if (box) {
+        box.classList.add('twod-hidden');
+        box.innerHTML = '';
+    }
+}
+
+let _dupLaunchModalResolver = null;
+let _dupLaunchModalMissingRequired = false;
+
+function syncDupLaunchModalScheduleUI() {
+    const rInst = document.getElementById('dup-launch-radio-instant');
+    const rSched = document.getElementById('dup-launch-radio-scheduled');
+    const cInst = document.getElementById('dup-card-instant');
+    const cSched = document.getElementById('dup-card-scheduled');
+    const panel = document.getElementById('dup-launch-schedule-panel');
+    const dtEl = document.getElementById('dup-launch-schedule-dt');
+    const isSched = Boolean(rSched && rSched.checked);
+
+    if (cInst) cInst.classList.toggle('is-selected', Boolean(rInst && rInst.checked));
+    if (cSched) cSched.classList.toggle('is-selected', isSched);
+    if (panel) panel.classList.toggle('twod-hidden', !isSched);
+    if (isSched && dtEl && !dtEl.value) {
+        dtEl.value = getNextTargetTimeLocalInput('01:00');
+    }
+}
+
+function applyDupModalTimePreset(hhmm = '01:00') {
+    const rSched = document.getElementById('dup-launch-radio-scheduled');
+    const dtEl = document.getElementById('dup-launch-schedule-dt');
+    if (rSched) rSched.checked = true;
+    if (dtEl) dtEl.value = getNextTargetTimeLocalInput(hhmm);
+    syncDupLaunchModalScheduleUI();
+}
+
+function resolveDuplicatorLaunchModal(val) {
+    const modal = document.getElementById('modal-dup-launch');
+    if (modal) modal.classList.add('twod-hidden');
+    if (typeof _dupLaunchModalResolver === 'function') {
+        const fn = _dupLaunchModalResolver;
+        _dupLaunchModalResolver = null;
+        fn(val);
+    }
+}
+
+function confirmDuplicatorLaunchModal() {
+    const errEl = document.getElementById('dup-launch-error');
+    const showErr = (m) => {
+        if (errEl) {
+            errEl.textContent = m;
+            errEl.classList.remove('twod-hidden');
+        }
+    };
+    if (errEl) errEl.classList.add('twod-hidden');
+
+    if (_dupLaunchModalMissingRequired) {
+        const ack = document.getElementById('dup-launch-missing-ack');
+        if (!ack || !ack.checked) {
+            showErr('⚠️ Marque a caixa amarela acima confirmando criar apenas estrutura onde faltar criativo, ou clique em Cancelar para vincular o pacote.');
+            return;
+        }
+    }
+
+    const rSched = document.getElementById('dup-launch-radio-scheduled');
+    const isSched = Boolean(rSched && rSched.checked);
+    if (!isSched) {
+        resolveDuplicatorLaunchModal({ mode: 'instant', scheduleLocalDt: '', metaStartTimeIso: '', schedulePtBr: '', autoActive: false });
+        return;
+    }
+
+    const dtVal = (document.getElementById('dup-launch-schedule-dt')?.value || '').trim();
+    if (!dtVal) {
+        showErr('⚠️ Selecione a data e o horário de início da programação.');
+        return;
+    }
+    const parsed = new Date(dtVal);
+    if (isNaN(parsed.getTime())) {
+        showErr('⚠️ Data/hora inválida.');
+        return;
+    }
+    if (parsed.getTime() <= Date.now() + 4 * 60 * 1000) {
+        showErr('⚠️ O horário programado deve estar pelo menos 5 minutos no futuro.');
+        return;
+    }
+
+    const autoActive = Boolean(document.getElementById('dup-launch-auto-active')?.checked);
+    resolveDuplicatorLaunchModal({
+        mode: 'scheduled',
+        scheduleLocalDt: dtVal,
+        metaStartTimeIso: formatMetaStartTimeIso(dtVal),
+        schedulePtBr: formatPtBrDateTime(dtVal),
+        autoActive
+    });
+}
+
+function openDuplicatorLaunchModal(config) {
+    if (window.__testDupLaunchChoice !== undefined) {
+        return Promise.resolve(window.__testDupLaunchChoice);
+    }
+    const modal = document.getElementById('modal-dup-launch');
+    if (!modal) {
+        return Promise.resolve({ mode: 'instant', scheduleLocalDt: '', metaStartTimeIso: '', schedulePtBr: '', autoActive: false });
+    }
+
+    const summaryEl = document.getElementById('dup-launch-summary');
+    const warnBox = document.getElementById('dup-launch-missing-warn');
+    const warnTxt = document.getElementById('dup-launch-missing-text');
+    const warnAck = document.getElementById('dup-launch-missing-ack');
+    const errEl = document.getElementById('dup-launch-error');
+    const rInst = document.getElementById('dup-launch-radio-instant');
+    const rSched = document.getElementById('dup-launch-radio-scheduled');
+    const dtEl = document.getElementById('dup-launch-schedule-dt');
+    const instSub = document.getElementById('dup-instant-sub');
+
+    if (errEl) errEl.classList.add('twod-hidden');
+    if (summaryEl) {
+        summaryEl.innerHTML = `
+            <div>🎯 <strong>Campanha:</strong> ${escHtml(config.campName)} <span class="text-muted">(ID: ${escHtml(config.campId)})</span></div>
+            <div>📦 <strong>Conjunto Base:</strong> ${escHtml(config.adsetName)} [${escHtml(config.baseLang.toUpperCase())}]</div>
+            <div>🌍 <strong>Bloco:</strong> ${escHtml(config.blockTitle)} • <strong>${config.countriesCount} conjunto(s)</strong> • Orçamento fixo <strong>$1.00 USD/dia</strong></div>
+            <div>🎬 <strong>Modo de Anúncios:</strong> ${escHtml(config.modeSummary)}</div>
+        `;
+    }
+    if (instSub) {
+        instSub.textContent = config.initialStatus === 'ACTIVE'
+            ? 'Publica como ATIVO (entra em análise/rodando imediatamente).'
+            : 'Publica como PAUSADO para conferência manual antes do gasto.';
+    }
+
+    _dupLaunchModalMissingRequired = Boolean(config.missingDiffLangs && config.missingDiffLangs.length > 0);
+    if (warnBox && warnTxt && warnAck) {
+        if (_dupLaunchModalMissingRequired) {
+            warnAck.checked = false;
+            warnTxt.innerHTML = `⚠️ <strong>Idioma(s) sem criativo pronto (${escHtml(config.missingDiffLangs.map(l => l.toUpperCase()).join(', '))}):</strong> serão criados sem anúncios no idioma errado.`;
+            warnBox.classList.remove('twod-hidden');
+        } else {
+            warnBox.classList.add('twod-hidden');
+        }
+    }
+
+    const inlineMode = document.getElementById('select-dup-schedule-mode')?.value || 'ask';
+    const inlineDt = (document.getElementById('input-dup-schedule-dt')?.value || '').trim();
+    const defaultDt = inlineDt || getNextTargetTimeLocalInput('01:00');
+    if (dtEl) dtEl.value = defaultDt;
+
+    if (inlineMode === 'scheduled') {
+        if (rSched) rSched.checked = true;
+    } else {
+        if (rInst) rInst.checked = true;
+    }
+    syncDupLaunchModalScheduleUI();
+
+    modal.classList.remove('twod-hidden');
+    return new Promise((resolve) => {
+        _dupLaunchModalResolver = resolve;
+    });
+}
+
 function formatMetaApiError(err) {
     if (!err) return 'Erro desconhecido';
     if (typeof err === 'string') return err;
@@ -4905,11 +5139,21 @@ async function copyMetaLog() {
 // ========================================================
 
 async function startBatchDuplication() {
-    if (metaState.isDuplicating) return;
+    const startBtn = document.getElementById('btn-start-duplication');
+    const stopBtn = document.getElementById('btn-stop-duplication');
+    if (metaState.isDuplicating) {
+        if (stopBtn && stopBtn.classList.contains('twod-hidden')) {
+            metaState.isDuplicating = false;
+        } else {
+            showDupClickFeedback('⏳ <strong>Já existe uma duplicação em andamento.</strong> Aguarde a conclusão ou clique em "Parar Após Atual".', 'info');
+            return;
+        }
+    }
+
+    clearDupClickFeedback();
 
     if (!hasActiveMetaAuth()) {
-        alert('Configure META_ACCESS_TOKEN no servidor ou informe um Token na aba Configurações antes de duplicar.');
-        switchTab('configuracoes');
+        showDupClickFeedback('🔑 <strong>Token Meta ausente:</strong> configure <code>META_ACCESS_TOKEN</code> no servidor ou informe um Token na aba Configurações.', 'error');
         return;
     }
     const token = getMetaToken();
@@ -4923,15 +5167,15 @@ async function startBatchDuplication() {
     const adsetId = selectAdSet?.value || metaState.selectedAdSetId;
 
     if (!accountId) {
-        alert('Por favor, selecione uma Conta de Anúncios.');
+        showDupClickFeedback('⚠️ <strong>Selecione uma Conta de Anúncios</strong> no Passo 1 antes de iniciar.', 'warn');
         return;
     }
     if (!campaignId) {
-        alert('Por favor, selecione uma Campanha ativa.');
+        showDupClickFeedback('⚠️ <strong>Selecione uma Campanha de destino</strong> no Passo 1 antes de iniciar.', 'warn');
         return;
     }
     if (!adsetId) {
-        alert('Por favor, selecione o Conjunto Base (Origem).');
+        showDupClickFeedback('⚠️ <strong>Selecione o Conjunto Base (Origem)</strong> no Passo 1 antes de iniciar.', 'warn');
         return;
     }
 
@@ -4940,46 +5184,64 @@ async function startBatchDuplication() {
     metaState.selectedCampaignId = campaignId;
     metaState.selectedAdSetId = adsetId;
 
-    const campObj = (metaState.campaigns || []).find(c => c.id === campaignId);
-    const adsetObj = (metaState.adsets || []).find(a => a.id === adsetId);
+    const campObj = (metaState.campaigns || []).find(c => String(c.id) === String(campaignId));
+    const adsetObj = (metaState.adsets || []).find(a => String(a.id) === String(adsetId));
 
     if (!campObj) {
-        alert('Erro: A campanha selecionada não foi encontrada na lista carregada.');
+        showDupClickFeedback('❌ <strong>Campanha não encontrada na lista carregada.</strong> Clique em recarregar contas/campanhas no Passo 1.', 'error');
         return;
     }
     if (!adsetObj) {
-        alert('Erro: O conjunto base selecionado não foi encontrado nesta campanha.');
+        showDupClickFeedback('❌ <strong>Conjunto base não encontrado nesta campanha.</strong> Selecione o conjunto base novamente no Passo 1.', 'error');
         return;
     }
     metaState.selectedAdSet = adsetObj;
 
     const block = META_COUNTRY_BLOCKS[metaState.activeBlockId];
+    if (!block) {
+        showDupClickFeedback('⚠️ Selecione um Bloco de países no Passo 2.', 'warn');
+        return;
+    }
     const checks = metaState.checkedCountries[metaState.activeBlockId] || {};
     const countriesToDuplicate = block.countries.filter(c => checks[c.adSetName]);
 
     if (countriesToDuplicate.length === 0) {
-        alert('Selecione ao menos 1 país no bloco para duplicar.');
+        showDupClickFeedback('⚠️ <strong>Nenhum país marcado neste bloco!</strong> Marque pelo menos 1 país acima (ex.: clique em "✓ Marcar Todos" ou "⚡ Marcar Apenas Faltantes").', 'warn');
         return;
     }
 
-    const initialStatus = document.getElementById('select-initial-status').value || 'PAUSED';
-    const nameFormat = document.getElementById('select-name-format').value || 'country_only';
+    const initialStatus = document.getElementById('select-initial-status')?.value || 'PAUSED';
+    const nameFormat = document.getElementById('select-name-format')?.value || 'country_only';
 
     const baseLang = detectAdSetLanguage(adsetObj);
     const campNicheSlug = extractNicheFromCampaign(campObj.name || '');
-
-    // Hidrata pacote vinculado (se existir) para resolver vídeos por idioma (incluindo Bloco A/B e Multi-Idiomas)
-    const link = campaignCreativesMap[campaignId];
-    let linkedPackObj = getCachedLinkedPackObj(campaignId);
-    if (link && link.niche_pack && !linkedPackObj) {
-        linkedPackObj = await ensureLinkedPackHydrated(campaignId, false);
-    }
 
     const uniqueDiffLangs = Array.from(new Set(
         countriesToDuplicate
             .map(c => (c.langCode || (block.langCode && block.langCode !== 'multi' ? block.langCode : baseLang) || baseLang).toLowerCase())
             .filter(l => l !== baseLang)
     ));
+
+    // Hidrata pacote vinculado SOMENTE quando há idiomas diferentes do conjunto base (evita travar em clonagem mesmo idioma)
+    const link = campaignCreativesMap[campaignId];
+    let linkedPackObj = getCachedLinkedPackObj(campaignId);
+    if (uniqueDiffLangs.length > 0 && link && link.niche_pack && !linkedPackObj) {
+        if (startBtn) {
+            startBtn.disabled = true;
+            startBtn.innerText = '⏳ Verificando criativos OneDrive...';
+        }
+        try {
+            linkedPackObj = await Promise.race([
+                ensureLinkedPackHydrated(campaignId, false),
+                new Promise(resolve => setTimeout(() => resolve(null), 9000))
+            ]);
+        } finally {
+            if (startBtn) {
+                startBtn.disabled = false;
+                startBtn.innerText = '🚀 Iniciar Duplicação via Meta API';
+            }
+        }
+    }
 
     const langMediaSources = {};
     const readyDiffLangs = [];
@@ -5007,19 +5269,6 @@ async function startBatchDuplication() {
         missingDiffLangs.push(langCode);
     });
 
-    if (missingDiffLangs.length > 0) {
-        const missingWarn = `⚠️ DIVERGÊNCIA DE IDIOMA & CRIATIVOS PENDENTES:\n\n` +
-            `• Idioma do Conjunto Base: ${baseLang.toUpperCase()}\n` +
-            `• Pacote OneDrive Vinculado: ${link ? link.niche_pack : 'Nenhum'}\n` +
-            (readyDiffLangs.length > 0 ? `• Idiomas COM criativo pronto (serão traduzidos e publicados): ${readyDiffLangs.map(l => l.toUpperCase()).join(', ')}\n` : '') +
-            `• Idiomas SEM criativo disponível: ${missingDiffLangs.map(l => l.toUpperCase()).join(', ')}\n\n` +
-            `Para os países sem criativo no idioma certo, deseja DUPLICAR APENAS A ESTRUTURA DOS CONJUNTOS?\n` +
-            `(Cria em PAUSED com orçamento $1.00 USD/dia e segmentação do país, SEM copiar anúncios no idioma errado).\n\n` +
-            `• OK = Continuar com segurança (sem anúncios errados onde faltar criativo)\n` +
-            `• Cancelar = Voltar para vincular pacote, sincronizar OneDrive ou subir MP4 manualmente.`;
-        if (!confirm(missingWarn)) return;
-    }
-
     const modeSummary = uniqueDiffLangs.length === 0
         ? 'Clonagem Direta (Mesmo Idioma)'
         : (readyDiffLangs.length === uniqueDiffLangs.length
@@ -5028,21 +5277,26 @@ async function startBatchDuplication() {
                 ? `Misto: Tradução onde há criativo (${readyDiffLangs.map(l => l.toUpperCase()).join(',')}) + Apenas Estrutura onde falta (${missingDiffLangs.map(l => l.toUpperCase()).join(',')})`
                 : 'Apenas Estrutura Segura (Sem Anúncios)'));
 
-    const confirmMsg = `Confirmar duplicação de ${countriesToDuplicate.length} conjuntos no Meta Ads?\n\n` +
-        `🎯 CAMPANHA DE DESTINO:\n` +
-        `   ${campObj.name}\n` +
-        `   (ID: ${campObj.id})\n\n` +
-        `📦 CONJUNTO BASE (ORIGEM):\n` +
-        `   ${adsetObj.name} [${baseLang.toUpperCase()}]\n` +
-        `   (ID: ${adsetObj.id})\n\n` +
-        `• Bloco: ${block.title}\n` +
-        `• Modo de Anúncios: ${modeSummary}\n` +
-        `• Orçamento por conjunto: $1.00 USD (fixo)\n` +
-        `• Status Inicial: ${initialStatus === 'PAUSED' ? 'Pausado (Seguro)' : 'Ativo (Imediato)'}\n` +
-        `• Total de novos conjuntos: ${countriesToDuplicate.length}\n\n` +
-        `Deseja iniciar a duplicação?`;
+    const launchChoice = await openDuplicatorLaunchModal({
+        campName: campObj.name,
+        campId: campObj.id,
+        adsetName: adsetObj.name,
+        adsetId: adsetObj.id,
+        baseLang,
+        blockTitle: block.title,
+        countriesCount: countriesToDuplicate.length,
+        modeSummary,
+        initialStatus,
+        missingDiffLangs
+    });
 
-    if (!confirm(confirmMsg)) return;
+    if (!launchChoice) return;
+
+    const isScheduled = launchChoice.mode === 'scheduled' && Boolean(launchChoice.metaStartTimeIso);
+    const scheduledMetaStartTime = isScheduled ? launchChoice.metaStartTimeIso : '';
+    const effectiveStatus = isScheduled
+        ? (launchChoice.autoActive ? 'ACTIVE' : initialStatus)
+        : initialStatus;
 
     metaState.isDuplicating = true;
     metaState.stopDuplicationRequested = false;
@@ -5051,8 +5305,6 @@ async function startBatchDuplication() {
         : true;
 
     // Atualiza UI para estado de execução
-    const startBtn = document.getElementById('btn-start-duplication');
-    const stopBtn = document.getElementById('btn-stop-duplication');
     const clearBtn = document.getElementById('btn-clear-meta-log');
     const progressWrapper = document.getElementById('duplication-progress-wrapper');
     const progressFill = document.getElementById('duplication-progress-fill');
@@ -5076,6 +5328,11 @@ async function startBatchDuplication() {
     logMetaTerminal(`🚀 Iniciando processo de duplicação para ${countriesToDuplicate.length} países no bloco ${block.title}...`, 'info');
     logMetaTerminal(`🎯 Campanha de Destino: '${campObj.name}' (ID: ${campObj.id})`, 'info');
     logMetaTerminal(`📦 Conjunto base: '${adsetObj.name}' (${baseLang.toUpperCase()} | ID: ${adsetObj.id})`, 'info');
+    if (isScheduled) {
+        logMetaTerminal(`🕐 Agendamento ativo: início programado para ${launchChoice.schedulePtBr} (${scheduledMetaStartTime} • status=${effectiveStatus})`, 'info');
+    } else {
+        logMetaTerminal(`⚡ Início Instantâneo selecionado (status=${effectiveStatus})`, 'info');
+    }
 
     const budgetInCents = 100; // Sempre 1 dólar ($1.00 USD = 100 centavos)
 
@@ -5520,10 +5777,27 @@ async function startBatchDuplication() {
 
         try {
             // PASSO 1: Clona a estrutura do conjunto base sempre em PAUSED primeiro e FORÇA explicitamente a campanha de destino
-            const copyData = await metaGraphPost(`/${META_GRAPH_VERSION}/${adsetId}/copies`, {
+            const copyParams = {
                 status_option: 'PAUSED',
                 campaign_id: campaignId
-            });
+            };
+            let copyAppliedStartTime = false;
+            if (isScheduled && scheduledMetaStartTime) {
+                copyParams.start_time = scheduledMetaStartTime;
+                if (metaState.selectedAdSet?.end_time) {
+                    copyParams.end_time = '0';
+                }
+                copyAppliedStartTime = true;
+            }
+
+            let copyData = await metaGraphPost(`/${META_GRAPH_VERSION}/${adsetId}/copies`, copyParams);
+            if (copyData.error && copyAppliedStartTime && /start_time|end_time|schedule/i.test(copyData.error.message || '')) {
+                copyAppliedStartTime = false;
+                copyData = await metaGraphPost(`/${META_GRAPH_VERSION}/${adsetId}/copies`, {
+                    status_option: 'PAUSED',
+                    campaign_id: campaignId
+                });
+            }
 
             if (copyData.error) {
                 const cErr = new Error(formatMetaApiError(copyData.error));
@@ -5553,13 +5827,16 @@ async function startBatchDuplication() {
                 }
             };
 
-            // PASSO 4: Atualiza o conjunto clonado via POST /{copied_id} com retries p/ DSA/regulação
+            // PASSO 4: Atualiza o conjunto clonado via POST /{copied_id} com retries p/ DSA/regulação/start_time
             const updatePayload = {
                 name: finalName,
                 daily_budget: budgetInCents.toString(),
-                status: initialStatus,
+                status: effectiveStatus,
                 targeting
             };
+            if (isScheduled && scheduledMetaStartTime) {
+                updatePayload.start_time = scheduledMetaStartTime;
+            }
             if (EU_DSA_SET.has(country.code)) {
                 updatePayload.dsa_beneficiary = fallbackDsaName;
                 updatePayload.dsa_payor = metaState.selectedAdSet?.dsa_payor || siblingDsaAdset?.dsa_payor || fallbackDsaName;
@@ -5587,9 +5864,12 @@ async function startBatchDuplication() {
 
             let updateData = await postAdSetUpdate(updatePayload);
             const retried = new Set();
-            for (let attempt = 0; attempt < 4 && updateData.error; attempt++) {
+            for (let attempt = 0; attempt < 5 && updateData.error; attempt++) {
                 const errMsg = (updateData.error.message || '').toLowerCase();
-                if (!retried.has('reg') && (errMsg.includes('regional_regulat') || errMsg.includes('voluntary_verification') || errMsg.includes('brazil_regulation'))) {
+                if (!retried.has('start_time') && copyAppliedStartTime && errMsg.includes('start_time')) {
+                    retried.add('start_time');
+                    delete updatePayload.start_time;
+                } else if (!retried.has('reg') && (errMsg.includes('regional_regulat') || errMsg.includes('voluntary_verification') || errMsg.includes('brazil_regulation'))) {
                     retried.add('reg');
                     delete updatePayload.regional_regulated_categories;
                     delete updatePayload.regional_regulation_identities;
@@ -5626,7 +5906,7 @@ async function startBatchDuplication() {
                     name: adName,
                     adset_id: copiedAdSetId,
                     creative: JSON.stringify({ creative_id: creativeId }),
-                    status: initialStatus
+                    status: effectiveStatus
                 };
                 if (urlTags) payload.url_tags = urlTags;
                 return metaGraphPost(`/${META_GRAPH_VERSION}/${metaState.selectedAccountId}/ads`, payload);
@@ -5692,13 +5972,15 @@ async function startBatchDuplication() {
             }
 
             successCount++;
-            logMetaTerminal(`✅ [${currentIdx}/${total}] Conjunto '${finalName}' criado ${countryModeMsg}! (ID: ${copiedAdSetId})`, 'success');
+            const schedTag = isScheduled ? ` [Programado: ${launchChoice.schedulePtBr}]` : '';
+            logMetaTerminal(`✅ [${currentIdx}/${total}] Conjunto '${finalName}' criado ${countryModeMsg}${schedTag}! (ID: ${copiedAdSetId})`, 'success');
 
             // Registra o novo conjunto no estado local e atualiza os cards/badges em tempo real
             metaState.adsets.push({
                 id: copiedAdSetId,
                 name: finalName,
-                status: initialStatus,
+                status: effectiveStatus,
+                start_time: scheduledMetaStartTime || undefined,
                 targeting: targeting
             });
             if (metaState.checkedCountries[metaState.activeBlockId]) {
@@ -6060,6 +6342,14 @@ window.stopBatchDuplication = stopBatchDuplication;
 window.rollbackOrphanMetaAdSet = rollbackOrphanMetaAdSet;
 window.isMetaPagePermissionError = isMetaPagePermissionError;
 window.buildMetaPagePermissionHint = buildMetaPagePermissionHint;
+window.getNextTargetTimeLocalInput = getNextTargetTimeLocalInput;
+window.formatMetaStartTimeIso = formatMetaStartTimeIso;
+window.onDupScheduleModeChanged = onDupScheduleModeChanged;
+window.presetDupInlineTime = presetDupInlineTime;
+window.syncDupLaunchModalScheduleUI = syncDupLaunchModalScheduleUI;
+window.applyDupModalTimePreset = applyDupModalTimePreset;
+window.confirmDuplicatorLaunchModal = confirmDuplicatorLaunchModal;
+window.resolveDuplicatorLaunchModal = resolveDuplicatorLaunchModal;
 window.clearMetaLog = clearMetaLog;
 window.copyMetaLog = copyMetaLog;
 window.toggleDuplicatorTokenBox = toggleDuplicatorTokenBox;

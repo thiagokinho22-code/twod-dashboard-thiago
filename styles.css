@@ -3396,3 +3396,89 @@ body {
     margin-top: 3px;
 }
 
+/* Modal de Confirmação e Agendamento do Duplicador */
+.dup-launch-modal-card {
+    max-width: 580px;
+    width: 94%;
+}
+
+.dup-launch-summary {
+    padding: 10px 12px;
+    border-radius: 8px;
+    background: rgba(15, 23, 42, 0.45);
+    border: 1px solid var(--border-color);
+    font-size: 12.5px;
+    line-height: 1.55;
+    margin-bottom: 12px;
+}
+
+.dup-launch-warn {
+    padding: 10px 12px;
+    border-radius: 8px;
+    background: rgba(245, 158, 11, 0.12);
+    border: 1px solid rgba(245, 158, 11, 0.4);
+    color: #fcd34d;
+    font-size: 12px;
+    line-height: 1.45;
+    margin-bottom: 12px;
+}
+
+.dup-schedule-choice-section {
+    margin-top: 6px;
+}
+
+.dup-schedule-cards {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+}
+
+@media (max-width: 600px) {
+    .dup-schedule-cards {
+        grid-template-columns: 1fr;
+    }
+}
+
+.dup-schedule-card {
+    display: flex;
+    align-items: flex-start;
+    gap: 9px;
+    padding: 11px 12px;
+    border-radius: 9px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-input);
+    cursor: pointer;
+    transition: border-color 0.18s ease, background 0.18s ease;
+}
+
+.dup-schedule-card.is-selected {
+    border-color: #3b82f6;
+    background: rgba(59, 130, 246, 0.12);
+}
+
+.dup-schedule-card input[type="radio"] {
+    margin-top: 3px;
+}
+
+.dup-schedule-card strong {
+    display: block;
+    font-size: 12.5px;
+    color: var(--text-primary);
+    margin-bottom: 3px;
+}
+
+.dup-schedule-card span {
+    display: block;
+    font-size: 11.5px;
+    color: var(--text-muted);
+    line-height: 1.35;
+}
+
+.dup-launch-schedule-panel {
+    margin-top: 10px;
+    padding: 12px;
+    border-radius: 9px;
+    background: rgba(16, 185, 129, 0.07);
+    border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
