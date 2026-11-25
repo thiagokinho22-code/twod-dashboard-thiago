@@ -690,6 +690,17 @@ const tabTitles = {
 // ========================================================
 const PANEL_CHANGELOG = [
     {
+        date: '25/11/2026',
+        type: 'fix',
+        badge: '🛑 Trava Duplicador',
+        title: 'Parada imediata no 1º erro + Rollback automático de conjunto sem anúncio',
+        summary: 'Impede que o Duplicador e o Gerador de Campanhas criem vários conjuntos vazios quando a Meta bloqueia o anúncio (ex.: permissão de Página 1885499).',
+        highlights: [
+            'Ao falhar o anúncio no 1º país, exclui automaticamente o conjunto recém-clonado vazio na Meta API, mantém os países marcados e interrompe o lote na hora.',
+            'Diagnóstico direto para erro 1885499 / 3858749 (No Advertiser Permission On Page) + botão ⏹️ Parar Após Atual durante a duplicação.'
+        ]
+    },
+    {
         date: '16/11/2026',
         type: 'feat',
         badge: '🎨 Fábrica de Criativos IA',
@@ -2961,6 +2972,56 @@ function escHtml(str = '') {
 window.escHtml = escHtml;
 window.loadNichesFromAPI = loadNichesFromAPI;
 
+function isMetaPagePermissionError(err) {
+    if (!err) return false;
+    const sub = Number(err.error_subcode || 0);
+    const txt = (typeof err === 'string')
+        ? err
+        : `${err.error_user_title || ''} ${err.error_user_msg || ''} ${err.message || ''}`;
+    return sub === 1885499 || sub === 3858749 || /No Advertiser Permission On Page|Missing Page permission|advertiser permission on the page/i.test(txt);
+}
+
+function buildMetaPagePermissionHint(pageId = '') {
+    const pidLabel = pageId ? `Página ID ${pageId}` : 'Página do Facebook usada no anúncio';
+    return (
+        `📌 COMO LIBERAR A PÁGINA NO BUSINESS MANAGER (subcode 1885499 / 3858749):\n` +
+        `O Token / Usuário do Sistema não possui permissão de Anunciante na ${pidLabel}.\n` +
+        `1. Abra https://business.facebook.com/settings/system-users\n` +
+        `2. Clique no Usuário do Sistema do token -> "Atribuir Ativos" > "Páginas".\n` +
+        `3. Marque a ${pidLabel} e ative "Criar anúncios" (ou Controle total) -> Salvar.`
+    );
+}
+
+async function rollbackOrphanMetaAdSet(adsetId, adsetName = '', logFn = null) {
+    if (!adsetId) return false;
+    const logger = typeof logFn === 'function' ? logFn : logMetaTerminal;
+    try {
+        let delRes = await metaGraphRequest('DELETE', `/${META_GRAPH_VERSION}/${adsetId}`);
+        if (delRes && delRes.error) {
+            delRes = await metaGraphPost(`/${META_GRAPH_VERSION}/${adsetId}`, { status: 'DELETED' });
+        }
+        if (delRes && !delRes.error) {
+            logger(`🧹 Rollback automático: conjunto vazio '${adsetName || adsetId}' (ID: ${adsetId}) excluído na Meta para não deixar conjunto sem anúncios.`, 'warn');
+            return true;
+        }
+        logger(`⚠️ Não foi possível excluir automaticamente o conjunto vazio ${adsetId}: ${formatMetaApiError(delRes?.error || delRes)}`, 'warn');
+    } catch (e) {
+        logger(`⚠️ Falha ao tentar excluir conjunto vazio ${adsetId}: ${e.message || e}`, 'warn');
+    }
+    return false;
+}
+
+function stopBatchDuplication() {
+    if (!metaState.isDuplicating) return;
+    metaState.stopDuplicationRequested = true;
+    logMetaTerminal('⏹️ Parada solicitada! Interrompendo após concluir o país atual...', 'warn');
+    const stopBtn = document.getElementById('btn-stop-duplication');
+    if (stopBtn) {
+        stopBtn.disabled = true;
+        stopBtn.innerText = '⏳ Parando...';
+    }
+}
+
 function formatMetaApiError(err) {
     if (!err) return 'Erro desconhecido';
     if (typeof err === 'string') return err;
@@ -2968,6 +3029,9 @@ function formatMetaApiError(err) {
     const sub = err.error_subcode ? ` (subcode ${err.error_subcode})` : '';
     if (err.error_subcode === 1885183) {
         return `${baseMsg}${sub} — Ative o Modo "Ao Vivo" (Live) do app em developers.facebook.com/apps.`;
+    }
+    if (isMetaPagePermissionError(err)) {
+        return `${baseMsg}${sub} — Libere a Página para o Usuário do Sistema em business.facebook.com/settings/system-users (Atribuir Ativos > Páginas > Criar anúncios).`;
     }
     return `${baseMsg}${sub}`;
 }
@@ -4981,9 +5045,14 @@ async function startBatchDuplication() {
     if (!confirm(confirmMsg)) return;
 
     metaState.isDuplicating = true;
+    metaState.stopDuplicationRequested = false;
+    const stopOnFirstError = document.getElementById('dup-stop-on-error-check')
+        ? Boolean(document.getElementById('dup-stop-on-error-check').checked)
+        : true;
 
     // Atualiza UI para estado de execução
     const startBtn = document.getElementById('btn-start-duplication');
+    const stopBtn = document.getElementById('btn-stop-duplication');
     const clearBtn = document.getElementById('btn-clear-meta-log');
     const progressWrapper = document.getElementById('duplication-progress-wrapper');
     const progressFill = document.getElementById('duplication-progress-fill');
@@ -4994,6 +5063,11 @@ async function startBatchDuplication() {
     if (startBtn) {
         startBtn.disabled = true;
         startBtn.innerText = '⏳ Duplicando via API...';
+    }
+    if (stopBtn) {
+        stopBtn.disabled = false;
+        stopBtn.innerText = '⏹️ Parar Após Atual';
+        stopBtn.classList.remove('twod-hidden');
     }
     if (clearBtn) clearBtn.style.display = 'inline-block';
     if (progressWrapper) progressWrapper.classList.remove('twod-hidden');
@@ -5033,9 +5107,15 @@ async function startBatchDuplication() {
 
     const finishDuplicationUi = () => {
         metaState.isDuplicating = false;
+        metaState.stopDuplicationRequested = false;
         if (startBtn) {
             startBtn.disabled = false;
             startBtn.innerText = '🚀 Iniciar Nova Duplicação';
+        }
+        if (stopBtn) {
+            stopBtn.disabled = false;
+            stopBtn.innerText = '⏹️ Parar Após Atual';
+            stopBtn.classList.add('twod-hidden');
         }
     };
 
@@ -5176,9 +5256,9 @@ async function startBatchDuplication() {
                     } else {
                         sameLangErr = formatMetaApiError(crRes.error || crRes);
                         logMetaTerminal(`⚠️ Falha ao expandir criativo ${adCode} (${baseLang.toUpperCase()}): ${sameLangErr}`, 'error');
-                        if (crRes.error?.error_subcode === 1885183 || crRes.error?.error_subcode === 3858749 || /Missing Page permission/i.test(crRes.error?.message || '')) {
+                        if (crRes.error?.error_subcode === 1885183 || isMetaPagePermissionError(crRes.error)) {
                             sameLangDevBlock = crRes.error?.error_subcode === 1885183;
-                            sameLangPageBlock = crRes.error?.error_subcode === 3858749 || /Missing Page permission/i.test(crRes.error?.message || '');
+                            sameLangPageBlock = isMetaPagePermissionError(crRes.error);
                             sameLangBlockedPageId = spec.pageId || '';
                             break;
                         }
@@ -5329,7 +5409,7 @@ async function startBatchDuplication() {
                             hitDevModeBlock = true;
                             break;
                         }
-                        if (errSub === 3858749 || /Missing Page permission/i.test(errMsgTxt)) {
+                        if (isMetaPagePermissionError(crRes.error)) {
                             hitPagePermBlock = true;
                             blockedPageId = trData.spec.pageId || '';
                             break;
@@ -5361,7 +5441,7 @@ async function startBatchDuplication() {
     // BLOQUEIO DE SEGURANÇA: nunca cria conjuntos vazios silenciosamente se a criação de AdCreative falhou
     if (creativePrepFailures.length > 0) {
         const hasDevMode = creativePrepFailures.some(f => f.isDevMode);
-        const pagePermItem = creativePrepFailures.find(f => f.isPagePerm || /3858749|Missing Page permission/i.test(f.error || ''));
+        const pagePermItem = creativePrepFailures.find(f => f.isPagePerm || isMetaPagePermissionError(f.error || ''));
         const failLines = creativePrepFailures.map(f => `• ${f.lang.toUpperCase()}: ${f.error}`).join('\n');
         const devHint = hasDevMode
             ? `\n\n📌 COMO RESOLVER AGORA (Modo Desenvolvimento):\n` +
@@ -5371,11 +5451,7 @@ async function startBatchDuplication() {
               `3. No topo da tela, mude a chave de "Desenvolvimento" para "Ao Vivo / Público" (Live) — ou use um Token de Usuário do Sistema no Business Manager.`
             : '';
         const pagePermHint = pagePermItem
-            ? `\n\n📌 COMO LIBERAR A PÁGINA DO FACEBOOK (erro 3858749):\n` +
-              `O Token/Usuário do Sistema atual não tem função de Anunciante na Página ${pagePermItem.pageId || '(da campanha)'}.\n` +
-              `1. Abra https://business.facebook.com/settings/system-users\n` +
-              `2. Selecione o Usuário do Sistema do token salvo no servidor -> clique em "Atribuir Ativos" > "Páginas".\n` +
-              `3. Marque a Página ${pagePermItem.pageId || 'da campanha'} e ative "Criar anúncios" / "Gerenciar Página" -> Salvar.`
+            ? `\n\n${buildMetaPagePermissionHint(pagePermItem.pageId || '')}`
             : '';
 
         const proceedEmpty = confirm(
@@ -5403,14 +5479,36 @@ async function startBatchDuplication() {
     const fallbackDsaName = adsetObj.dsa_beneficiary || siblingDsaAdset?.dsa_beneficiary || 'Futuretech Dynamics LLC';
     const baseRegId = adsetObj.regional_regulation_identities || null;
 
+    const detectedBasePageId = (() => {
+        for (const ad of baseAds) {
+            const cr = ad?.creative || {};
+            const pid = cr.object_story_spec?.page_id
+                || (typeof cr.effective_object_story_id === 'string' && cr.effective_object_story_id.includes('_') ? cr.effective_object_story_id.split('_')[0] : '')
+                || cr.actor_id
+                || '';
+            if (pid) return String(pid);
+        }
+        return '';
+    })();
+
     let successCount = 0;
     let failCount = 0;
+    let abortedReason = '';
+    let abortedPagePerm = false;
     const startTime = Date.now();
 
     for (let i = 0; i < countriesToDuplicate.length; i++) {
+        if (metaState.stopDuplicationRequested) {
+            logMetaTerminal(`⏹️ Lote interrompido manualmente pelo usuário antes do país #${i + 1}.`, 'warn');
+            abortedReason = 'Interrompido manualmente pelo usuário.';
+            break;
+        }
+
         const country = countriesToDuplicate[i];
         const currentIdx = i + 1;
         const total = countriesToDuplicate.length;
+        let copiedAdSetId = '';
+        let finalName = country.adSetName;
 
         // Atualiza barra de progresso
         const pct = Math.round(((currentIdx - 1) / total) * 100);
@@ -5428,15 +5526,15 @@ async function startBatchDuplication() {
             });
 
             if (copyData.error) {
-                const cErr = new Error(copyData.error.message || 'Erro ao copiar conjunto');
+                const cErr = new Error(formatMetaApiError(copyData.error));
                 cErr.isCircuitBreaker = Boolean(copyData.error.is_circuit_breaker);
+                cErr.rawMetaError = copyData.error;
                 throw cErr;
             }
 
-            const copiedAdSetId = copyData.copied_adset_id;
+            copiedAdSetId = copyData.copied_adset_id;
 
             // PASSO 2: Formata o novo nome
-            let finalName = country.adSetName;
             if (nameFormat === 'country_lang') {
                 finalName = `${country.adSetName} (${country.langName})`;
             } else if (nameFormat === 'block_country') {
@@ -5511,12 +5609,16 @@ async function startBatchDuplication() {
             }
 
             if (updateData.error) {
-                throw new Error(updateData.error.message || 'Erro ao configurar conjunto clonado');
+                const uErr = new Error(formatMetaApiError(updateData.error));
+                uErr.rawMetaError = updateData.error;
+                throw uErr;
             }
 
             // PASSO 5: Publica anúncios clonados (mesmo idioma), traduzidos (idioma com criativo) ou omite se estrutura exclusiva
             const countryLang = (country.langCode || (block.langCode && block.langCode !== 'multi' ? block.langCode : baseLang) || baseLang).toLowerCase();
+            let expectedAds = 0;
             let adsCreated = 0;
+            const adErrors = [];
             let countryModeMsg = '';
 
             const createAdInCopiedSet = async (adName, creativeId, urlTags) => {
@@ -5532,40 +5634,61 @@ async function startBatchDuplication() {
 
             if (countryLang === baseLang) {
                 if (preparedSameLangItems.length > 0) {
+                    expectedAds = preparedSameLangItems.length;
                     for (const item of preparedSameLangItems) {
                         const adResult = await createAdInCopiedSet(item.adName, item.creativeId, item.urlTags);
                         if (adResult.id) {
                             adsCreated++;
                         } else if (adResult.error) {
-                            logMetaTerminal(`⚠️ Anúncio '${item.adName}' em ${finalName} falhou: ${formatMetaApiError(adResult.error)}`, 'warn');
+                            adErrors.push(adResult.error);
+                            logMetaTerminal(`❌ Anúncio '${item.adName}' em ${finalName} falhou: ${formatMetaApiError(adResult.error)}`, 'error');
+                            if (stopOnFirstError) break;
                         }
                     }
                     countryModeMsg = adsCreated > 0 ? `com ${adsCreated} anúncio(s) individuais clonado(s)` : 'sem anúncios';
                 } else {
-                    for (const baseAd of baseAds) {
-                        if (baseAd.creative && baseAd.creative.id) {
-                            const adResult = await createAdInCopiedSet(baseAd.name || finalName, baseAd.creative.id, baseAd.url_tags);
-                            if (adResult.id) {
-                                adsCreated++;
-                            } else if (adResult.error) {
-                                logMetaTerminal(`⚠️ Anúncio '${baseAd.name}' em ${finalName} falhou: ${formatMetaApiError(adResult.error)}`, 'warn');
-                            }
+                    const validBaseAds = baseAds.filter(b => b.creative && b.creative.id);
+                    expectedAds = validBaseAds.length;
+                    for (const baseAd of validBaseAds) {
+                        const adResult = await createAdInCopiedSet(baseAd.name || finalName, baseAd.creative.id, baseAd.url_tags);
+                        if (adResult.id) {
+                            adsCreated++;
+                        } else if (adResult.error) {
+                            adErrors.push(adResult.error);
+                            logMetaTerminal(`❌ Anúncio '${baseAd.name}' em ${finalName} falhou: ${formatMetaApiError(adResult.error)}`, 'error');
+                            if (stopOnFirstError) break;
                         }
                     }
                     countryModeMsg = adsCreated > 0 ? `com ${adsCreated} anúncio(s) clonado(s)` : 'sem anúncios';
                 }
             } else if (Array.isArray(preparedCreativesByLang[countryLang]) && preparedCreativesByLang[countryLang].length > 0) {
+                expectedAds = preparedCreativesByLang[countryLang].length;
                 for (const item of preparedCreativesByLang[countryLang]) {
                     const adResult = await createAdInCopiedSet(item.adName, item.creativeId, item.urlTags);
                     if (adResult.id) {
                         adsCreated++;
                     } else if (adResult.error) {
-                        logMetaTerminal(`⚠️ Anúncio traduzido '${item.adName}' em ${finalName} falhou: ${formatMetaApiError(adResult.error)}`, 'warn');
+                        adErrors.push(adResult.error);
+                        logMetaTerminal(`❌ Anúncio traduzido '${item.adName}' em ${finalName} falhou: ${formatMetaApiError(adResult.error)}`, 'error');
+                        if (stopOnFirstError) break;
                     }
                 }
                 countryModeMsg = adsCreated > 0 ? `com ${adsCreated} anúncio(s) traduzido(s) (${countryLang.toUpperCase()})` : 'sem anúncios';
             } else {
                 countryModeMsg = `apenas estrutura (sem anúncios — aguardando criativos em ${countryLang.toUpperCase()})`;
+            }
+
+            // TRAVA ANTI-CONJUNTO VAZIO: se o conjunto exigia anúncios e falhou, faz rollback e lança erro para parar o lote
+            if (expectedAds > 0 && (adsCreated === 0 || (stopOnFirstError && adErrors.length > 0))) {
+                const firstAdErr = adErrors[0] || { message: 'Nenhum anúncio pôde ser criado neste conjunto.' };
+                if (stopOnFirstError && copiedAdSetId && adsCreated === 0) {
+                    await rollbackOrphanMetaAdSet(copiedAdSetId, finalName, logMetaTerminal);
+                    copiedAdSetId = '';
+                }
+                const adErrObj = new Error(`Anúncio falhou (${adsCreated}/${expectedAds} criados): ${formatMetaApiError(firstAdErr)}`);
+                adErrObj.rawMetaError = firstAdErr;
+                adErrObj.isCircuitBreaker = Boolean(firstAdErr.is_circuit_breaker);
+                throw adErrObj;
             }
 
             successCount++;
@@ -5587,9 +5710,32 @@ async function startBatchDuplication() {
         } catch (err) {
             failCount++;
             console.error(`Erro ao duplicar para ${country.adSetName}:`, err);
-            logMetaTerminal(`❌ [${currentIdx}/${total}] Falha em ${country.adSetName}: ${err.message}`, 'error');
+            logMetaTerminal(`❌ [${currentIdx}/${total}] Falha em '${finalName}': ${err.message}`, 'error');
+
+            if (stopOnFirstError && copiedAdSetId) {
+                await rollbackOrphanMetaAdSet(copiedAdSetId, finalName, logMetaTerminal);
+                copiedAdSetId = '';
+            }
+
             if (err.isCircuitBreaker || /Proteção anti-rajada ativa|rate limit/i.test(err.message || '')) {
+                abortedReason = 'Pausado pelo Circuit Breaker anti-rajada.';
                 logMetaTerminal('🛑 Lote pausado automaticamente pelo Circuit Breaker para proteger o App Meta contra bloqueios. Veja o Status do App na Visão Geral.', 'warn');
+                break;
+            }
+
+            if (stopOnFirstError) {
+                const remaining = total - currentIdx;
+                abortedReason = err.message;
+                abortedPagePerm = isMetaPagePermissionError(err.rawMetaError || err.message);
+                logMetaTerminal(
+                    `🛑 Trava Anti-Conjunto Vazio acionada: lote interrompido em [${currentIdx}/${total}] para não criar ${remaining > 0 ? `os outros ${remaining} conjunto(s)` : 'conjuntos'} sem anúncios!`,
+                    'warn'
+                );
+                if (abortedPagePerm) {
+                    buildMetaPagePermissionHint(detectedBasePageId).split('\n').forEach(line => {
+                        if (line.trim()) logMetaTerminal(line, 'warn');
+                    });
+                }
                 break;
             }
         }
@@ -5601,18 +5747,34 @@ async function startBatchDuplication() {
     const elapsedSecs = ((Date.now() - startTime) / 1000).toFixed(1);
 
     // Finalização
-    if (progressFill) progressFill.style.width = '100%';
-    if (progressPct) progressPct.innerText = '100%';
-    if (progressStatus) progressStatus.innerText = 'Duplicação concluída!';
-    if (termStatus) termStatus.innerText = 'Concluído';
-
-    if (startBtn) {
-        startBtn.disabled = false;
-        startBtn.innerText = '🚀 Iniciar Nova Duplicação';
+    if (!abortedReason) {
+        if (progressFill) progressFill.style.width = '100%';
+        if (progressPct) progressPct.innerText = '100%';
+        if (progressStatus) progressStatus.innerText = 'Duplicação concluída!';
+        if (termStatus) termStatus.innerText = 'Concluído';
+    } else {
+        if (progressStatus) progressStatus.innerText = `🛑 Interrompido (${successCount} criado(s), ${failCount} falha)`;
+        if (termStatus) termStatus.innerText = abortedPagePerm ? 'Bloqueado (Permissão na Página)' : 'Interrompido por erro';
     }
-    metaState.isDuplicating = false;
 
-    logMetaTerminal(`🎉 Operação finalizada em ${elapsedSecs}s! Sucesso: ${successCount} | Falhas: ${failCount}`, successCount > 0 ? 'success' : 'warning');
+    finishDuplicationUi();
+
+    logMetaTerminal(
+        abortedReason
+            ? `🛑 Operação interrompida em ${elapsedSecs}s! Sucesso: ${successCount} | Falhas: ${failCount} (conjuntos vazios evitados/revertidos).`
+            : `🎉 Operação finalizada em ${elapsedSecs}s! Sucesso: ${successCount} | Falhas: ${failCount}`,
+        abortedReason ? 'warning' : (successCount > 0 ? 'success' : 'warning')
+    );
+
+    if (abortedReason && failCount > 0) {
+        const extraHint = abortedPagePerm ? `\n\n${buildMetaPagePermissionHint(detectedBasePageId)}` : '';
+        alert(
+            `🛑 LOTE INTERROMPIDO NO 1º ERRO (CONJUNTOS VAZIOS EVITADOS):\n\n` +
+            `• Motivo: ${abortedReason}\n` +
+            `• Conjuntos completos salvos antes do erro: ${successCount}\n` +
+            `• O conjunto que falhou sem anúncio foi excluído automaticamente na Meta e os países pendentes continuam marcados para você retomar após corrigir.${extraHint}`
+        );
+    }
     refreshMetaAppHealth(false);
 }
 
@@ -5894,6 +6056,10 @@ window.toggleAllCountriesInBlock = toggleAllCountriesInBlock;
 window.selectPriorityCountriesOnly = selectPriorityCountriesOnly;
 window.selectMissingCountriesOnly = selectMissingCountriesOnly;
 window.startBatchDuplication = startBatchDuplication;
+window.stopBatchDuplication = stopBatchDuplication;
+window.rollbackOrphanMetaAdSet = rollbackOrphanMetaAdSet;
+window.isMetaPagePermissionError = isMetaPagePermissionError;
+window.buildMetaPagePermissionHint = buildMetaPagePermissionHint;
 window.clearMetaLog = clearMetaLog;
 window.copyMetaLog = copyMetaLog;
 window.toggleDuplicatorTokenBox = toggleDuplicatorTokenBox;

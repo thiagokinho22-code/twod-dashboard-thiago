@@ -1500,9 +1500,19 @@
                             <span class="badge-tag">Passo 3 de 3</span>
                         </div>
 
+                        <div style="margin-bottom: 12px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                            <label style="display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; cursor: pointer; padding: 7px 12px; border-radius: 8px; background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.28);">
+                                <input type="checkbox" id="dup-stop-on-error-check" checked>
+                                <span>🛑 <strong>Trava Anti-Conjunto Vazio:</strong> parar lote imediatamente no 1º erro de anúncio e excluir o conjunto incompleto</span>
+                            </label>
+                        </div>
+
                         <div class="execution-trigger-bar">
                             <button type="button" class="btn btn-primary btn-lg" id="btn-start-duplication" onclick="startBatchDuplication()">
                                 🚀 Iniciar Duplicação via Meta API
+                            </button>
+                            <button type="button" class="btn btn-outline twod-hidden" id="btn-stop-duplication" onclick="stopBatchDuplication()">
+                                ⏹️ Parar Após Atual
                             </button>
                             <button type="button" class="btn btn-outline" id="btn-clear-meta-log" onclick="clearMetaLog()" style="display: none;">
                                 🧹 Limpar Terminal
@@ -1856,10 +1866,10 @@
         </div>
     </div>
 
-    <script src="app.js?v=9.5"></script>
+    <script src="app.js?v=9.6"></script>
     <script src="studio.js?v=1.11"></script>
     <script src="creative_gen.js?v=1.2"></script>
-    <script src="campaign_builder.js?v=1.7"></script>
+    <script src="campaign_builder.js?v=1.8"></script>
 </body>
 </html>
 

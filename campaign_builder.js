@@ -1549,11 +1549,11 @@ async function launchStandardCampaign() {
                     const errDetail = (typeof formatMetaApiError === 'function')
                         ? formatMetaApiError(creativeRes.error || creativeRes)
                         : (creativeRes.error?.error_user_msg || creativeRes.error?.message || JSON.stringify(creativeRes));
-                    logBuilderTerminal(`⚠️ Anúncio ${asset.adName} (${country.adSetName}) falhou no AdCreative: ${errDetail}`, 'error');
-                    if (creativeRes.error?.error_subcode === 1885183) {
-                        throw new Error(errDetail);
+                    logBuilderTerminal(`❌ Anúncio ${asset.adName} (${country.adSetName}) falhou no AdCreative: ${errDetail}`, 'error');
+                    if (typeof window.rollbackOrphanMetaAdSet === 'function' && adsOk === 0) {
+                        await window.rollbackOrphanMetaAdSet(adSetId, country.adSetName, logBuilderTerminal);
                     }
-                    continue;
+                    throw new Error(`Falha no criativo do conjunto '${country.adSetName}' (${errDetail}). Lote interrompido para não criar conjuntos vazios.`);
                 }
 
                 const adPayload = {
@@ -1570,7 +1570,14 @@ async function launchStandardCampaign() {
                 if (adRes.id) {
                     adsOk++;
                 } else {
-                    logBuilderTerminal(`⚠️ Falha ao publicar anúncio ${asset.adName}: ${adRes.error?.message || JSON.stringify(adRes)}`, 'warn');
+                    const adErrDetail = (typeof formatMetaApiError === 'function')
+                        ? formatMetaApiError(adRes.error || adRes)
+                        : (adRes.error?.message || JSON.stringify(adRes));
+                    logBuilderTerminal(`❌ Falha ao publicar anúncio ${asset.adName} em ${country.adSetName}: ${adErrDetail}`, 'error');
+                    if (typeof window.rollbackOrphanMetaAdSet === 'function' && adsOk === 0) {
+                        await window.rollbackOrphanMetaAdSet(adSetId, country.adSetName, logBuilderTerminal);
+                    }
+                    throw new Error(`Falha ao publicar anúncio em '${country.adSetName}' (${adErrDetail}). Conjunto sem anúncio revertido e lote interrompido.`);
                 }
             }
 
