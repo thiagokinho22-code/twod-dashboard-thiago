@@ -449,8 +449,11 @@ body {
 
 .current-time-badge {
     font-family: monospace;
+    font-variant-numeric: tabular-nums;
     font-size: 13px;
     padding: 6px 12px;
+    min-width: 86px;
+    text-align: center;
     border-radius: 6px;
     background: var(--bg-page);
     border: 1px solid var(--border-color);
@@ -2356,7 +2359,142 @@ body {
 
 .app-health-pill:hover {
     filter: brightness(1.08);
-    transform: translateY(-1px);
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+}
+
+.header-meta-pill-wrap {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+}
+
+.header-meta-hover-card {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    min-width: 315px;
+    max-width: 390px;
+    padding: 12px 14px;
+    border-radius: 12px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    box-shadow: var(--shadow-lg);
+    color: var(--text-primary);
+    font-size: 12px;
+    line-height: 1.45;
+    z-index: 60;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition: opacity 0.14s ease, visibility 0.14s ease;
+    text-align: left;
+}
+
+.header-meta-hover-card::before {
+    content: '';
+    position: absolute;
+    top: -10px;
+    left: 0;
+    right: 0;
+    height: 12px;
+}
+
+.header-meta-pill-wrap:hover .header-meta-hover-card,
+.header-meta-pill-wrap:focus-within .header-meta-hover-card {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+}
+
+.meta-hover-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    padding-bottom: 7px;
+    margin-bottom: 8px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.meta-hover-head strong {
+    font-size: 12.5px;
+    color: var(--text-primary);
+}
+
+.meta-hover-time {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.meta-hover-quota-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.meta-hover-quota-row strong {
+    font-size: 13px;
+    color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
+}
+
+.meta-hover-sub {
+    margin-top: 3px;
+    font-size: 11.5px;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+}
+
+.meta-hover-guard {
+    margin-top: 8px;
+    padding: 6px 9px;
+    border-radius: 8px;
+    background: rgba(239, 68, 68, 0.14);
+    border: 1px solid rgba(239, 68, 68, 0.35);
+    color: #fca5a5;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    font-size: 11.5px;
+}
+
+.meta-hover-guard.is-throttle {
+    background: rgba(245, 158, 11, 0.12);
+    border-color: rgba(245, 158, 11, 0.35);
+    color: #fcd34d;
+}
+
+.meta-hover-guard strong {
+    font-variant-numeric: tabular-nums;
+    font-size: 12.5px;
+}
+
+.meta-hover-alerts {
+    margin-top: 8px;
+    padding-top: 7px;
+    border-top: 1px dashed var(--border-color);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.meta-hover-alert-item {
+    font-size: 11.5px;
+    color: var(--text-secondary);
+    line-height: 1.35;
+}
+
+.meta-hover-foot {
+    margin-top: 8px;
+    padding-top: 6px;
+    border-top: 1px solid var(--border-color);
+    font-size: 11px;
+    color: var(--text-muted);
 }
 
 .meta-quota-inline-chip {
@@ -2369,6 +2507,7 @@ body {
     font-size: 11px;
     font-weight: 800;
     letter-spacing: 0.2px;
+    font-variant-numeric: tabular-nums;
     border: 1px solid rgba(148, 163, 184, 0.35);
     background: rgba(15, 23, 42, 0.45);
     color: #e2e8f0;
@@ -3984,5 +4123,14 @@ body {
 
 .block-acc-body .countries-grid-container {
     margin-bottom: 0;
+}
+
+@media (max-width: 768px) {
+    .header-meta-hover-card {
+        left: 0;
+        right: auto;
+        min-width: 260px;
+        max-width: calc(100vw - 32px);
+    }
 }
 

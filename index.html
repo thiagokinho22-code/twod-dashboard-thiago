@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>TwoD Hub — Central de Automações</title>
-    <link rel="stylesheet" href="styles.css?v=3.8">
+    <link rel="stylesheet" href="styles.css?v=3.9">
 </head>
 <body>
 
@@ -168,11 +168,31 @@
                 </div>
 
                 <div class="header-actions">
-                    <button type="button" id="header-meta-app-pill" class="app-health-pill health-pending" onclick="openMetaAppHealthPanel()" title="Ver Status de Saúde do App Meta, DUC e Rate Limit">
-                        <span class="health-dot"></span>
-                        <span id="header-meta-app-pill-text">App Meta: Verificando...</span>
-                        <span id="header-meta-quota-chip" class="meta-quota-inline-chip quota-unknown" title="Uso atual da cota da Meta API">Cota: --%</span>
-                    </button>
+                    <div class="header-meta-pill-wrap" id="header-meta-pill-wrap">
+                        <button type="button" id="header-meta-app-pill" class="app-health-pill health-pending" onclick="openMetaAppHealthPanel()">
+                            <span class="health-dot"></span>
+                            <span id="header-meta-app-pill-text">App Meta: Verificando...</span>
+                            <span id="header-meta-quota-chip" class="meta-quota-inline-chip quota-unknown">Cota: --%</span>
+                        </button>
+                        <div id="header-meta-hover-card" class="header-meta-hover-card" role="tooltip">
+                            <div class="meta-hover-head">
+                                <strong id="meta-hover-title">Status do App Meta</strong>
+                                <span id="meta-hover-updated" class="meta-hover-time">Atualizado: --:--:--</span>
+                            </div>
+                            <div class="meta-hover-quota-row">
+                                <span>Uso da Cota Meta:</span>
+                                <strong id="meta-hover-pct">--%</strong>
+                            </div>
+                            <div id="meta-hover-breakdown" class="meta-hover-sub">Call App --% • CPU --% • Tempo --% • Conta --%</div>
+                            <div id="meta-hover-guard" class="meta-hover-guard twod-hidden">
+                                <span id="meta-hover-guard-label">🔒 Anti-rajada (reset em):</span>
+                                <strong id="meta-hover-countdown">--s</strong>
+                            </div>
+                            <div id="meta-hover-guard-reason" class="meta-hover-sub twod-hidden"></div>
+                            <div id="meta-hover-alerts" class="meta-hover-alerts twod-hidden"></div>
+                            <div class="meta-hover-foot">Clique no botão para abrir o diagnóstico completo</div>
+                        </div>
+                    </div>
 
                     <!-- SELETOR RÁPIDO DE TEMA -->
                     <div class="theme-quick-toggle" title="Modo de Tema">
@@ -2068,7 +2088,7 @@
         ⬆ Topo
     </button>
 
-    <script src="app.js?v=9.18"></script>
+    <script src="app.js?v=9.19"></script>
     <script src="duplicator_queue.js?v=1.1"></script>
     <script src="studio.js?v=1.11"></script>
     <script src="creative_gen.js?v=1.2"></script>

@@ -597,10 +597,11 @@ function evaluateTheme() {
     const mode = currentUser.themeMode || 'dark';
     const html = document.documentElement;
 
+    let nextTheme = 'dark';
     if (mode === 'light') {
-        html.setAttribute('data-theme', 'light');
+        nextTheme = 'light';
     } else if (mode === 'dark') {
-        html.setAttribute('data-theme', 'dark');
+        nextTheme = 'dark';
     } else if (mode === 'auto') {
         // Lógica de agendamento por horário
         const now = new Date();
@@ -620,7 +621,10 @@ function evaluateTheme() {
             isDaytime = currentMins >= startMins || currentMins < endMins;
         }
 
-        html.setAttribute('data-theme', isDaytime ? 'light' : 'dark');
+        nextTheme = isDaytime ? 'light' : 'dark';
+    }
+    if (html.getAttribute('data-theme') !== nextTheme) {
+        html.setAttribute('data-theme', nextTheme);
     }
 }
 
@@ -664,7 +668,10 @@ function updateClock() {
     const now = new Date();
     const clockEl = document.getElementById('live-clock');
     if (clockEl) {
-        clockEl.innerText = now.toLocaleTimeString('pt-BR');
+        const nextClock = now.toLocaleTimeString('pt-BR');
+        if (clockEl.textContent !== nextClock) {
+            clockEl.textContent = nextClock;
+        }
     }
     evaluateTheme();
 }
@@ -2446,6 +2453,7 @@ function updateMetaStatusUI(isSuccess, errorMessage = null, userData = null) {
 let _lastMetaHealthReport = null;
 
 function openMetaAppHealthPanel() {
+    document.getElementById('header-meta-app-pill')?.blur();
     switchTab('visao-geral');
     const panel = document.getElementById('meta-app-health-panel');
     if (panel) {
@@ -2520,8 +2528,9 @@ function renderMetaAppHealthUI(report) {
 
     const pillEl = document.getElementById('header-meta-app-pill');
     const pillTxt = document.getElementById('header-meta-app-pill-text');
-    if (pillEl) pillEl.className = `app-health-pill ${overallMeta.cls}`;
-    if (pillTxt) pillTxt.innerText = overallMeta.pill;
+    const nextPillCls = `app-health-pill ${overallMeta.cls}`;
+    if (pillEl && pillEl.className !== nextPillCls) pillEl.className = nextPillCls;
+    if (pillTxt && pillTxt.textContent !== overallMeta.pill) pillTxt.textContent = overallMeta.pill;
     applyMetaQuotaSnapshot(report, { fromHealthUi: true });
 
     const badgeEl = document.getElementById('meta-app-health-badge');
@@ -2645,17 +2654,38 @@ function _hasNonQuotaHealthIssue(level) {
     return checks.some(c => c && !quotaIds.has(c.id) && c.level === level);
 }
 
-/** Updates the top-header quota chip and pill status from a quota or app-health snapshot. */
+let _lastHoverAlertsKey = '';
+
+function _setHoverText(el, val) {
+    if (el && el.textContent !== val) el.textContent = val;
+}
+
+/** Updates the top-header quota chip, pill status, and steady hover card without triggering tooltip flicker. */
 function renderHeaderMetaQuotaChip(snapshot, overrideSecLeft = null) {
     const chipEl = document.getElementById('header-meta-quota-chip');
     const pillEl = document.getElementById('header-meta-app-pill');
     const pillTxt = document.getElementById('header-meta-app-pill-text');
     if (!chipEl) return;
 
+    if (chipEl.hasAttribute('title')) chipEl.removeAttribute('title');
+    if (pillEl && pillEl.hasAttribute('title')) pillEl.removeAttribute('title');
+
+    const hoverTitleEl = document.getElementById('meta-hover-title');
+    const hoverUpdEl = document.getElementById('meta-hover-updated');
+    const hoverPctEl = document.getElementById('meta-hover-pct');
+    const hoverBreakEl = document.getElementById('meta-hover-breakdown');
+    const hoverGuardEl = document.getElementById('meta-hover-guard');
+    const hoverGuardLbl = document.getElementById('meta-hover-guard-label');
+    const hoverCdEl = document.getElementById('meta-hover-countdown');
+    const hoverReasonEl = document.getElementById('meta-hover-guard-reason');
+    const hoverAlertsEl = document.getElementById('meta-hover-alerts');
+
     if (!snapshot || (!snapshot.usage && snapshot.max_pct === undefined)) {
-        chipEl.className = 'meta-quota-inline-chip quota-unknown';
-        chipEl.textContent = 'Cota: --%';
-        chipEl.title = 'Uso atual da cota da Meta API (aguardando leitura)';
+        const unkCls = 'meta-quota-inline-chip quota-unknown';
+        if (chipEl.className !== unkCls) chipEl.className = unkCls;
+        _setHoverText(chipEl, 'Cota: --%');
+        _setHoverText(hoverPctEl, '--%');
+        _setHoverText(hoverUpdEl, 'Aguardando leitura...');
         return;
     }
 
@@ -2671,14 +2701,16 @@ function renderHeaderMetaQuotaChip(snapshot, overrideSecLeft = null) {
     const hasReading = updatedAt > 0 || pct > 0 || circuitOpen || snapshot.max_pct !== undefined;
 
     if (!hasReading) {
-        chipEl.className = 'meta-quota-inline-chip quota-unknown';
-        chipEl.textContent = 'Cota: --%';
+        const unkCls = 'meta-quota-inline-chip quota-unknown';
+        if (chipEl.className !== unkCls) chipEl.className = unkCls;
+        _setHoverText(chipEl, 'Cota: --%');
     } else {
         const cls = (circuitOpen || pct >= 90)
             ? 'quota-crit'
             : (pct >= 70 ? 'quota-warn' : 'quota-ok');
-        chipEl.className = `meta-quota-inline-chip ${cls}`;
-        chipEl.textContent = circuitOpen ? `Cota: ${pct}% 🔒 ${secLeft}s` : `Cota: ${pct}%`;
+        const nextChipCls = `meta-quota-inline-chip ${cls}`;
+        if (chipEl.className !== nextChipCls) chipEl.className = nextChipCls;
+        _setHoverText(chipEl, circuitOpen ? `Cota: ${pct}% 🔒 ${secLeft}s` : `Cota: ${pct}%`);
     }
 
     const callPct = Math.round(Number(usage.call_count || 0));
@@ -2688,32 +2720,69 @@ function renderHeaderMetaQuotaChip(snapshot, overrideSecLeft = null) {
     const throttleMs = Number(guard.throttle_delay_ms || 0);
     const checkedLabel = snapshot.checked_at || (snapshot.checked_at_iso ? new Date(snapshot.checked_at_iso).toLocaleTimeString('pt-BR', { hour12: false }) : '--:--:--');
 
-    const tipParts = [
-        `Cota Meta: ${hasReading ? `${pct}%` : '--%'} (Call App ${callPct}% • CPU ${cpuPct}% • Tempo ${timePct}% • Conta ${accPct}%)`
-    ];
-    if (circuitOpen) {
-        tipParts.push(`Anti-rajada ativa: ${secLeft}s${guard.circuit_reason ? ` — ${guard.circuit_reason}` : ''}`);
-    } else if (throttleMs > 0) {
-        tipParts.push(`Throttle preventivo: ${throttleMs}ms entre chamadas`);
-    }
-    tipParts.push(`Atualizado: ${checkedLabel} • Clique para diagnóstico`);
-    const fullTip = tipParts.join('\n');
-    chipEl.title = fullTip;
-    if (pillEl) pillEl.title = fullTip;
+    _setHoverText(hoverUpdEl, `Atualizado: ${checkedLabel}`);
+    _setHoverText(hoverPctEl, hasReading ? `${pct}%` : '--%');
+    _setHoverText(hoverBreakEl, `Call App ${callPct}% • CPU ${cpuPct}% • Tempo ${timePct}% • Conta ${accPct}%`);
 
+    if (hoverGuardEl) {
+        if (circuitOpen) {
+            hoverGuardEl.classList.remove('twod-hidden', 'is-throttle');
+            _setHoverText(hoverGuardLbl, '🔒 Anti-rajada (reset em):');
+            _setHoverText(hoverCdEl, `${secLeft}s`);
+            if (hoverReasonEl) {
+                if (guard.circuit_reason) {
+                    hoverReasonEl.classList.remove('twod-hidden');
+                    _setHoverText(hoverReasonEl, guard.circuit_reason);
+                } else {
+                    hoverReasonEl.classList.add('twod-hidden');
+                }
+            }
+        } else if (throttleMs > 0) {
+            hoverGuardEl.classList.remove('twod-hidden');
+            hoverGuardEl.classList.add('is-throttle');
+            _setHoverText(hoverGuardLbl, '⏱️ Throttle preventivo:');
+            _setHoverText(hoverCdEl, `${throttleMs}ms`);
+            if (hoverReasonEl) hoverReasonEl.classList.add('twod-hidden');
+        } else {
+            hoverGuardEl.classList.add('twod-hidden');
+            hoverGuardEl.classList.remove('is-throttle');
+            if (hoverReasonEl) hoverReasonEl.classList.add('twod-hidden');
+        }
+    }
+
+    let nextPillCls = null;
+    let nextPillTxt = null;
     if (pillEl && pillTxt) {
-        if (circuitOpen || pct >= 95) {
-            pillEl.className = 'app-health-pill health-red';
-            pillTxt.innerText = 'App Meta: Crítico';
-        } else if (_hasNonQuotaHealthIssue('red') || guard.dev_mode_blocked || guard.token_blocked) {
-            pillEl.className = 'app-health-pill health-red';
-            pillTxt.innerText = 'App Meta: Crítico';
+        if (circuitOpen || pct >= 95 || _hasNonQuotaHealthIssue('red') || guard.dev_mode_blocked || guard.token_blocked) {
+            nextPillCls = 'app-health-pill health-red';
+            nextPillTxt = 'App Meta: Crítico';
         } else if (pct >= 70 || _hasNonQuotaHealthIssue('yellow')) {
-            pillEl.className = 'app-health-pill health-yellow';
-            pillTxt.innerText = 'App Meta: Atenção';
+            nextPillCls = 'app-health-pill health-yellow';
+            nextPillTxt = 'App Meta: Atenção';
         } else if (_lastMetaHealthReport) {
-            pillEl.className = 'app-health-pill health-green';
-            pillTxt.innerText = 'App Meta: Saudável';
+            nextPillCls = 'app-health-pill health-green';
+            nextPillTxt = 'App Meta: Saudável';
+        }
+        if (nextPillCls && pillEl.className !== nextPillCls) pillEl.className = nextPillCls;
+        if (nextPillTxt) _setHoverText(pillTxt, nextPillTxt);
+    }
+    _setHoverText(hoverTitleEl, nextPillTxt || pillTxt?.textContent || 'Status do App Meta');
+
+    if (hoverAlertsEl) {
+        const warnChecks = (Array.isArray(_lastMetaHealthReport?.checks) ? _lastMetaHealthReport.checks : [])
+            .filter(c => c && (c.level === 'yellow' || c.level === 'red'));
+        const alertsKey = warnChecks.map(c => `${c.level}:${c.title}`).join('|');
+        if (alertsKey !== _lastHoverAlertsKey) {
+            _lastHoverAlertsKey = alertsKey;
+            if (warnChecks.length === 0) {
+                hoverAlertsEl.classList.add('twod-hidden');
+                hoverAlertsEl.innerHTML = '';
+            } else {
+                hoverAlertsEl.classList.remove('twod-hidden');
+                hoverAlertsEl.innerHTML = warnChecks.map(c =>
+                    `<div class="meta-hover-alert-item">${c.level === 'red' ? '🔴' : '🟡'} ${escHtml(c.title || '')}</div>`
+                ).join('');
+            }
         }
     }
 }
