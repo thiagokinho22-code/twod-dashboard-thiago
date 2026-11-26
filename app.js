@@ -691,6 +691,17 @@ const tabTitles = {
 const PANEL_CHANGELOG = [
     {
         date: '26/11/2026',
+        type: 'fix',
+        badge: '🧹 Rollback & Índice Meta',
+        title: 'Rollback DELETE garantido mesmo no Circuit Breaker + ordenação do índice /adcreatives',
+        summary: 'Permite que a exclusão automática de conjunto vazio (DELETE) conclua mesmo quando a trava anti-rajada acabou de disparar, e consulta ads da campanha + adcreatives recentes.',
+        highlights: [
+            'Evita deixar conjunto vazio órfão (ex: ao parar no 9º país em 95% de cota) liberando DELETE de limpeza no Circuit Breaker.',
+            'Corrige campos inválidos de subconsulta no /adcreatives e ordena candidatos do ID mais recente para o mais antigo.'
+        ]
+    },
+    {
+        date: '26/11/2026',
         type: 'feat',
         badge: '♻️ Cache & Economia Cota',
         title: 'Reaproveitamento persistente de Vídeos/AdCreatives + corte de ~75% na cota Meta',
@@ -5019,21 +5030,48 @@ function markAccountMultiAfsDisabled(accountId) {
     writePersistentMetaJsonEntry(META_NO_MULTI_AFS_KEY, accountId, { disabled: true }, 100);
 }
 
-async function fetchExistingAccountAdCreativesIndex(accountId) {
+async function fetchExistingAccountAdCreativesIndex(accountId, campaignId = '') {
     if (!accountId) return new Map();
-    const fields = 'id,name,object_story_spec{page_id,link_data{link,call_to_action},video_data{video_id,call_to_action}}';
-    let res = await fetchMetaGraphWithFieldFallback([
-        `/${META_GRAPH_VERSION}/${accountId}/adcreatives?fields=${fields}&limit=200`,
-        `/${META_GRAPH_VERSION}/${accountId}/adcreatives?fields=id,name,object_story_spec&limit=200`,
-        `/${META_GRAPH_VERSION}/${accountId}/adcreatives?fields=id,name&limit=200`
-    ]);
-    const list = Array.isArray(res?.data) ? res.data : [];
+    const calls = [
+        fetchMetaGraphWithFieldFallback([
+            `/${META_GRAPH_VERSION}/${accountId}/adcreatives?fields=id,name,object_story_spec&limit=500`,
+            `/${META_GRAPH_VERSION}/${accountId}/adcreatives?fields=id,name&limit=500`
+        ])
+    ];
+    if (campaignId) {
+        calls.push(
+            metaGraphGet(`/${META_GRAPH_VERSION}/${campaignId}/ads?fields=id,name,creative{id,name,object_story_spec}&limit=200`).catch(() => null)
+        );
+    }
+    const [accRes, campAdsRes] = await Promise.allSettled(calls);
+    const allItems = [];
+    if (accRes.status === 'fulfilled' && Array.isArray(accRes.value?.data)) {
+        allItems.push(...accRes.value.data);
+    }
+    if (campAdsRes && campAdsRes.status === 'fulfilled' && Array.isArray(campAdsRes.value?.data)) {
+        campAdsRes.value.data.forEach(ad => {
+            if (ad?.creative?.id && ad.creative?.name) allItems.push(ad.creative);
+        });
+    }
+
     const byName = new Map();
-    list.forEach(cr => {
+    const seenIds = new Set();
+    allItems.forEach(cr => {
         const nm = String(cr?.name || '').trim();
-        if (!nm) return;
+        const cid = String(cr?.id || '').trim();
+        if (!nm || !cid || seenIds.has(cid)) return;
+        seenIds.add(cid);
         if (!byName.has(nm)) byName.set(nm, []);
         byName.get(nm).push(cr);
+    });
+    // Ordena do ID mais novo para o mais antigo (evita reutilizar criativo antigo se existir mais novo com mesmo nome)
+    byName.forEach(arr => {
+        arr.sort((a, b) => {
+            const sa = String(a?.id || '');
+            const sb = String(b?.id || '');
+            if (sa.length !== sb.length) return sb.length - sa.length;
+            return sb.localeCompare(sa);
+        });
     });
     return byName;
 }
@@ -7054,7 +7092,7 @@ async function startBatchDuplication() {
         }
     }
 
-    logMetaTerminal(`🚀 Iniciando processo de duplicação para ${countriesToDuplicate.length} países no bloco ${block.title}... [v9.14]`, 'info');
+    logMetaTerminal(`🚀 Iniciando processo de duplicação para ${countriesToDuplicate.length} países no bloco ${block.title}... [v9.15]`, 'info');
     logMetaTerminal(`🎯 Campanha de Destino: '${campObj.name}' (ID: ${campObj.id})`, 'info');
     logMetaTerminal(`📦 Conjunto base: '${adsetObj.name}' (${baseLang.toUpperCase()} | ID: ${adsetObj.id})`, 'info');
     if (activeWorkingPageId) {
@@ -7308,9 +7346,9 @@ async function startBatchDuplication() {
         let existingAccountCreativesMap = new Map();
         if (reuseExistingMetaAssets) {
             try {
-                existingAccountCreativesMap = await fetchExistingAccountAdCreativesIndex(metaState.selectedAccountId);
+                existingAccountCreativesMap = await fetchExistingAccountAdCreativesIndex(metaState.selectedAccountId, campaignId);
                 if (existingAccountCreativesMap.size > 0) {
-                    logMetaTerminal(`♻️ Memória de cota ativa: ${existingAccountCreativesMap.size} AdCreative(s) recente(s) indexado(s) na conta para reaproveitamento.`, 'info');
+                    logMetaTerminal(`♻️ Memória de cota ativa: ${existingAccountCreativesMap.size} nome(s) de AdCreative indexado(s) na conta/campanha para reaproveitamento.`, 'info');
                 }
             } catch (_) {
                 existingAccountCreativesMap = new Map();

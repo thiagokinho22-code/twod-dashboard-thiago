@@ -770,7 +770,7 @@ def _execute_meta_graph_request(method, raw_path, params=None, manual_token="", 
         clean_path = base_p
 
     throttle_ms = 0
-    if not bypass_circuit:
+    if not bypass_circuit and req_method != "DELETE":
         with META_GUARD_LOCK:
             now = time.time()
             open_until = META_GUARD_STATE["circuit_open_until"]
