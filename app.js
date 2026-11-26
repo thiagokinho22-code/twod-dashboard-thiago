@@ -692,6 +692,17 @@ const PANEL_CHANGELOG = [
     {
         date: '25/11/2026',
         type: 'feat',
+        badge: '🛡️ Fix 3858756 & /copies',
+        title: 'Fallback direto em /adsets quando /copies bloqueia por Advertiser (3858634) + suporte a 3858756 + Botão ⬆ Topo',
+        summary: 'Clona conjuntos direto via POST /adsets se a Meta barrar /copies na origem (ex: Brasil), reconhece erro 3858756 na troca de Página e adiciona botão de rolar ao topo.',
+        highlights: [
+            'Reconhece subcode 3858756 ("permission to promote post") para acionar troca automática de Página (ex: Apps Úteis).',
+            'Se /copies rejeitar copiar conjunto base (ex: Brasil sem Advertiser -> 3858634), cria os conjuntos diretamente via API já mirando o país destino + Advertiser.'
+        ]
+    },
+    {
+        date: '25/11/2026',
+        type: 'feat',
         badge: '🏢 Advertiser AU / Compliance',
         title: 'Detecção e preenchimento automático do Advertiser (Futuretech Dynamics) para Austrália (3858634)',
         summary: 'Detecta a entidade verificada na conta/BM/conjuntos existentes e aplica automaticamente em Austrália, Brasil, UE e demais países regulados.',
@@ -3236,6 +3247,119 @@ function applyComplianceAttemptToAdSetPayload(payloadObj, attempt) {
     return payloadObj;
 }
 
+async function fetchFullBaseAdSetSpec(adsetId) {
+    if (!adsetId) return null;
+    const fields = 'id,name,optimization_goal,billing_event,bid_strategy,bid_amount,destination_type,promoted_object,attribution_spec,targeting,daily_budget,start_time,dsa_beneficiary,dsa_payor,regional_regulated_categories,regional_regulation_identities';
+    const res = await fetchMetaGraphWithFieldFallback([
+        `/${META_GRAPH_VERSION}/${adsetId}?fields=${fields}`,
+        `/${META_GRAPH_VERSION}/${adsetId}?fields=id,name,optimization_goal,billing_event,bid_strategy,destination_type,promoted_object,targeting,daily_budget`
+    ]);
+    return (res && !res.error) ? res : null;
+}
+
+async function sendAdSetMutationWithRetries({
+    endpointPath,
+    payloadObj,
+    complianceAttempts = [],
+    countryCode = '',
+    finalName = '',
+    accountId = '',
+    allowStartTimeRetry = false,
+    workingComplianceByCountry = {},
+    logFn = null
+}) {
+    const logger = typeof logFn === 'function' ? logFn : logMetaTerminal;
+    let complianceIdx = -1;
+    if (complianceAttempts.shouldProactive && complianceAttempts.length > 0) {
+        complianceIdx = 0;
+        applyComplianceAttemptToAdSetPayload(payloadObj, complianceAttempts[0]);
+    }
+
+    const postMutation = async (obj) => {
+        const cleanPayload = {};
+        Object.entries(obj || {}).forEach(([k, v]) => {
+            if (v !== undefined && v !== null) {
+                cleanPayload[k] = typeof v === 'object' ? JSON.stringify(v) : String(v);
+            }
+        });
+        return metaGraphPost(endpointPath, cleanPayload);
+    };
+
+    let res = await postMutation(payloadObj);
+    const retried = new Set();
+    const maxAttempts = Math.max(6, complianceAttempts.length + 4);
+
+    for (let attempt = 0; attempt < maxAttempts && res?.error; attempt++) {
+        const errMsg = (res.error.message || '').toLowerCase();
+        const errSub = Number(res.error.error_subcode || 0);
+        const isMissingAdv = isMetaMissingAdvertiserError(res.error);
+        const isRegOrDsaErr = isMissingAdv
+            || errMsg.includes('regional_regulat')
+            || errMsg.includes('voluntary_verification')
+            || errMsg.includes('brazil_regulation')
+            || errMsg.includes('spain_finserv')
+            || errMsg.includes('australia_')
+            || errMsg.includes('dsa_beneficiary')
+            || errMsg.includes('dsa_payor');
+
+        if (allowStartTimeRetry && !retried.has('start_time') && errMsg.includes('start_time')) {
+            retried.add('start_time');
+            delete payloadObj.start_time;
+        } else if (!retried.has('dest') && (errMsg.includes('destination_type') || errSub === 1487877)) {
+            retried.add('dest');
+            delete payloadObj.destination_type;
+        } else if (!retried.has('attr') && errMsg.includes('attribution_spec')) {
+            retried.add('attr');
+            delete payloadObj.attribution_spec;
+        } else if (!retried.has('bid') && (errMsg.includes('bid_strategy') || errMsg.includes('bid_amount'))) {
+            retried.add('bid');
+            delete payloadObj.bid_amount;
+            payloadObj.bid_strategy = 'LOWEST_COST_WITHOUT_CAP';
+        } else if (!retried.has('targeting') && (errMsg.includes('targeting') || errMsg.includes('advantage_audience'))) {
+            retried.add('targeting');
+            payloadObj.targeting = {
+                geo_locations: { countries: [countryCode], location_types: ['frequently_in', 'home', 'recent'] }
+            };
+        } else if (isRegOrDsaErr) {
+            const onlyDsaRejected = !isMissingAdv && (errMsg.includes('dsa_beneficiary') || errMsg.includes('dsa_payor')) && !errMsg.includes('regional_regulat');
+            let nextIdx = -1;
+            for (let k = complianceIdx + 1; k < complianceAttempts.length; k++) {
+                if (onlyDsaRejected && complianceAttempts[k].dsaBeneficiary) continue;
+                nextIdx = k;
+                break;
+            }
+            if (nextIdx !== -1) {
+                complianceIdx = nextIdx;
+                const nextComp = complianceAttempts[complianceIdx];
+                logger(`🏢 Ajustando Advertiser/Compliance em ${finalName} (${errSub || 'regulação'}) ➔ '${nextComp.label}'...`, 'warn');
+                applyComplianceAttemptToAdSetPayload(payloadObj, nextComp);
+            } else if (!retried.has('reg_strip') && !isMissingAdv) {
+                retried.add('reg_strip');
+                delete payloadObj.regional_regulated_categories;
+                delete payloadObj.regional_regulation_identities;
+                delete payloadObj.dsa_beneficiary;
+                delete payloadObj.dsa_payor;
+            } else {
+                break;
+            }
+        } else {
+            break;
+        }
+        res = await postMutation(payloadObj);
+    }
+
+    if (res && !res.error && complianceIdx >= 0 && complianceAttempts[complianceIdx]) {
+        const winningComp = complianceAttempts[complianceIdx];
+        if (workingComplianceByCountry) workingComplianceByCountry[countryCode] = winningComp;
+        saveStoredRegionalComplianceConfig(accountId, countryCode, winningComp);
+        if (complianceIdx > 0 || countryCode === 'AU') {
+            logger(`🏢 Advertiser aplicado em ${finalName}: '${winningComp.label}'`, 'info');
+        }
+    }
+
+    return res;
+}
+
 function buildMetaAdvertiserHelpHint(countryName = 'Austrália', countryCode = 'AU', regCtx = null) {
     const foundCount = regCtx?.candidates?.length || 0;
     return (
@@ -3616,13 +3740,16 @@ function isMetaPagePermissionError(err) {
     const txt = (typeof err === 'string')
         ? err
         : `${err.error_user_title || ''} ${err.error_user_msg || ''} ${err.message || ''}`;
-    return sub === 1885499 || sub === 3858749 || /No Advertiser Permission On Page|Missing Page permission|advertiser permission on the page/i.test(txt);
+    return sub === 1885499
+        || sub === 3858749
+        || sub === 3858756
+        || /No Advertiser Permission On Page|Missing Page permission|advertiser permission on the page|permission to promote post|actor can.?t access the post|assigned to your Business Manager/i.test(txt);
 }
 
 function buildMetaPagePermissionHint(pageId = '') {
     const pidLabel = pageId ? `Página ID ${pageId}` : 'Página do Facebook usada no anúncio';
     return (
-        `📌 COMO LIBERAR A PÁGINA NO BUSINESS MANAGER (subcode 1885499 / 3858749):\n` +
+        `📌 COMO LIBERAR A PÁGINA NO BUSINESS MANAGER (subcode 1885499 / 3858749 / 3858756):\n` +
         `O Token / Usuário do Sistema não possui permissão de Anunciante na ${pidLabel}.\n` +
         `1. Abra https://business.facebook.com/settings/system-users\n` +
         `2. Clique no Usuário do Sistema do token -> "Atribuir Ativos" > "Páginas".\n` +
@@ -6792,6 +6919,8 @@ async function startBatchDuplication() {
     let abortedReason = '';
     let abortedPagePerm = false;
     let abortedAdvCountry = null;
+    let cachedBaseAdSetCloneSpec = null;
+    let preferDirectCreateAdSet = false;
     const startTime = Date.now();
 
     for (let i = 0; i < countriesToDuplicate.length; i++) {
@@ -6816,46 +6945,13 @@ async function startBatchDuplication() {
         logMetaTerminal(`[${currentIdx}/${total}] Duplicando conjunto para '${country.adSetName}' (${country.code})...`, 'info');
 
         try {
-            // PASSO 1: Clona a estrutura do conjunto base sempre em PAUSED primeiro e FORÇA explicitamente a campanha de destino
-            const copyParams = {
-                status_option: 'PAUSED',
-                campaign_id: campaignId
-            };
-            let copyAppliedStartTime = false;
-            if (isScheduled && scheduledMetaStartTime) {
-                copyParams.start_time = scheduledMetaStartTime;
-                if (metaState.selectedAdSet?.end_time) {
-                    copyParams.end_time = '0';
-                }
-                copyAppliedStartTime = true;
-            }
-
-            let copyData = await metaGraphPost(`/${META_GRAPH_VERSION}/${adsetId}/copies`, copyParams);
-            if (copyData.error && copyAppliedStartTime && /start_time|end_time|schedule/i.test(copyData.error.message || '')) {
-                copyAppliedStartTime = false;
-                copyData = await metaGraphPost(`/${META_GRAPH_VERSION}/${adsetId}/copies`, {
-                    status_option: 'PAUSED',
-                    campaign_id: campaignId
-                });
-            }
-
-            if (copyData.error) {
-                const cErr = new Error(formatMetaApiError(copyData.error));
-                cErr.isCircuitBreaker = Boolean(copyData.error.is_circuit_breaker);
-                cErr.rawMetaError = copyData.error;
-                throw cErr;
-            }
-
-            copiedAdSetId = copyData.copied_adset_id;
-
-            // PASSO 2: Formata o novo nome
+            // PASSO 1 / 2 / 3: Formata nome, segmentação e matriz de Advertiser/Compliance para o país destino
             if (nameFormat === 'country_lang') {
                 finalName = `${country.adSetName} (${country.langName})`;
             } else if (nameFormat === 'block_country') {
                 finalName = `${block.id.replace('BLOCO-', 'B')} - ${country.adSetName}`;
             }
 
-            // PASSO 3: Configura segmentação preservando idade/targeting_automation do conjunto base (sem locales herdados)
             const baseT = metaState.selectedAdSet?.targeting ? JSON.parse(JSON.stringify(metaState.selectedAdSet.targeting)) : {};
             delete baseT.locales;
             if (country.code !== 'BR') delete baseT.brand_safety_content_filter_levels;
@@ -6867,17 +6963,6 @@ async function startBatchDuplication() {
                 }
             };
 
-            // PASSO 4: Atualiza o conjunto clonado via POST /{copied_id} com suporte automático a Advertiser (AU/UE/BR/3858634)
-            const updatePayload = {
-                name: finalName,
-                daily_budget: budgetInCents.toString(),
-                status: effectiveStatus,
-                targeting
-            };
-            if (isScheduled && scheduledMetaStartTime) {
-                updatePayload.start_time = scheduledMetaStartTime;
-            }
-
             const complianceAttempts = buildRegionalComplianceAttempts({
                 countryCode: country.code,
                 baseAdset: adsetObj,
@@ -6888,86 +6973,118 @@ async function startBatchDuplication() {
                 manualDsaName,
                 workingComplianceByCountry
             });
-            let complianceIdx = -1;
-            if (complianceAttempts.shouldProactive && complianceAttempts.length > 0) {
-                complianceIdx = 0;
-                applyComplianceAttemptToAdSetPayload(updatePayload, complianceAttempts[0]);
-            }
 
-            const postAdSetUpdate = async (payloadObj) => {
-                const cleanPayload = {};
-                Object.entries(payloadObj || {}).forEach(([k, v]) => {
-                    if (v !== undefined && v !== null) {
-                        cleanPayload[k] = typeof v === 'object' ? JSON.stringify(v) : String(v);
+            let needDirectCreate = preferDirectCreateAdSet;
+            let copyAppliedStartTime = false;
+
+            if (!needDirectCreate) {
+                const copyParams = {
+                    status_option: 'PAUSED',
+                    campaign_id: campaignId
+                };
+                if (isScheduled && scheduledMetaStartTime) {
+                    copyParams.start_time = scheduledMetaStartTime;
+                    if (metaState.selectedAdSet?.end_time) {
+                        copyParams.end_time = '0';
                     }
-                });
-                return metaGraphPost(`/${META_GRAPH_VERSION}/${copiedAdSetId}`, cleanPayload);
-            };
+                    copyAppliedStartTime = true;
+                }
 
-            let updateData = await postAdSetUpdate(updatePayload);
-            const retried = new Set();
-            const maxUpdateAttempts = Math.max(6, complianceAttempts.length + 3);
-            for (let attempt = 0; attempt < maxUpdateAttempts && updateData.error; attempt++) {
-                const errMsg = (updateData.error.message || '').toLowerCase();
-                const errSub = Number(updateData.error.error_subcode || 0);
-                const isMissingAdv = isMetaMissingAdvertiserError(updateData.error);
-                const isRegOrDsaErr = isMissingAdv
-                    || errMsg.includes('regional_regulat')
-                    || errMsg.includes('voluntary_verification')
-                    || errMsg.includes('brazil_regulation')
-                    || errMsg.includes('spain_finserv')
-                    || errMsg.includes('australia_')
-                    || errMsg.includes('dsa_beneficiary')
-                    || errMsg.includes('dsa_payor');
+                let copyData = await metaGraphPost(`/${META_GRAPH_VERSION}/${adsetId}/copies`, copyParams);
+                if (copyData.error && copyAppliedStartTime && /start_time|end_time|schedule/i.test(copyData.error.message || '')) {
+                    copyAppliedStartTime = false;
+                    copyData = await metaGraphPost(`/${META_GRAPH_VERSION}/${adsetId}/copies`, {
+                        status_option: 'PAUSED',
+                        campaign_id: campaignId
+                    });
+                }
 
-                if (!retried.has('start_time') && copyAppliedStartTime && errMsg.includes('start_time')) {
-                    retried.add('start_time');
-                    delete updatePayload.start_time;
-                } else if (!retried.has('targeting') && (errMsg.includes('targeting') || errMsg.includes('advantage_audience'))) {
-                    retried.add('targeting');
-                    updatePayload.targeting = {
-                        geo_locations: { countries: [country.code], location_types: ['frequently_in', 'home', 'recent'] }
-                    };
-                } else if (isRegOrDsaErr) {
-                    const onlyDsaRejected = !isMissingAdv && (errMsg.includes('dsa_beneficiary') || errMsg.includes('dsa_payor')) && !errMsg.includes('regional_regulat');
-                    let nextIdx = -1;
-                    for (let k = complianceIdx + 1; k < complianceAttempts.length; k++) {
-                        if (onlyDsaRejected && complianceAttempts[k].dsaBeneficiary) continue;
-                        nextIdx = k;
-                        break;
-                    }
-                    if (nextIdx !== -1) {
-                        complianceIdx = nextIdx;
-                        const nextComp = complianceAttempts[complianceIdx];
-                        logMetaTerminal(`🏢 Ajustando Advertiser/Compliance em ${finalName} (${errSub || 'regulação'}) ➔ '${nextComp.label}'...`, 'warn');
-                        applyComplianceAttemptToAdSetPayload(updatePayload, nextComp);
-                    } else if (!retried.has('reg_strip') && !isMissingAdv) {
-                        retried.add('reg_strip');
-                        delete updatePayload.regional_regulated_categories;
-                        delete updatePayload.regional_regulation_identities;
-                        delete updatePayload.dsa_beneficiary;
-                        delete updatePayload.dsa_payor;
+                if (copyData.error) {
+                    if (isMetaMissingAdvertiserError(copyData.error)) {
+                        needDirectCreate = true;
+                        preferDirectCreateAdSet = true;
+                        logMetaTerminal(
+                            `🏢 Cópia /copies exigiu Advertiser no conjunto base (${copyData.error.error_subcode || '3858634'}). Criando conjunto direto em '${finalName}' (${country.code})...`,
+                            'warn'
+                        );
                     } else {
-                        break;
+                        const cErr = new Error(formatMetaApiError(copyData.error));
+                        cErr.isCircuitBreaker = Boolean(copyData.error.is_circuit_breaker);
+                        cErr.rawMetaError = copyData.error;
+                        throw cErr;
                     }
                 } else {
-                    break;
+                    copiedAdSetId = copyData.copied_adset_id;
                 }
-                updateData = await postAdSetUpdate(updatePayload);
             }
 
-            if (updateData.error) {
-                const uErr = new Error(formatMetaApiError(updateData.error));
-                uErr.rawMetaError = updateData.error;
-                throw uErr;
-            }
+            // PASSO 4: Atualiza cópia OU cria conjunto direto via POST /{accountId}/adsets quando /copies bloqueou em 3858634
+            if (needDirectCreate) {
+                if (!cachedBaseAdSetCloneSpec) {
+                    cachedBaseAdSetCloneSpec = (await fetchFullBaseAdSetSpec(adsetId)) || adsetObj;
+                }
+                const specSrc = cachedBaseAdSetCloneSpec || {};
+                const createPayload = {
+                    name: finalName,
+                    campaign_id: campaignId,
+                    daily_budget: budgetInCents.toString(),
+                    status: effectiveStatus,
+                    billing_event: specSrc.billing_event || 'IMPRESSIONS',
+                    optimization_goal: specSrc.optimization_goal || 'OFFSITE_CONVERSIONS',
+                    bid_strategy: specSrc.bid_strategy || 'LOWEST_COST_WITHOUT_CAP',
+                    targeting
+                };
+                if (specSrc.bid_amount) createPayload.bid_amount = specSrc.bid_amount;
+                if (specSrc.destination_type && specSrc.destination_type !== 'UNDEFINED') createPayload.destination_type = specSrc.destination_type;
+                if (specSrc.promoted_object) createPayload.promoted_object = specSrc.promoted_object;
+                if (specSrc.attribution_spec) createPayload.attribution_spec = specSrc.attribution_spec;
+                if (isScheduled && scheduledMetaStartTime) createPayload.start_time = scheduledMetaStartTime;
 
-            if (complianceIdx >= 0 && complianceAttempts[complianceIdx]) {
-                const winningComp = complianceAttempts[complianceIdx];
-                workingComplianceByCountry[country.code] = winningComp;
-                saveStoredRegionalComplianceConfig(accountId, country.code, winningComp);
-                if (complianceIdx > 0 || country.code === 'AU') {
-                    logMetaTerminal(`🏢 Advertiser aplicado em ${finalName}: '${winningComp.label}'`, 'info');
+                const createData = await sendAdSetMutationWithRetries({
+                    endpointPath: `/${META_GRAPH_VERSION}/${accountId}/adsets`,
+                    payloadObj: createPayload,
+                    complianceAttempts,
+                    countryCode: country.code,
+                    finalName,
+                    accountId,
+                    allowStartTimeRetry: Boolean(isScheduled && scheduledMetaStartTime),
+                    workingComplianceByCountry,
+                    logFn: logMetaTerminal
+                });
+                if (createData.error || !createData.id) {
+                    const cErr = new Error(formatMetaApiError(createData?.error || createData));
+                    cErr.isCircuitBreaker = Boolean(createData?.error?.is_circuit_breaker);
+                    cErr.rawMetaError = createData?.error || createData;
+                    throw cErr;
+                }
+                copiedAdSetId = createData.id;
+            } else {
+                const updatePayload = {
+                    name: finalName,
+                    daily_budget: budgetInCents.toString(),
+                    status: effectiveStatus,
+                    targeting
+                };
+                if (isScheduled && scheduledMetaStartTime) {
+                    updatePayload.start_time = scheduledMetaStartTime;
+                }
+
+                const updateData = await sendAdSetMutationWithRetries({
+                    endpointPath: `/${META_GRAPH_VERSION}/${copiedAdSetId}`,
+                    payloadObj: updatePayload,
+                    complianceAttempts,
+                    countryCode: country.code,
+                    finalName,
+                    accountId,
+                    allowStartTimeRetry: copyAppliedStartTime,
+                    workingComplianceByCountry,
+                    logFn: logMetaTerminal
+                });
+
+                if (updateData.error) {
+                    const uErr = new Error(formatMetaApiError(updateData.error));
+                    uErr.rawMetaError = updateData.error;
+                    throw uErr;
                 }
             }
 
