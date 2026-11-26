@@ -2855,11 +2855,21 @@ async function loadMetaAccounts(forceReload = false) {
     if (countLabel) countLabel.innerText = '(Buscando contas...)';
 
     try {
-        const data = await metaGraphGet(`/${META_GRAPH_VERSION}/me/adaccounts?fields=id,name,account_id,account_status,currency,amount_spent,business{id,name}&limit=150`);
+        let allAccounts = [];
+        let nextUrl = `/${META_GRAPH_VERSION}/me/adaccounts?fields=id,name,account_id,account_status,currency,amount_spent,business{id,name}&limit=150`;
+        for (let page = 0; page < 5 && nextUrl; page++) {
+            const data = await metaGraphGet(nextUrl);
+            if (Array.isArray(data.data) && data.data.length > 0) {
+                allAccounts = allAccounts.concat(data.data);
+            }
+            nextUrl = data.paging?.next || null;
+        }
 
-        if (data.data && Array.isArray(data.data)) {
-            // Ordena ativas primeiro
-            const sorted = data.data.sort((a, b) => {
+        if (allAccounts.length > 0) {
+            // Remove duplicadas e ordena ativas primeiro
+            const uniqMap = new Map();
+            allAccounts.forEach(a => { if (a?.id) uniqMap.set(a.id, a); });
+            const sorted = Array.from(uniqMap.values()).sort((a, b) => {
                 if (a.account_status === 1 && b.account_status !== 1) return -1;
                 if (a.account_status !== 1 && b.account_status === 1) return 1;
                 return (a.name || '').localeCompare(b.name || '');
@@ -2869,6 +2879,9 @@ async function loadMetaAccounts(forceReload = false) {
             populateAccountsSelect(sorted);
             if (typeof window.onCampaignBuilderAccountsReady === 'function') {
                 window.onCampaignBuilderAccountsReady();
+            }
+            if (typeof window.renderDupQueueList === 'function') {
+                window.renderDupQueueList();
             }
 
             if (countLabel) countLabel.innerText = `(${sorted.length} contas encontradas)`;

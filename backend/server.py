@@ -1,5 +1,6 @@
 import os
 import re
+import io
 import hmac
 import json
 import time
@@ -8,12 +9,14 @@ import base64
 import hashlib
 import secrets
 import shutil
+import zipfile
 import tempfile
 import threading
 import mimetypes
 import urllib.request
 import urllib.parse
 import urllib.error
+import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, unquote, parse_qs
@@ -2289,6 +2292,111 @@ def scan_onedrive_folders(base_path=DEFAULT_WORK_DIR, force_reload=False):
     return NICHES_CACHE
 
 
+def _is_green_rgb_hex(hex_str):
+    s = str(hex_str or "").strip().lstrip("#")
+    if len(s) != 6:
+        return False
+    try:
+        r, g, b = int(s[0:2], 16), int(s[2:4], 16), int(s[4:6], 16)
+        return g >= 65 and g >= r + 18 and g >= b + 12
+    except Exception:
+        return False
+
+
+def _is_orange_rgb_hex(hex_str):
+    s = str(hex_str or "").strip().lstrip("#")
+    if len(s) != 6:
+        return False
+    try:
+        r, g, b = int(s[0:2], 16), int(s[2:4], 16), int(s[4:6], 16)
+        return r >= 180 and 65 <= g <= 200 and b <= 90 and r > g + 30
+    except Exception:
+        return False
+
+
+def _parse_docx_queue_bytes(raw_bytes):
+    if not raw_bytes:
+        raise ValueError("Arquivo .docx vazio.")
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(raw_bytes), "r")
+    except zipfile.BadZipFile:
+        raise ValueError("Arquivo inválido: envie um documento .docx válido do Word ou Google Docs.")
+
+    with zf:
+        if "word/document.xml" not in zf.namelist():
+            raise ValueError("Documento .docx sem conteúdo principal (word/document.xml).")
+        xml_bytes = zf.read("word/document.xml")
+
+    root = ET.fromstring(xml_bytes)
+    w_ns = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+    paragraphs = []
+
+    for p in root.findall(f".//{w_ns}p"):
+        text_parts = []
+        colors = []
+        has_green = False
+        has_orange = False
+        has_strike = False
+
+        ppr = p.find(f"{w_ns}pPr")
+        p_rpr = ppr.find(f"{w_ns}rPr") if ppr is not None else None
+        p_color = ""
+        if p_rpr is not None:
+            ce = p_rpr.find(f"{w_ns}color")
+            if ce is not None:
+                p_color = str(ce.attrib.get(f"{w_ns}val") or "").strip()
+
+        for r in p.findall(f".//{w_ns}r"):
+            r_txt = "".join(t.text or "" for t in r.findall(f".//{w_ns}t"))
+            if not r_txt:
+                continue
+            text_parts.append(r_txt)
+            if not r_txt.strip():
+                continue
+
+            rpr = r.find(f"{w_ns}rPr")
+            col = p_color
+            hl = ""
+            shd = ""
+            if rpr is not None:
+                ce = rpr.find(f"{w_ns}color")
+                if ce is not None:
+                    col = str(ce.attrib.get(f"{w_ns}val") or "").strip() or col
+                he = rpr.find(f"{w_ns}highlight")
+                if he is not None:
+                    hl = str(he.attrib.get(f"{w_ns}val") or "").strip().lower()
+                se = rpr.find(f"{w_ns}shd")
+                if se is not None:
+                    shd = str(se.attrib.get(f"{w_ns}fill") or "").strip()
+                if rpr.find(f"{w_ns}strike") is not None:
+                    has_strike = True
+
+            if col and col.lower() != "auto":
+                colors.append(col.lower())
+                if _is_green_rgb_hex(col):
+                    has_green = True
+                if _is_orange_rgb_hex(col):
+                    has_orange = True
+            if hl in ("green", "darkgreen", "brightgreen") or _is_green_rgb_hex(shd):
+                has_green = True
+
+        full_text = "".join(text_parts).strip()
+        if full_text:
+            paragraphs.append({
+                "text": full_text,
+                "is_green": has_green or has_strike,
+                "is_orange": has_orange,
+                "colors": list(dict.fromkeys(colors)),
+            })
+
+    return {
+        "success": True,
+        "total_paragraphs": len(paragraphs),
+        "green_paragraphs": sum(1 for p in paragraphs if p["is_green"]),
+        "paragraphs": paragraphs,
+    }
+
+
 # ============================================================
 # HTTP HANDLER DA API & DASHBOARD
 # ============================================================
@@ -2908,7 +3016,7 @@ class APIHandler(BaseHTTPRequestHandler):
         elif path == "/" or path == "/index.html":
             self._serve_file(os.path.join(DASHBOARD_DIR, "index.html"))
 
-        elif path in ["/styles.css", "/app.js", "/studio.js", "/campaign_builder.js", "/privacy.html", "/README.md"]:
+        elif path in ["/styles.css", "/app.js", "/studio.js", "/creative_gen.js", "/campaign_builder.js", "/duplicator_queue.js", "/privacy.html", "/README.md"]:
             self._serve_file(os.path.join(DASHBOARD_DIR, path.lstrip("/")))
 
         else:
@@ -3693,6 +3801,30 @@ class APIHandler(BaseHTTPRequestHandler):
                 self._send_json({"success": False, "quota_exceeded": True, "error": str(qe)}, 429)
             except Exception as e:
                 self._send_json({"success": False, "error": str(e)}, 400 if isinstance(e, ValueError) else 500)
+
+        elif path == "/api/duplicator/parse-docx":
+            if not self._authenticate_request():
+                return
+            try:
+                content_len = int(self.headers.get("Content-Length", "0") or 0)
+                if content_len <= 0 or content_len > 15 * 1024 * 1024:
+                    self._send_json({"success": False, "error": "Tamanho de arquivo .docx inválido (máx 15MB)."}, 400)
+                    return
+                raw_chunks = []
+                remaining = content_len
+                while remaining > 0:
+                    chunk = self.rfile.read(min(remaining, 1024 * 256))
+                    if not chunk:
+                        break
+                    raw_chunks.append(chunk)
+                    remaining -= len(chunk)
+                raw_bytes = b"".join(raw_chunks)
+                parsed = _parse_docx_queue_bytes(raw_bytes)
+                self._send_json(parsed)
+            except ValueError as ve:
+                self._send_json({"success": False, "error": str(ve)}, 400)
+            except Exception as e:
+                self._send_json({"success": False, "error": str(e)}, 500)
 
         else:
             self._send_json({"error": "Rota não encontrada"}, 404)

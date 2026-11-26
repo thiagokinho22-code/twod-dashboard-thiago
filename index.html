@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>TwoD Hub — Central de Automações</title>
-    <link rel="stylesheet" href="styles.css?v=3.6">
+    <link rel="stylesheet" href="styles.css?v=3.7">
 </head>
 <body>
 
@@ -1316,6 +1316,51 @@
                         <div id="duplicador-token-test-result" class="twod-hidden" style="margin-top: 12px; padding: 12px 16px; border-radius: 8px; font-size: 13px; line-height: 1.5;"></div>
                     </div>
 
+                    <!-- FILA DE TAREFAS (GOOGLE DOCS / .DOCX) -->
+                    <div class="panel-card dup-queue-card" id="dup-queue-card" style="margin-bottom: 24px;">
+                        <div class="panel-card-header" style="margin-bottom: 12px;">
+                            <div>
+                                <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                                    <h2>📋 Fila de Campanhas (Google Docs / .DOCX)</h2>
+                                    <div id="dup-queue-summary-pills" style="display:flex; gap:6px; flex-wrap:wrap;">
+                                        <span class="studio-mini-badge muted">Nenhuma lista carregada</span>
+                                    </div>
+                                </div>
+                                <p>Suba o arquivo <code>.docx</code> do Google Docs ou dê <strong>Ctrl+C → Ctrl+V</strong> direto na caixa abaixo. Itens em <strong>verde</strong> já entram marcados como feitos.</p>
+                            </div>
+                            <button type="button" id="btn-dup-queue-toggle" class="btn btn-outline btn-sm" onclick="toggleDupQueueCard()">Recolher</button>
+                        </div>
+
+                        <div id="dup-queue-body">
+                            <div class="dup-queue-input-bar">
+                                <textarea id="dup-queue-paste-box" class="twod-input dup-queue-paste-box" rows="3" placeholder="Cole aqui direto do Google Docs (preserva os verdes como concluídos!) ou escreva linhas tipo: 24572 1 - 5 países"></textarea>
+                                <div class="dup-queue-input-actions">
+                                    <input type="file" id="dup-queue-docx-input" accept=".docx" style="display:none;" onchange="handleDupQueueDocxUpload(this.files); this.value='';">
+                                    <button type="button" class="btn btn-primary btn-sm" onclick="document.getElementById('dup-queue-docx-input').click()">📄 Subir .DOCX</button>
+                                    <button type="button" class="btn btn-secondary btn-sm" onclick="loadDupQueueFromPasteBox()">⚡ Carregar Texto</button>
+                                    <button type="button" class="btn btn-outline btn-sm" onclick="clearDupQueue()">🗑️ Limpar Fila</button>
+                                </div>
+                            </div>
+
+                            <div id="dup-queue-status" class="twod-hidden"></div>
+
+                            <div id="dup-queue-loaded-wrap" class="dup-queue-loaded-wrap twod-hidden">
+                                <div class="dup-queue-filter-bar">
+                                    <label style="display:inline-flex; align-items:center; gap:6px; font-size:12px; cursor:pointer;">
+                                        <input type="checkbox" id="dup-queue-hide-done" checked onchange="toggleDupQueueHideDone(this.checked)">
+                                        <span>Ocultar já feitos (verdes)</span>
+                                    </label>
+                                    <select id="dup-queue-site-filter" class="twod-select" style="max-width:220px; padding:5px 10px; font-size:12px;" onchange="onDupQueueSiteFilterChanged(this.value)">
+                                        <option value="all">Todos os Sites</option>
+                                    </select>
+                                    <input type="search" id="dup-queue-search" class="twod-input" style="flex:1; min-width:170px; padding:5px 10px; font-size:12px;" placeholder="🔍 Buscar PostID, conta, UTM..." oninput="onDupQueueSearchInput(this.value)">
+                                </div>
+
+                                <div id="dup-queue-list" class="dup-queue-list"></div>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- ETAPA 1: SELEÇÃO DE CONTA, CAMPANHA E CONJUNTO BASE -->
                     <div class="panel-card" style="margin-bottom: 24px;">
                         <div class="panel-card-header">
@@ -1434,6 +1479,9 @@
                             </div>
                             <span class="badge-tag">Passo 2 de 3</span>
                         </div>
+
+                        <!-- TAREFA ATIVA DA FILA (PRÉ-PREPARADA) -->
+                        <div id="dup-queue-active-banner" class="dup-queue-active-banner twod-hidden" style="margin-bottom:16px;"></div>
 
                         <!-- BANNER DE AVISO DE IDIOMA E VÍDEOS -->
                         <div id="duplicator-lang-notice" class="duplicator-lang-notice twod-hidden" style="margin-bottom:16px;">
@@ -2022,7 +2070,8 @@
         ⬆ Topo
     </button>
 
-    <script src="app.js?v=9.16"></script>
+    <script src="app.js?v=9.17"></script>
+    <script src="duplicator_queue.js?v=1.0"></script>
     <script src="studio.js?v=1.11"></script>
     <script src="creative_gen.js?v=1.2"></script>
     <script src="campaign_builder.js?v=1.11"></script>
