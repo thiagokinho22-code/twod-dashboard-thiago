@@ -1788,27 +1788,123 @@ def save_campaign_creatives(data):
         return False
 
 
-def find_niche_candidate_packs(niche_slug, force_refresh=False):
-    """Busca pacotes de criativo do OneDrive para o nicho, separando Bloco A / Bloco B e ordenando da data mais nova para a mais antiga."""
+def _normalize_pack_text(txt):
     import unicodedata
+    nfd = unicodedata.normalize('NFD', txt or '')
+    clean = ''.join(c for c in nfd if unicodedata.category(c) != 'Mn')
+    return re.sub(r'[^a-zA-Z0-9]', '', clean).lower()
+
+
+def _split_pack_query_tokens(query_txt):
+    import unicodedata
+    nfd = unicodedata.normalize('NFD', query_txt or '')
+    clean = ''.join(c for c in nfd if unicodedata.category(c) != 'Mn')
+    raw_parts = re.split(r'[\s._/\-]+', clean.strip())
+    tokens = []
+    for p in raw_parts:
+        al = re.sub(r'[^a-zA-Z0-9]', '', p).lower()
+        if al and len(al) >= 2:
+            tokens.append(al)
+    return tokens
+
+
+def _matches_pack_query(folder_name, target_norm, query_tokens):
+    n_norm = _normalize_pack_text(folder_name)
+    if not n_norm:
+        return False
+    if target_norm and (target_norm in n_norm or (len(n_norm) >= 4 and n_norm in target_norm)):
+        return True
+    if query_tokens and all(tok in n_norm for tok in query_tokens):
+        return True
+    return False
+
+
+def _pack_date_sort_key(folder_name):
+    m = re.search(r'(\d{2})[./-](\d{2})[./-](\d{2,4})', folder_name or '')
+    if not m:
+        return (0, 0, 0, 0)
+    d, mo, y = int(m.group(1)), int(m.group(2)), m.group(3)
+    y_int = int(y) + 2000 if len(y) == 2 else int(y)
+    return (1, y_int, mo, d)
+
+
+def _refresh_videos_root_index(tok=None):
+    if not tok:
+        tok, _ = get_graph_access_token()
+    if not tok:
+        return False
+    _, _, videos_id = _find_work_folder_ids(tok)
+    if not videos_id:
+        return False
+    for ch in _graph_list_all_children(videos_id, tok):
+        if "folder" in ch:
+            cname = (ch.get("name") or "").strip()
+            if cname:
+                with GRAPH_LOCK:
+                    if cname not in GRAPH_SYNC_STATE["niches_map"]:
+                        GRAPH_SYNC_STATE["niches_map"][cname] = {
+                            "name": cname,
+                            "audios": [],
+                            "videos": {"feed": [], "reels": []},
+                            "status": "pending",
+                            "source": "graph",
+                        }
+    return True
+
+
+def list_onedrive_video_folders(query="", force_refresh=False):
+    """Lista todas as pastas de Vídeos no OneDrive ordenadas por data (mais novas primeiro), com filtro opcional por tokens."""
+    cfg = load_env_vars()
+    has_graph = bool(cfg.get("ONEDRIVE_REFRESH_TOKEN"))
+    target_norm = _normalize_pack_text(query)
+    query_tokens = _split_pack_query_tokens(query)
+
+    names_rows = []
+    if has_graph:
+        with GRAPH_LOCK:
+            is_empty = len(GRAPH_SYNC_STATE.get("niches_map", {})) == 0
+        if force_refresh or is_empty:
+            _refresh_videos_root_index()
+        with GRAPH_LOCK:
+            items = list(GRAPH_SYNC_STATE.get("niches_map", {}).values())
+        if (target_norm or query_tokens) and not force_refresh:
+            has_hit = any(_matches_pack_query(n.get("name", ""), target_norm, query_tokens) for n in items)
+            if not has_hit:
+                if _refresh_videos_root_index():
+                    with GRAPH_LOCK:
+                        items = list(GRAPH_SYNC_STATE.get("niches_map", {}).values())
+        for n in items:
+            cname = (n.get("name") or "").strip()
+            if not cname:
+                continue
+            if (target_norm or query_tokens) and not _matches_pack_query(cname, target_norm, query_tokens):
+                continue
+            v_cnt = len(n.get("videos", {}).get("feed", [])) + len(n.get("videos", {}).get("reels", []))
+            names_rows.append({"name": cname, "videos_count": v_cnt, "status": n.get("status", "pending")})
+    else:
+        for n in scan_onedrive_folders(DEFAULT_WORK_DIR, force_reload=force_refresh):
+            cname = (n.get("name") or "").strip()
+            if not cname:
+                continue
+            if (target_norm or query_tokens) and not _matches_pack_query(cname, target_norm, query_tokens):
+                continue
+            v_cnt = len(n.get("videos", {}).get("feed", [])) + len(n.get("videos", {}).get("reels", []))
+            names_rows.append({"name": cname, "videos_count": v_cnt, "status": n.get("status", "pending")})
+
+    names_rows.sort(key=lambda r: (_pack_date_sort_key(r["name"]), r["name"].lower()), reverse=True)
+    return names_rows
+
+
+def find_niche_candidate_packs(niche_slug, force_refresh=False):
+    """Busca pacotes de criativo do OneDrive para o nicho/busca manual, separando Bloco A / Bloco B e ordenando da data mais nova para a mais antiga."""
     if not niche_slug:
         return []
 
-    def _norm(txt):
-        nfd = unicodedata.normalize('NFD', txt or '')
-        clean = ''.join(c for c in nfd if unicodedata.category(c) != 'Mn')
-        return re.sub(r'[^a-zA-Z0-9]', '', clean).lower()
-
-    def _pack_date_key(folder_name):
-        m = re.search(r'(\d{2})[./-](\d{2})[./-](\d{2,4})', folder_name or '')
-        if not m:
-            return (0, 0, 0, 0)
-        d, mo, y = int(m.group(1)), int(m.group(2)), m.group(3)
-        y_int = int(y) + 2000 if len(y) == 2 else int(y)
-        return (1, y_int, mo, d)
-
-    target_norm = _norm(niche_slug)
-    if not target_norm:
+    _norm = _normalize_pack_text
+    _pack_date_key = _pack_date_sort_key
+    target_norm = _normalize_pack_text(niche_slug)
+    query_tokens = _split_pack_query_tokens(niche_slug)
+    if not target_norm and not query_tokens:
         return []
 
     cfg = load_env_vars()
@@ -1820,31 +1916,22 @@ def find_niche_candidate_packs(niche_slug, force_refresh=False):
             is_empty = len(GRAPH_SYNC_STATE.get("niches_map", {})) == 0
 
         if force_refresh or is_empty:
-            tok, _ = get_graph_access_token()
-            if tok:
-                _, _, videos_id = _find_work_folder_ids(tok)
-                if videos_id:
-                    for ch in _graph_list_all_children(videos_id, tok):
-                        if "folder" in ch:
-                            cname = (ch.get("name") or "").strip()
-                            if cname:
-                                with GRAPH_LOCK:
-                                    if cname not in GRAPH_SYNC_STATE["niches_map"]:
-                                        GRAPH_SYNC_STATE["niches_map"][cname] = {
-                                            "name": cname,
-                                            "audios": [],
-                                            "videos": {"feed": [], "reels": []},
-                                            "status": "pending",
-                                            "source": "graph",
-                                        }
+            _refresh_videos_root_index()
 
         candidate_names = []
         with GRAPH_LOCK:
             niches_map = GRAPH_SYNC_STATE.get("niches_map", {})
             for nname in niches_map.keys():
-                n_norm = _norm(nname)
-                if target_norm in n_norm or (len(n_norm) >= 4 and n_norm in target_norm):
+                if _matches_pack_query(nname, target_norm, query_tokens):
                     candidate_names.append(nname)
+
+        if not candidate_names and not force_refresh:
+            if _refresh_videos_root_index():
+                with GRAPH_LOCK:
+                    niches_map = GRAPH_SYNC_STATE.get("niches_map", {})
+                    for nname in niches_map.keys():
+                        if _matches_pack_query(nname, target_norm, query_tokens):
+                            candidate_names.append(nname)
 
         any_refreshed = False
         to_fetch = []
@@ -1880,8 +1967,7 @@ def find_niche_candidate_packs(niche_slug, force_refresh=False):
     else:
         local_niches = scan_onedrive_folders(DEFAULT_WORK_DIR, force_reload=force_refresh)
         for niche_obj in local_niches:
-            n_norm = _norm(niche_obj.get("name", ""))
-            if target_norm in n_norm or (len(n_norm) >= 4 and n_norm in target_norm):
+            if _matches_pack_query(niche_obj.get("name", ""), target_norm, query_tokens):
                 source_niches.append(niche_obj)
 
     lang_priority = {"PORTUGUES": 1, "ESPANHOL": 2, "INGLES": 3, "FRANCES": 4}
@@ -2537,6 +2623,14 @@ class APIHandler(BaseHTTPRequestHandler):
                 self._send_json({"success": False, "error": err}, 500)
                 return
             self._send_json({"success": True, "niche": niche_name, "videos": videos})
+
+        elif path == "/api/onedrive/folders":
+            if not self._authenticate_request():
+                return
+            q_str = (qs.get("q", [""])[0] or "").strip()
+            force_refresh = qs.get("refresh", ["false"])[0].lower() == "true"
+            folders = list_onedrive_video_folders(query=q_str, force_refresh=force_refresh)
+            self._send_json({"success": True, "count": len(folders), "folders": folders})
 
         elif path == "/api/onedrive/niche-packs":
             if not self._authenticate_request():

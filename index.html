@@ -1410,6 +1410,12 @@
                                     Vincule esta campanha a um pacote de criativos do OneDrive para identificar facilmente e duplicar para outros idiomas sem procurar.
                                 </div>
 
+                                <div id="onedrive-manual-search-bar" style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:10px;">
+                                    <input type="search" id="input-onedrive-pack-search" class="twod-input" placeholder="🔎 Procurar pasta manualmente no OneDrive (ex: RastrearCelular 21.08, 21.08...)" style="flex:1; min-width:220px; font-size:12.5px; padding:7px 11px;" onkeydown="if(event.key==='Enter'){event.preventDefault(); searchManualOneDrivePacks(false);}">
+                                    <button type="button" class="btn btn-primary btn-sm" id="btn-manual-search-packs" onclick="searchManualOneDrivePacks(false)" style="padding:6px 12px; font-size:12px; white-space:nowrap;">🔎 Procurar Pasta</button>
+                                    <button type="button" class="btn btn-outline btn-sm" id="btn-list-all-packs" onclick="listAllOneDriveCandidatePacks(false)" style="padding:6px 11px; font-size:11.5px; white-space:nowrap;" title="Listar todas as pastas da raiz Vídeos do OneDrive para escolher manualmente">📂 Listar Pastas</button>
+                                </div>
+
                                 <!-- SELETOR DE PACOTES CANDIDATOS DO ONEDRIVE COM PREVIEW -->
                                 <div id="onedrive-candidate-packs-container" class="candidate-packs-container twod-hidden" style="margin-top:12px;">
                                     <!-- Cards de cada pasta do nicho no OneDrive com thumbs -->
@@ -2011,7 +2017,7 @@
         ⬆ Topo
     </button>
 
-    <script src="app.js?v=9.12"></script>
+    <script src="app.js?v=9.13"></script>
     <script src="studio.js?v=1.11"></script>
     <script src="creative_gen.js?v=1.2"></script>
     <script src="campaign_builder.js?v=1.10"></script>

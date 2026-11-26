@@ -692,6 +692,17 @@ const PANEL_CHANGELOG = [
     {
         date: '26/11/2026',
         type: 'feat',
+        badge: '🔎 Busca Manual OneDrive',
+        title: 'Busca manual de pastas/criativos no OneDrive (ex: RastrearCelular 21.08)',
+        summary: 'Adicionada barra de busca manual e listagem rápida de todas as pastas de Vídeos no vínculo de criativos do Duplicador.',
+        highlights: [
+            'Permite digitar nome parcial ou data (ex: "RastrearCelular 21.08" ou "21.08") quando o nicho da campanha difere do nome da pasta.',
+            'Botão "📂 Listar Pastas" exibe todas as pastas do OneDrive ordenadas por data para clicar e carregar blocos/miniaturas na hora.'
+        ]
+    },
+    {
+        date: '26/11/2026',
+        type: 'feat',
         badge: '🔗 Link Direto Meta Ads',
         title: 'Botões diretos para abrir Anúncio, Conjunto e Campanha no Gerenciador em erros + Prévia',
         summary: 'Sempre que ocorrer um erro que exija ajuste manual (página, post, advertiser ou criativo), o terminal e o card de alerta exibem botões clicáveis direto para o item exato.',
@@ -3586,6 +3597,8 @@ async function onMetaCampaignSelected() {
     metaState.adsets = [];
     metaState.checkedCountries = {};
     duplicatorManualFilesByLang = {};
+    const packSearchInput = document.getElementById('input-onedrive-pack-search');
+    if (packSearchInput) packSearchInput.value = '';
 
     renderCampaignCreativeLinkBadge();
     updateDuplicatorLanguageNotice();
@@ -5590,8 +5603,142 @@ function renderPackCardThumbs(thumbsWrapEl, pack, selectedLang) {
     });
 }
 
+function matchesOneDrivePackQuery(folderName = '', queryStr = '') {
+    const cleanQ = String(queryStr || '').trim();
+    if (!cleanQ) return true;
+    const nNorm = normalizeText(folderName);
+    const qNorm = normalizeText(cleanQ);
+    if (qNorm && (nNorm.includes(qNorm) || (nNorm.length >= 4 && qNorm.includes(nNorm)))) return true;
+    const tokens = cleanQ.split(/[\s._/\-]+/).map(t => normalizeText(t)).filter(t => t.length >= 2);
+    return tokens.length > 0 && tokens.every(tok => nNorm.includes(tok));
+}
+
+function searchManualOneDrivePacks(forceRefresh = false) {
+    const inputEl = document.getElementById('input-onedrive-pack-search');
+    const q = (inputEl?.value || '').trim();
+    if (!q) {
+        return loadNicheCandidatePacks(true, forceRefresh, null);
+    }
+    return loadNicheCandidatePacks(true, forceRefresh, q);
+}
+
+async function listAllOneDriveCandidatePacks(forceRefresh = false) {
+    const container = document.getElementById('onedrive-candidate-packs-container');
+    if (!container) return;
+
+    const filterInput = document.getElementById('input-onedrive-pack-search');
+    const initialFilter = (filterInput?.value || '').trim();
+
+    container.classList.remove('twod-hidden');
+    container.innerHTML = `<div class="text-muted" style="font-size:12px; padding:8px;">📂 Listando todas as pastas disponíveis em Vídeos do OneDrive...</div>`;
+
+    let folders = [];
+    try {
+        const resp = await apiFetch(`/api/onedrive/folders${forceRefresh ? '?refresh=true' : ''}`);
+        const data = await resp.json();
+        if (data.success && Array.isArray(data.folders)) {
+            folders = data.folders;
+        }
+    } catch (e) {
+        console.warn('Falha ao consultar /api/onedrive/folders:', e);
+    }
+
+    // Fallback para /api/onedrive/niches ou pasta local conectada no navegador
+    if (folders.length === 0) {
+        try {
+            const resp2 = await apiFetch(`/api/onedrive/niches${forceRefresh ? '?reload=true' : ''}`);
+            const d2 = await resp2.json();
+            if (d2.success && Array.isArray(d2.niches)) {
+                folders = d2.niches.map(n => ({
+                    name: n.name,
+                    videos_count: ((n.videos?.feed || []).length + (n.videos?.reels || []).length),
+                    status: n.status || 'pending'
+                }));
+            }
+        } catch (_) {}
+    }
+
+    if (folders.length === 0 && Array.isArray(oneDriveData.niches)) {
+        folders = oneDriveData.niches.map(n => ({
+            name: n.name,
+            videos_count: ((n.videos?.feed || []).length + (n.videos?.reels || []).length),
+            status: n.status || 'pending'
+        }));
+    }
+
+    if (folders.length === 0) {
+        container.innerHTML = `
+            <div style="font-size:12px; color:#cbd5e1; padding:10px; background:rgba(255,255,255,0.03); border-radius:6px;">
+                ⚠️ Nenhuma pasta encontrada no OneDrive. Clique em <strong>🔄 Sincronizar OneDrive</strong> para atualizar.
+            </div>
+        `;
+        return;
+    }
+
+    const renderPickerList = (filterText) => {
+        const q = String(filterText || '').trim();
+        const filtered = q ? folders.filter(f => matchesOneDrivePackQuery(f.name, q)) : folders;
+
+        container.innerHTML = '';
+        const head = document.createElement('div');
+        head.style.cssText = 'display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:8px; font-size:12px; color:#cbd5e1;';
+        head.innerHTML = `<span>📂 <strong>${filtered.length}</strong> de ${folders.length} pasta(s) no OneDrive — clique na pasta para abrir os criativos e vincular:</span>`;
+
+        const btnsRight = document.createElement('div');
+        btnsRight.style.cssText = 'display:flex; gap:6px;';
+        const refBtn = document.createElement('button');
+        refBtn.type = 'button';
+        refBtn.className = 'btn btn-secondary btn-sm';
+        refBtn.style.cssText = 'padding:3px 9px; font-size:11px;';
+        refBtn.innerText = '🔄 Atualizar Lista';
+        refBtn.addEventListener('click', () => listAllOneDriveCandidatePacks(true));
+        btnsRight.appendChild(refBtn);
+        head.appendChild(btnsRight);
+        container.appendChild(head);
+
+        if (filtered.length === 0) {
+            const emptyMsg = document.createElement('div');
+            emptyMsg.style.cssText = 'font-size:12px; color:#fbbf24; padding:8px; background:rgba(245,158,11,0.08); border-radius:6px;';
+            emptyMsg.innerHTML = `Nenhuma pasta bate com "<strong>${escHtml(q)}</strong>". Limpe o filtro para ver todas (${folders.length}).`;
+            container.appendChild(emptyMsg);
+            return;
+        }
+
+        const listGrid = document.createElement('div');
+        listGrid.style.cssText = 'display:flex; flex-wrap:wrap; gap:6px; max-height:220px; overflow-y:auto; padding:6px; background:rgba(15,23,42,0.45); border-radius:8px; border:1px solid rgba(148,163,184,0.2);';
+
+        filtered.forEach(f => {
+            const pill = document.createElement('button');
+            pill.type = 'button';
+            pill.className = 'btn-chip';
+            pill.style.cssText = 'text-align:left; font-size:12px; padding:6px 10px; border-radius:7px; cursor:pointer;';
+            const vTag = f.videos_count > 0 ? ` (${f.videos_count} vídeos)` : '';
+            pill.innerText = `📁 ${f.name}${vTag}`;
+            pill.title = `Carregar blocos e miniaturas de ${f.name}`;
+            pill.addEventListener('click', () => {
+                const inp = document.getElementById('input-onedrive-pack-search');
+                if (inp) inp.value = f.name;
+                loadNicheCandidatePacks(true, false, f.name);
+            });
+            listGrid.appendChild(pill);
+        });
+
+        container.appendChild(listGrid);
+    };
+
+    renderPickerList(initialFilter);
+
+    if (filterInput && !filterInput.dataset.liveListBound) {
+        filterInput.dataset.liveListBound = 'true';
+        filterInput.addEventListener('input', () => {
+            if (container.querySelector('.candidate-pack-card')) return;
+            renderPickerList(filterInput.value);
+        });
+    }
+}
+
 // Busca e exibe os pacotes candidatos do nicho no OneDrive com thumbnails por idioma + Bloco A/B
-async function loadNicheCandidatePacks(forceOpen = true, forceRefresh = false) {
+async function loadNicheCandidatePacks(forceOpen = true, forceRefresh = false, customQuery = null) {
     const container = document.getElementById('onedrive-candidate-packs-container');
     if (!container) return;
 
@@ -5603,24 +5750,28 @@ async function loadNicheCandidatePacks(forceOpen = true, forceRefresh = false) {
 
     const campObj = (metaState.campaigns || []).find(c => c.id === campaignId);
     const campName = campObj ? campObj.name : '';
+    const manualInputVal = (document.getElementById('input-onedrive-pack-search')?.value || '').trim();
     const nicheSlug = extractNicheFromCampaign(campName);
+    const searchQuery = customQuery !== null
+        ? String(customQuery).trim()
+        : (forceOpen && manualInputVal ? manualInputVal : nicheSlug);
 
-    if (!nicheSlug) {
-        container.innerHTML = '<div class="text-muted" style="font-size:12px;">Não foi possível identificar o nicho no nome da campanha.</div>';
+    if (!searchQuery) {
+        container.innerHTML = '<div class="text-muted" style="font-size:12px;">Não foi possível identificar o nicho no nome da campanha. Digite o nome da pasta acima (ex: <code>RastrearCelular 21.08</code>) e clique em <strong>🔎 Procurar Pasta</strong>.</div>';
         container.classList.remove('twod-hidden');
         return;
     }
 
     container.classList.remove('twod-hidden');
-    container.innerHTML = `<div class="text-muted" style="font-size:12px; padding:8px;">${forceRefresh ? '🔄 Sincronizando pastas e novos idiomas direto do OneDrive...' : '⏳ Buscando pacotes para'} "<strong>${escHtml(nicheSlug)}</strong>"...</div>`;
+    container.innerHTML = `<div class="text-muted" style="font-size:12px; padding:8px;">${forceRefresh ? '🔄 Sincronizando pastas e novos idiomas direto do OneDrive...' : '⏳ Buscando pacotes para'} "<strong>${escHtml(searchQuery)}</strong>"...</div>`;
 
     let packs = [];
-    const normSlug = normalizeText(nicheSlug);
+    const normSlug = normalizeText(searchQuery);
     if (!forceRefresh && Array.isArray(loadedPacksByNicheSlug[normSlug]) && loadedPacksByNicheSlug[normSlug].length > 0) {
         packs = loadedPacksByNicheSlug[normSlug];
     } else {
         try {
-            const q = `niche=${encodeURIComponent(nicheSlug)}${forceRefresh ? '&refresh=true' : ''}`;
+            const q = `niche=${encodeURIComponent(searchQuery)}${forceRefresh ? '&refresh=true' : ''}`;
             const resp = await apiFetch(`/api/onedrive/niche-packs?${q}`);
             const data = await resp.json();
             if (data.success && Array.isArray(data.packs)) {
@@ -5638,10 +5789,7 @@ async function loadNicheCandidatePacks(forceOpen = true, forceRefresh = false) {
 
     // Fallback para oneDriveData.niches caso conectado via pasta local no navegador
     if (packs.length === 0 && Array.isArray(oneDriveData.niches)) {
-        const localMatches = oneDriveData.niches.filter(n => {
-            const nNorm = normalizeText(n.name);
-            return nNorm.includes(normSlug) || (nNorm.length >= 4 && normSlug.includes(nNorm));
-        });
+        const localMatches = oneDriveData.niches.filter(n => matchesOneDrivePackQuery(n.name, searchQuery));
         localMatches.forEach(lm => {
             const allV = [...(lm.videos?.feed || []), ...(lm.videos?.reels || [])];
             const blocks = {};
@@ -5682,9 +5830,10 @@ async function loadNicheCandidatePacks(forceOpen = true, forceRefresh = false) {
 
     if (packs.length === 0) {
         container.innerHTML = `
-            <div style="font-size:12px; color:#cbd5e1; padding:10px; background:rgba(255,255,255,0.03); border-radius:6px;">
-                🔍 Nenhuma pasta encontrada no OneDrive para o nicho "<strong>${escHtml(nicheSlug)}</strong>".<br>
-                <span class="text-muted" style="font-size:11px;">Verifique se a pasta com o nome do nicho e data (ex: <code>${escHtml(nicheSlug)} 04.11.26</code>) está na pasta Vídeos do OneDrive.</span>
+            <div style="font-size:12px; color:#cbd5e1; padding:10px; background:rgba(255,255,255,0.03); border-radius:6px; display:flex; flex-direction:column; gap:8px;">
+                <div>🔍 Nenhuma pasta encontrada no OneDrive para "<strong>${escHtml(searchQuery)}</strong>".</div>
+                <div class="text-muted" style="font-size:11px;">Dica: digite parte do nome ou a data no campo acima (ex: <code>RastrearCelular 21.08</code> ou <code>21.08</code>) e clique em <strong>🔎 Procurar Pasta</strong>, ou clique em <strong>📂 Listar Pastas</strong> para escolher da lista completa.</div>
+                <div><button type="button" class="btn btn-secondary btn-sm" onclick="listAllOneDriveCandidatePacks(true)" style="padding:4px 10px; font-size:11px;">📂 Listar Todas as Pastas do OneDrive</button></div>
             </div>
         `;
         return;
@@ -5697,15 +5846,26 @@ async function loadNicheCandidatePacks(forceOpen = true, forceRefresh = false) {
     const topBar = document.createElement('div');
     topBar.style.cssText = 'font-size:12px; margin-bottom:8px; color:#cbd5e1; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;';
     topBar.innerHTML = `
-        <span><strong>${packs.length} pacote(s) encontrado(s)</strong> para "${escHtml(nicheSlug)}" (Bloco A / B separados • clique nos idiomas para comparar as miniaturas):</span>
+        <span><strong>${packs.length} pacote(s) encontrado(s)</strong> para "${escHtml(searchQuery)}" (Bloco A / B separados • clique nos idiomas para comparar as miniaturas):</span>
     `;
+    const barBtns = document.createElement('div');
+    barBtns.style.cssText = 'display:flex; gap:6px; flex-wrap:wrap;';
+    const listAllBtn = document.createElement('button');
+    listAllBtn.type = 'button';
+    listAllBtn.className = 'btn btn-secondary btn-sm';
+    listAllBtn.style.cssText = 'padding:3px 10px; font-size:11px;';
+    listAllBtn.innerText = '📂 Ver Outras Pastas';
+    listAllBtn.addEventListener('click', () => listAllOneDriveCandidatePacks(false));
+    barBtns.appendChild(listAllBtn);
+
     const refreshBtn = document.createElement('button');
     refreshBtn.type = 'button';
     refreshBtn.className = 'btn btn-secondary btn-sm';
     refreshBtn.style.cssText = 'padding:3px 10px; font-size:11px;';
     refreshBtn.innerText = '🔄 Atualizar OneDrive';
-    refreshBtn.addEventListener('click', () => loadNicheCandidatePacks(true, true));
-    topBar.appendChild(refreshBtn);
+    refreshBtn.addEventListener('click', () => loadNicheCandidatePacks(true, true, searchQuery));
+    barBtns.appendChild(refreshBtn);
+    topBar.appendChild(barBtns);
     container.appendChild(topBar);
 
     packs.forEach(pack => {
@@ -6681,7 +6841,7 @@ async function startBatchDuplication() {
         }
     }
 
-    logMetaTerminal(`🚀 Iniciando processo de duplicação para ${countriesToDuplicate.length} países no bloco ${block.title}... [v9.12]`, 'info');
+    logMetaTerminal(`🚀 Iniciando processo de duplicação para ${countriesToDuplicate.length} países no bloco ${block.title}... [v9.13]`, 'info');
     logMetaTerminal(`🎯 Campanha de Destino: '${campObj.name}' (ID: ${campObj.id})`, 'info');
     logMetaTerminal(`📦 Conjunto base: '${adsetObj.name}' (${baseLang.toUpperCase()} | ID: ${adsetObj.id})`, 'info');
     if (activeWorkingPageId) {
@@ -7948,6 +8108,8 @@ window.loadCampaignCreativeLinks = loadCampaignCreativeLinks;
 window.linkCampaignToPack = linkCampaignToPack;
 window.unlinkCampaignFromPack = unlinkCampaignFromPack;
 window.loadNicheCandidatePacks = loadNicheCandidatePacks;
+window.searchManualOneDrivePacks = searchManualOneDrivePacks;
+window.listAllOneDriveCandidatePacks = listAllOneDriveCandidatePacks;
 window.updateDuplicatorLanguageNotice = updateDuplicatorLanguageNotice;
 window.openThumbZoomModal = openThumbZoomModal;
 window.closeThumbZoomModal = closeThumbZoomModal;
