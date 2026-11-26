@@ -7577,12 +7577,68 @@ window.saveGeminiSettingsFromUI = saveGeminiSettingsFromUI;
 window.refreshGeminiServerBanner = refreshGeminiServerBanner;
 window.saveCloudflareSettingsFromUI = saveCloudflareSettingsFromUI;
 window.refreshCloudflareServerBanner = refreshCloudflareServerBanner;
+window.scrollDashboardToTop = scrollDashboardToTop;
+window.updateScrollToTopVisibility = updateScrollToTopVisibility;
 window.metaState = metaState;
+
+function getDashboardScrollTop() {
+    const mainEl = document.querySelector('.main-content');
+    return Math.max(
+        window.scrollY || window.pageYOffset || 0,
+        document.documentElement?.scrollTop || 0,
+        document.body?.scrollTop || 0,
+        mainEl?.scrollTop || 0
+    );
+}
+
+function updateScrollToTopVisibility() {
+    const btn = document.getElementById('btn-scroll-to-top');
+    if (!btn) return;
+    const appHidden = document.getElementById('app-container')?.classList.contains('twod-hidden');
+    if (appHidden) {
+        btn.classList.remove('visible');
+        return;
+    }
+    btn.classList.toggle('visible', getDashboardScrollTop() > 200);
+}
+
+function scrollDashboardToTop() {
+    try {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch (_) {
+        window.scrollTo(0, 0);
+    }
+    if (document.documentElement) {
+        try {
+            document.documentElement.scrollTo({ top: 0, behavior: 'smooth' });
+        } catch (_) {
+            document.documentElement.scrollTop = 0;
+        }
+    }
+    if (document.body) document.body.scrollTop = 0;
+    const mainEl = document.querySelector('.main-content');
+    if (mainEl && mainEl.scrollTop > 0) {
+        try {
+            mainEl.scrollTo({ top: 0, behavior: 'smooth' });
+        } catch (_) {
+            mainEl.scrollTop = 0;
+        }
+    }
+}
+
+function initScrollToTopButton() {
+    if (window.__twodScrollTopBound) return;
+    window.__twodScrollTopBound = true;
+    window.addEventListener('scroll', updateScrollToTopVisibility, { passive: true });
+    document.querySelector('.main-content')?.addEventListener('scroll', updateScrollToTopVisibility, { passive: true });
+    updateScrollToTopVisibility();
+}
 
 // ========================================================
 // INICIALIZAÇÃO INFALÍVEL (EXECUTA IMEDIATO SE DOM JÁ CARREGADO)
 // ========================================================
 function startApp() {
+    initScrollToTopButton();
     checkSession();
 }
 
