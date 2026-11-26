@@ -1178,10 +1178,17 @@ async function metaFormPost(endpoint, paramsObj, token) {
 }
 
 async function uploadOneDriveVideoToMeta(accountId, video, token, uploadCache) {
-    const cacheKey = video.id || video.url || video.name;
-    if (uploadCache[cacheKey]) return uploadCache[cacheKey];
+    const rawKey = video.id || video.url || video.name;
+    const accKey = accountId ? `${accountId}:${rawKey}` : rawKey;
+    const existing = (uploadCache && (uploadCache[accKey] || uploadCache[rawKey]))
+        || (typeof window.getPersistentMetaVideoCacheEntry === 'function' ? window.getPersistentMetaVideoCacheEntry(accKey) : null);
+    if (existing?.video_id) {
+        if (uploadCache) uploadCache[accKey] = existing;
+        return existing;
+    }
 
     let videoId = null;
+    const videoTitle = video.uploadTitle || video.name;
 
     // 1. Tenta resolver link direto da CDN Microsoft (OneDrive Nuvem) e enviar via file_url
     if (video.id) {
@@ -1191,11 +1198,19 @@ async function uploadOneDriveVideoToMeta(accountId, video, token, uploadCache) {
             if (dlData.success && dlData.download_url) {
                 const upRes = await metaFormPost(`/${accountId}/advideos`, {
                     file_url: dlData.download_url,
-                    title: video.name
+                    title: videoTitle
                 }, token);
-                if (upRes.id) videoId = upRes.id;
+                if (upRes.id) {
+                    videoId = upRes.id;
+                } else if (upRes.error && (upRes.error.is_circuit_breaker || [4, 17, 32, 613].includes(Number(upRes.error.code || 0)))) {
+                    const rlErr = new Error(upRes.error.message || 'Rate limit da Meta no upload');
+                    rlErr.rawMetaError = upRes.error;
+                    rlErr.isCircuitBreaker = true;
+                    throw rlErr;
+                }
             }
         } catch (e) {
+            if (e.isCircuitBreaker || e.rawMetaError?.is_circuit_breaker) throw e;
             console.warn('Fallback upload direto via backend:', e);
         }
     }
@@ -1208,7 +1223,7 @@ async function uploadOneDriveVideoToMeta(accountId, video, token, uploadCache) {
             body: JSON.stringify({
                 account_id: accountId,
                 access_token: token || '',
-                title: video.name,
+                title: videoTitle,
                 local_url: !video.id && video.url ? video.url : '',
                 graph_item_id: video.id || '',
                 graph_version: META_GRAPH_VERSION
@@ -1218,22 +1233,44 @@ async function uploadOneDriveVideoToMeta(accountId, video, token, uploadCache) {
         if (upJson.success && upJson.result?.id) {
             videoId = upJson.result.id;
         } else {
-            throw new Error(`Falha ao subir vídeo ${video.name}: ${upJson.error || JSON.stringify(upJson)}`);
+            const errObj = upJson.error?.error || upJson.error;
+            const errTxt = typeof errObj === 'string' ? errObj : (errObj?.message || JSON.stringify(upJson));
+            const upErr = new Error(`Falha ao subir vídeo ${video.name}: ${errTxt}`);
+            upErr.rawMetaError = typeof errObj === 'object' ? errObj : null;
+            upErr.isCircuitBreaker = Boolean(errObj?.is_circuit_breaker);
+            throw upErr;
         }
     }
 
-    // Aguarda processamento + thumbnail pronta na Meta (até ~60s)
+    // Salva imediatamente mesmo antes de concluir thumbnails (video_id já está na Meta!)
+    const partialResult = { video_id: videoId, thumbnail_url: '' };
+    if (uploadCache) uploadCache[accKey] = partialResult;
+    if (typeof window.savePersistentMetaVideoCacheEntry === 'function') {
+        window.savePersistentMetaVideoCacheEntry(accKey, partialResult);
+    }
+
+    // Aguarda processamento + thumbnail pronta na Meta (espaçamento maior para economizar chamadas GET)
     let thumbnailUrl = '';
-    for (let attempt = 0; attempt < 20; attempt++) {
-        await new Promise(r => setTimeout(r, 3000));
-        const stData = await metaGraphGet(`/${META_GRAPH_VERSION}/${videoId}?fields=status,picture,thumbnails`, token || null);
-        const thumbUri = stData.thumbnails?.data?.[0]?.uri || stData.picture || '';
-        if (thumbUri) thumbnailUrl = thumbUri;
-        if (stData.status?.video_status === 'ready') break;
+    for (let attempt = 0; attempt < 12; attempt++) {
+        await new Promise(r => setTimeout(r, attempt === 0 ? 5000 : 7000));
+        try {
+            const stData = await metaGraphGet(`/${META_GRAPH_VERSION}/${videoId}?fields=status,picture,thumbnails`, token || null);
+            if (stData?.error && (stData.error.is_circuit_breaker || [4, 17, 32, 613].includes(Number(stData.error.code || 0)))) {
+                break;
+            }
+            const thumbUri = stData.thumbnails?.data?.[0]?.uri || stData.picture || '';
+            if (thumbUri) thumbnailUrl = thumbUri;
+            if (stData.status?.video_status === 'ready') break;
+        } catch (_) {
+            break;
+        }
     }
 
     const result = { video_id: videoId, thumbnail_url: thumbnailUrl };
-    uploadCache[cacheKey] = result;
+    if (uploadCache) uploadCache[accKey] = result;
+    if (typeof window.savePersistentMetaVideoCacheEntry === 'function') {
+        window.savePersistentMetaVideoCacheEntry(accKey, result);
+    }
     return result;
 }
 

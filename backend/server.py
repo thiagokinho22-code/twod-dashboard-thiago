@@ -2394,9 +2394,16 @@ class APIHandler(BaseHTTPRequestHandler):
         conn.send(footer)
 
         resp = conn.getresponse()
+        resp_headers = dict(resp.getheaders())
         raw_res = resp.read().decode("utf-8", errors="ignore")
         conn.close()
-        return resp.status, _scrub_meta_secret(raw_res, access_token)
+        scrubbed = _scrub_meta_secret(raw_res, access_token)
+        try:
+            parsed_vid = json.loads(scrubbed)
+        except Exception:
+            parsed_vid = {"raw": scrubbed}
+        _record_meta_telemetry(resp.status, f"/{graph_version}/{account_id}/advideos", resp_headers, parsed_vid)
+        return resp.status, scrubbed
 
     def do_HEAD(self):
         self.do_GET()

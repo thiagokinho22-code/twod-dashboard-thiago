@@ -692,6 +692,17 @@ const PANEL_CHANGELOG = [
     {
         date: '26/11/2026',
         type: 'feat',
+        badge: '♻️ Cache & Economia Cota',
+        title: 'Reaproveitamento persistente de Vídeos/AdCreatives + corte de ~75% na cota Meta',
+        summary: 'Salva em cache persistente todo vídeo enviado e AdCreative criado, recupera AdCreatives já prontos na conta Meta, pula asset_feed_spec após 1ª rejeição e para imediatamente se bater rate limit.',
+        highlights: [
+            'Não re-envia vídeos nem recria AdCreatives ao retomar após cota/erro (reaproveita inclusive os já prontos na conta via /adcreatives).',
+            'Memoriza contas que não aceitam asset_feed_spec múltiplo, reduz polling de vídeo e adiciona botão "Checar Cota / Destravar Anti-Rajada" no card de erro.'
+        ]
+    },
+    {
+        date: '26/11/2026',
+        type: 'feat',
         badge: '🔎 Busca Manual OneDrive',
         title: 'Busca manual de pastas/criativos no OneDrive (ex: RastrearCelular 21.08)',
         summary: 'Adicionada barra de busca manual e listagem rápida de todas as pastas de Vídeos no vínculo de criativos do Duplicador.',
@@ -3854,7 +3865,8 @@ function showDupErrorActionCard({
     adId = '',
     targetAdsetId = '',
     pageId = '',
-    isPagePerm = false
+    isPagePerm = false,
+    isRateLimit = false
 } = {}) {
     const card = document.getElementById('dup-error-action-card');
     const titleEl = document.getElementById('dup-error-action-title');
@@ -3865,7 +3877,7 @@ function showDupErrorActionCard({
     const items = buildMetaErrorActionItems({
         accountId, campaignId, adsetId, adId, targetAdsetId, pageId, isPagePerm
     });
-    if (items.length === 0) {
+    if (items.length === 0 && !isRateLimit) {
         hideDupErrorActionCard();
         return;
     }
@@ -3884,6 +3896,17 @@ function showDupErrorActionCard({
         a.textContent = item.label;
         btnsEl.appendChild(a);
     });
+
+    if (isRateLimit) {
+        const resetBtn = document.createElement('button');
+        resetBtn.type = 'button';
+        resetBtn.id = 'btn-dup-check-reset-quota';
+        resetBtn.className = 'dup-error-action-btn warn';
+        resetBtn.textContent = '🔓 Checar Cota / Destravar Anti-Rajada';
+        resetBtn.title = 'Limpar a trava local do servidor e verificar a % atual da cota da Meta';
+        resetBtn.addEventListener('click', () => ackResetMetaCircuit(accountId || metaState.selectedAccountId));
+        btnsEl.appendChild(resetBtn);
+    }
 
     card.classList.remove('twod-hidden');
 }
@@ -4888,11 +4911,194 @@ async function resolveMetaVideoThumbUrl(videoId, initialThumb = '', cacheMap = n
     }
 }
 
+const META_PERSISTENT_VIDEO_KEY = 'twod_meta_video_cache_v1';
+const META_PERSISTENT_CREATIVE_KEY = 'twod_meta_creative_cache_v1';
+const META_NO_MULTI_AFS_KEY = 'twod_meta_no_afs_v1';
+const META_CACHE_TTL_MS = 14 * 24 * 60 * 60 * 1000;
+
+function isMetaRateLimitError(err) {
+    if (!err) return false;
+    const raw = err?.rawMetaError || err || {};
+    const code = Number(raw?.code || err?.code || 0);
+    const sub = Number(raw?.error_subcode || err?.error_subcode || 0);
+    const msg = (typeof err === 'string' ? err : (raw?.message || err?.message || '')).toLowerCase();
+    return Boolean(raw?.is_circuit_breaker || err?.is_circuit_breaker)
+        || code === 4 || code === 17 || code === 32 || code === 613 || sub === 80004
+        || /proteção anti-rajada|rate limit|too many calls|cota da meta/i.test(msg);
+}
+
+function readPersistentMetaJsonMap(storageKey, maxEntries = 450) {
+    try {
+        const raw = localStorage.getItem(storageKey);
+        if (!raw) return {};
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== 'object') return {};
+        const now = Date.now();
+        const fresh = {};
+        const entries = Object.entries(parsed).filter(([, v]) => v && (!v.ts || (now - v.ts) < META_CACHE_TTL_MS));
+        entries.sort((a, b) => (b[1]?.ts || 0) - (a[1]?.ts || 0));
+        entries.slice(0, maxEntries).forEach(([k, v]) => { fresh[k] = v; });
+        return fresh;
+    } catch (_) {
+        return {};
+    }
+}
+
+function writePersistentMetaJsonEntry(storageKey, key, val, maxEntries = 450) {
+    if (!key || !val) return;
+    try {
+        const map = readPersistentMetaJsonMap(storageKey, maxEntries);
+        map[key] = { ...val, ts: Date.now() };
+        const trimmed = {};
+        Object.entries(map)
+            .sort((a, b) => (b[1]?.ts || 0) - (a[1]?.ts || 0))
+            .slice(0, maxEntries)
+            .forEach(([k, v]) => { trimmed[k] = v; });
+        localStorage.setItem(storageKey, JSON.stringify(trimmed));
+    } catch (_) { /* ignore storage quota */ }
+}
+
+function getPersistentMetaVideoCacheEntry(key) {
+    if (!key) return null;
+    const map = readPersistentMetaJsonMap(META_PERSISTENT_VIDEO_KEY, 450);
+    return map[key]?.video_id ? map[key] : null;
+}
+
+function savePersistentMetaVideoCacheEntry(key, val) {
+    if (!key || !val?.video_id) return;
+    writePersistentMetaJsonEntry(META_PERSISTENT_VIDEO_KEY, key, {
+        video_id: String(val.video_id),
+        thumbnail_url: val.thumbnail_url || ''
+    }, 450);
+}
+
+function hydrateSessionVideoCacheFromStorage(targetCache) {
+    const map = readPersistentMetaJsonMap(META_PERSISTENT_VIDEO_KEY, 450);
+    Object.entries(map).forEach(([k, v]) => {
+        if (v?.video_id && !targetCache[k]) {
+            targetCache[k] = { video_id: v.video_id, thumbnail_url: v.thumbnail_url || '' };
+        }
+    });
+}
+
+function buildPersistentCreativeCacheKey({ accountId = '', nicheSlug = '', lang = '', adName = '', localizedLink = '', videoId = '' }) {
+    return `${accountId}::${String(nicheSlug || '').toLowerCase()}::${String(lang || '').toLowerCase()}::${adName}::${localizedLink || ''}::${videoId || ''}`;
+}
+
+function getPersistentMetaCreativeCacheEntry(key, blockedPageIds = new Set(), activeWorkingPageId = '') {
+    if (!key) return null;
+    const map = readPersistentMetaJsonMap(META_PERSISTENT_CREATIVE_KEY, 600);
+    const hit = map[key];
+    if (!hit?.creativeId) return null;
+    if (hit.pageId && blockedPageIds.has(String(hit.pageId))) return null;
+    if (activeWorkingPageId && hit.pageId && String(hit.pageId) !== String(activeWorkingPageId)) return null;
+    return hit;
+}
+
+function savePersistentMetaCreativeCacheEntry(key, val) {
+    if (!key || !val?.creativeId) return;
+    writePersistentMetaJsonEntry(META_PERSISTENT_CREATIVE_KEY, key, {
+        creativeId: String(val.creativeId),
+        adName: val.adName || '',
+        urlTags: val.urlTags || '',
+        pageId: val.pageId ? String(val.pageId) : ''
+    }, 600);
+}
+
+function isAccountMultiAfsDisabled(accountId) {
+    if (!accountId) return false;
+    if (window._metaNoMultiAfsMap && window._metaNoMultiAfsMap[accountId]) return true;
+    const map = readPersistentMetaJsonMap(META_NO_MULTI_AFS_KEY, 100);
+    return Boolean(map[accountId]?.disabled);
+}
+
+function markAccountMultiAfsDisabled(accountId) {
+    if (!accountId) return;
+    window._metaNoMultiAfsMap = window._metaNoMultiAfsMap || {};
+    window._metaNoMultiAfsMap[accountId] = true;
+    writePersistentMetaJsonEntry(META_NO_MULTI_AFS_KEY, accountId, { disabled: true }, 100);
+}
+
+async function fetchExistingAccountAdCreativesIndex(accountId) {
+    if (!accountId) return new Map();
+    const fields = 'id,name,object_story_spec{page_id,link_data{link,call_to_action},video_data{video_id,call_to_action}}';
+    let res = await fetchMetaGraphWithFieldFallback([
+        `/${META_GRAPH_VERSION}/${accountId}/adcreatives?fields=${fields}&limit=200`,
+        `/${META_GRAPH_VERSION}/${accountId}/adcreatives?fields=id,name,object_story_spec&limit=200`,
+        `/${META_GRAPH_VERSION}/${accountId}/adcreatives?fields=id,name&limit=200`
+    ]);
+    const list = Array.isArray(res?.data) ? res.data : [];
+    const byName = new Map();
+    list.forEach(cr => {
+        const nm = String(cr?.name || '').trim();
+        if (!nm) return;
+        if (!byName.has(nm)) byName.set(nm, []);
+        byName.get(nm).push(cr);
+    });
+    return byName;
+}
+
+function normalizeUrlForReuseMatch(u = '') {
+    return String(u || '').trim().replace(/\/+$/, '').toLowerCase();
+}
+
+function findReusableAccountAdCreative(byNameMap, { expectedName, localizedLink = '', blockedPageIds = new Set(), activeWorkingPageId = '' }) {
+    if (!byNameMap || !expectedName) return null;
+    const candidates = byNameMap.get(String(expectedName).trim());
+    if (!Array.isArray(candidates) || candidates.length === 0) return null;
+
+    const targetLinkNorm = normalizeUrlForReuseMatch(localizedLink);
+    for (const cr of candidates) {
+        if (!cr?.id) continue;
+        const oss = cr.object_story_spec || {};
+        const pageId = oss.page_id ? String(oss.page_id) : '';
+        if (pageId && blockedPageIds.has(pageId)) continue;
+        if (activeWorkingPageId && pageId && pageId !== String(activeWorkingPageId)) continue;
+
+        const existingLink = oss.video_data?.call_to_action?.value?.link || oss.link_data?.link || oss.link_data?.call_to_action?.value?.link || '';
+        if (targetLinkNorm && existingLink && normalizeUrlForReuseMatch(existingLink) !== targetLinkNorm) {
+            continue;
+        }
+        return {
+            creativeId: String(cr.id),
+            pageId,
+            videoId: oss.video_data?.video_id ? String(oss.video_data.video_id) : ''
+        };
+    }
+    return null;
+}
+
+async function ackResetMetaCircuit(accountId = '') {
+    try {
+        const resp = await apiFetch('/api/meta/app-health/ack', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                action: 'reset_circuit',
+                account_id: accountId || metaState.selectedAccountId || '',
+                manual_token: getMetaToken()
+            })
+        });
+        const report = await resp.json();
+        const quotaChk = (report.checks || []).find(c => c.id === 'rate_ok' || c.id === 'rate_high' || c.id === 'circuit_open');
+        const msg = quotaChk
+            ? `🔓 Trava anti-rajada limpa! ${quotaChk.title} — ${quotaChk.detail}`
+            : '🔓 Trava anti-rajada local resetada. Aguarde ~5–15 min se a Meta ainda estiver limitando por hora.';
+        logMetaTerminal(msg, quotaChk?.level === 'red' ? 'warn' : 'info');
+        const descEl = document.getElementById('dup-error-action-desc');
+        if (descEl) descEl.textContent = msg;
+        refreshMetaAppHealth(false);
+    } catch (e) {
+        logMetaTerminal(`⚠️ Falha ao checar/destravar cota: ${e.message}`, 'warn');
+    }
+}
+
 async function createSingleMediaAdCreative({ accountId, name, spec, mediaAsset, textsObj, linkUrl, logFn = null }) {
     const postCreative = (pObj) => metaGraphPost(`/${META_GRAPH_VERSION}/${accountId}/adcreatives`, pObj);
     const cleanLink = linkUrl || spec.rawLink || '';
     const hasMultiAfs = Boolean(
-        textsObj.hasAfs
+        !isAccountMultiAfsDisabled(accountId)
+        && textsObj.hasAfs
         && ((textsObj.tBodies || []).length > 0 || (textsObj.tTitles || []).length > 0 || (textsObj.tDescs || []).length > 0)
     );
 
@@ -4970,15 +5176,15 @@ async function createSingleMediaAdCreative({ accountId, name, spec, mediaAsset, 
 
     const postWithFieldFallbacks = async (payload) => {
         let res = await postCreative(payload);
-        if (res.error && /degrees_of_freedom_spec|standard_enhancements/i.test(res.error.message || '')) {
+        if (res.error && !isMetaRateLimitError(res.error) && /degrees_of_freedom_spec|standard_enhancements/i.test(res.error.message || '')) {
             delete payload.degrees_of_freedom_spec;
             res = await postCreative(payload);
         }
-        if (res.error && /instagram_user_id/i.test(res.error.message || '')) {
+        if (res.error && !isMetaRateLimitError(res.error) && /instagram_user_id/i.test(res.error.message || '')) {
             delete payload.object_story_spec.instagram_user_id;
             res = await postCreative(payload);
         }
-        if (res.error && payload.object_story_spec?.video_data?.image_url && /image_url|thumbnail|picture|download image/i.test(res.error.message || '')) {
+        if (res.error && !isMetaRateLimitError(res.error) && payload.object_story_spec?.video_data?.image_url && /image_url|thumbnail|picture|download image/i.test(res.error.message || '')) {
             delete payload.object_story_spec.video_data.image_url;
             res = await postCreative(payload);
         }
@@ -4988,10 +5194,17 @@ async function createSingleMediaAdCreative({ accountId, name, spec, mediaAsset, 
     let creativePayload = buildPayload(hasMultiAfs);
     let crRes = await postWithFieldFallbacks(creativePayload);
 
-    if (crRes.error && hasMultiAfs && crRes.error.error_subcode !== 1885183) {
+    if (
+        crRes.error
+        && hasMultiAfs
+        && crRes.error.error_subcode !== 1885183
+        && !isMetaRateLimitError(crRes.error)
+        && !isMetaPagePermissionError(crRes.error)
+    ) {
         if (typeof logFn === 'function') {
-            logFn(`ℹ️ Conta não aceitou asset_feed_spec múltiplo em '${name}', aplicando texto principal único como fallback...`, 'warn');
+            logFn(`ℹ️ Conta não aceitou asset_feed_spec múltiplo em '${name}', aplicando texto principal único como fallback e memorizando para esta conta...`, 'warn');
         }
+        markAccountMultiAfsDisabled(accountId);
         creativePayload = buildPayload(false);
         crRes = await postWithFieldFallbacks(creativePayload);
     }
@@ -6841,7 +7054,7 @@ async function startBatchDuplication() {
         }
     }
 
-    logMetaTerminal(`🚀 Iniciando processo de duplicação para ${countriesToDuplicate.length} países no bloco ${block.title}... [v9.13]`, 'info');
+    logMetaTerminal(`🚀 Iniciando processo de duplicação para ${countriesToDuplicate.length} países no bloco ${block.title}... [v9.14]`, 'info');
     logMetaTerminal(`🎯 Campanha de Destino: '${campObj.name}' (ID: ${campObj.id})`, 'info');
     logMetaTerminal(`📦 Conjunto base: '${adsetObj.name}' (${baseLang.toUpperCase()} | ID: ${adsetObj.id})`, 'info');
     if (activeWorkingPageId) {
@@ -6878,10 +7091,16 @@ async function startBatchDuplication() {
     }
 
     // Pré-prepara vídeos + textos traduzidos + URLs TranslateX + AdCreatives por idioma destino pronto
+    const reuseExistingMetaAssets = document.getElementById('dup-reuse-existing-check')
+        ? Boolean(document.getElementById('dup-reuse-existing-check').checked)
+        : true;
     const preparedCreativesByLang = {};
     const creativePrepFailures = [];
     window._dupSessionVideoCache = window._dupSessionVideoCache || {};
     const videoUploadCache = window._dupSessionVideoCache;
+    if (reuseExistingMetaAssets) {
+        hydrateSessionVideoCacheFromStorage(videoUploadCache);
+    }
 
     const finishDuplicationUi = () => {
         metaState.isDuplicating = false;
@@ -6899,7 +7118,7 @@ async function startBatchDuplication() {
 
     const uploadLocalBrowserFileToMeta = async (accountId, fileObj) => {
         const cacheKey = `${accountId}:manual:${fileObj.name}:${fileObj.size}`;
-        if (videoUploadCache[cacheKey]?.video_id) return videoUploadCache[cacheKey];
+        if (reuseExistingMetaAssets && videoUploadCache[cacheKey]?.video_id) return videoUploadCache[cacheKey];
 
         const q = new URLSearchParams({
             account_id: accountId,
@@ -6918,18 +7137,25 @@ async function startBatchDuplication() {
         const upJson = await upResp.json();
         const upRes = upJson.result || upJson;
         if (!upJson.success || !upRes.id) {
-            throw new Error(`Falha ao subir ${fileObj.name}: ${formatMetaApiError(upJson.error || upRes)}`);
+            const errObj = upJson.error?.error || upJson.error || upRes;
+            const err = new Error(`Falha ao subir ${fileObj.name}: ${formatMetaApiError(errObj)}`);
+            err.rawMetaError = typeof errObj === 'object' ? errObj : null;
+            err.isCircuitBreaker = Boolean(errObj?.is_circuit_breaker);
+            throw err;
         }
+        savePersistentMetaVideoCacheEntry(cacheKey, { video_id: upRes.id, thumbnail_url: '' });
         let thumbnailUrl = '';
-        for (let attempt = 0; attempt < 20; attempt++) {
-            await new Promise(r => setTimeout(r, 3000));
+        for (let attempt = 0; attempt < 12; attempt++) {
+            await new Promise(r => setTimeout(r, attempt === 0 ? 5000 : 7000));
             const stData = await metaGraphGet(`/${META_GRAPH_VERSION}/${upRes.id}?fields=status,picture,thumbnails`);
+            if (isMetaRateLimitError(stData?.error)) break;
             const thumbUri = stData.thumbnails?.data?.[0]?.uri || stData.picture || '';
             if (thumbUri) thumbnailUrl = thumbUri;
             if (stData.status?.video_status === 'ready') break;
         }
         const out = { video_id: upRes.id, thumbnail_url: thumbnailUrl };
         videoUploadCache[cacheKey] = out;
+        savePersistentMetaVideoCacheEntry(cacheKey, out);
         return out;
     };
 
@@ -7075,8 +7301,34 @@ async function startBatchDuplication() {
         }
     }
 
+    let hitRateLimitGlobally = false;
+    let rateLimitWaitSecs = 0;
+
     if (baseAds.length > 0 && readyDiffLangs.length > 0) {
+        let existingAccountCreativesMap = new Map();
+        if (reuseExistingMetaAssets) {
+            try {
+                existingAccountCreativesMap = await fetchExistingAccountAdCreativesIndex(metaState.selectedAccountId);
+                if (existingAccountCreativesMap.size > 0) {
+                    logMetaTerminal(`♻️ Memória de cota ativa: ${existingAccountCreativesMap.size} AdCreative(s) recente(s) indexado(s) na conta para reaproveitamento.`, 'info');
+                }
+            } catch (_) {
+                existingAccountCreativesMap = new Map();
+            }
+        }
+
         for (const tLang of readyDiffLangs) {
+            if (hitRateLimitGlobally) {
+                creativePrepFailures.push({
+                    lang: tLang,
+                    error: 'Interrompido preventivamente por cota/rate limit da Meta antes de enviar este idioma.',
+                    isDevMode: false,
+                    isPagePerm: false,
+                    isRateLimit: true,
+                    pageId: ''
+                });
+                continue;
+            }
             const mediaSrc = langMediaSources[tLang];
             if (!mediaSrc || mediaSrc.mode === 'missing') continue;
 
@@ -7092,32 +7344,16 @@ async function startBatchDuplication() {
             let lastLangError = '';
             let hitDevModeBlock = false;
             let hitPagePermBlock = false;
+            let hitRateLimitBlock = false;
             let blockedPageId = '';
 
             try {
                 if (progressStatus) progressStatus.innerText = `🎬 Preparando criativos e tradução para ${tLang.toUpperCase()}...`;
                 logMetaTerminal(`🌐 Preparando pacote de vídeos e tradução (${baseLang.toUpperCase()} ➔ ${tLang.toUpperCase()})...`, 'info');
 
-                // Sobe 1 vídeo por vez e valida logo o primeiro AdCreative para abortar rápido em caso de bloqueio da Meta (ex: 1885183)
+                // Reaproveita AdCreatives já criados antes / na conta Meta; senão sobe 1 vídeo por vez
                 for (let uIdx = 0; uIdx < mediaItems.length; uIdx++) {
                     const mItem = mediaItems[uIdx];
-                    let uploaded;
-
-                    if (mItem.kind === 'onedrive') {
-                        const vKey = `${metaState.selectedAccountId}:${mItem.video.id || mItem.video.url || mItem.video.name}`;
-                        if (videoUploadCache[vKey]?.video_id) {
-                            logMetaTerminal(`⚡ Reutilizando vídeo ${mItem.adName} (${mItem.video.name}) já enviado nesta sessão (ID: ${videoUploadCache[vKey].video_id})`, 'info');
-                            uploaded = videoUploadCache[vKey];
-                        } else {
-                            logMetaTerminal(`☁️ Subindo criativo ${mItem.adName} (${mItem.video.lang} / ${mItem.video.name}) para Meta Ads...`, 'info');
-                            uploaded = await uploadOneDriveVideoToMeta(metaState.selectedAccountId, mItem.video, token, videoUploadCache);
-                            if (uploaded?.video_id) videoUploadCache[vKey] = uploaded;
-                        }
-                    } else {
-                        logMetaTerminal(`📤 Enviando MP4 manual ${mItem.adName} (${mItem.file.name}) para Meta Ads...`, 'info');
-                        uploaded = await uploadLocalBrowserFileToMeta(metaState.selectedAccountId, mItem.file);
-                    }
-
                     const templateAd = usePaired ? baseAds[uIdx] : baseAds[0];
                     const templateKey = templateAd.id || String(usePaired ? uIdx : 0);
                     const spec = extractCreativeTemplateSpec(templateAd.creative || {}, templateAd.creative?.actor_id || '');
@@ -7132,8 +7368,75 @@ async function startBatchDuplication() {
                         continue;
                     }
 
+                    const expectedCreativeName = `${campNicheSlug || 'Ad'} - ${tLang.toUpperCase()} - ${mItem.adName}`;
+                    const localizedLinkPre = buildDuplicatorLocalizedUrl(spec.rawLink, tLang, baseLang);
+
+                    if (reuseExistingMetaAssets) {
+                        const rawMediaId = mItem.kind === 'onedrive' ? (mItem.video.id || mItem.video.url || mItem.video.name) : `${mItem.file.name}:${mItem.file.size}`;
+                        const pCreativeKey = buildPersistentCreativeCacheKey({
+                            accountId: metaState.selectedAccountId,
+                            nicheSlug: campNicheSlug || 'Ad',
+                            lang: tLang,
+                            adName: mItem.adName,
+                            localizedLink: localizedLinkPre,
+                            videoId: rawMediaId
+                        });
+                        const cachedCr = getPersistentMetaCreativeCacheEntry(pCreativeKey, blockedPageIds, activeWorkingPageId);
+                        const metaExistingCr = !cachedCr
+                            ? findReusableAccountAdCreative(existingAccountCreativesMap, {
+                                expectedName: expectedCreativeName,
+                                localizedLink: localizedLinkPre,
+                                blockedPageIds,
+                                activeWorkingPageId
+                            })
+                            : null;
+                        const reusable = cachedCr || metaExistingCr;
+                        if (reusable?.creativeId) {
+                            if (!activeWorkingPageId && reusable.pageId && reusable.pageId !== String(spec.pageId || '')) {
+                                activeWorkingPageId = String(reusable.pageId);
+                            }
+                            logMetaTerminal(`♻️ Reaproveitando AdCreative pronto '${expectedCreativeName}' (ID: ${reusable.creativeId}) — 0 uploads!`, 'info');
+                            createdItems.push({
+                                adName: usePaired ? (templateAd.name || mItem.adName) : mItem.adName,
+                                creativeId: reusable.creativeId,
+                                urlTags: templateAd.url_tags || ''
+                            });
+                            savePersistentMetaCreativeCacheEntry(pCreativeKey, {
+                                creativeId: reusable.creativeId,
+                                adName: mItem.adName,
+                                urlTags: templateAd.url_tags || '',
+                                pageId: reusable.pageId || activeWorkingPageId || spec.pageId
+                            });
+                            continue;
+                        }
+                    }
+
+                    let uploaded;
+
+                    if (mItem.kind === 'onedrive') {
+                        const vKey = `${metaState.selectedAccountId}:${mItem.video.id || mItem.video.url || mItem.video.name}`;
+                        if (reuseExistingMetaAssets && videoUploadCache[vKey]?.video_id) {
+                            logMetaTerminal(`⚡ Reutilizando vídeo ${mItem.adName} (${mItem.video.name}) já enviado anteriormente (ID: ${videoUploadCache[vKey].video_id})`, 'info');
+                            uploaded = videoUploadCache[vKey];
+                        } else {
+                            logMetaTerminal(`☁️ Subindo criativo ${mItem.adName} (${mItem.video.lang} / ${mItem.video.name}) para Meta Ads...`, 'info');
+                            const taggedVideo = {
+                                ...mItem.video,
+                                uploadTitle: `${campNicheSlug || 'Ad'}_${tLang.toUpperCase()}_${mItem.adName}_${mItem.video.name}`
+                            };
+                            uploaded = await uploadOneDriveVideoToMeta(metaState.selectedAccountId, taggedVideo, token, videoUploadCache);
+                            if (uploaded?.video_id) {
+                                videoUploadCache[vKey] = uploaded;
+                                savePersistentMetaVideoCacheEntry(vKey, uploaded);
+                            }
+                        }
+                    } else {
+                        logMetaTerminal(`📤 Enviando MP4 manual ${mItem.adName} (${mItem.file.name}) para Meta Ads...`, 'info');
+                        uploaded = await uploadLocalBrowserFileToMeta(metaState.selectedAccountId, mItem.file);
+                    }
+
                     if (!translatedTemplateCache[templateKey]) {
-                        const localizedLink = buildDuplicatorLocalizedUrl(spec.rawLink, tLang, baseLang);
+                        const localizedLink = localizedLinkPre;
                         const batchIn = [
                             ...spec.rawBodies,
                             ...spec.rawTitles,
@@ -7172,7 +7475,7 @@ async function startBatchDuplication() {
                     const trData = translatedTemplateCache[templateKey];
                     const crRes = await createSingleMediaCreativeWithPageFallback({
                         accountId: metaState.selectedAccountId,
-                        name: `${campNicheSlug || 'Ad'} - ${tLang.toUpperCase()} - ${mItem.adName}`,
+                        name: expectedCreativeName,
                         spec: trData.spec,
                         mediaAsset: {
                             kind: 'video',
@@ -7189,11 +7492,29 @@ async function startBatchDuplication() {
                     });
 
                     if (crRes.id) {
+                        const effectiveUsedPage = String(crRes.usedPageId || trData.spec.pageId || '');
                         if (crRes.usedPageId && (crRes.switchedPage || (activeWorkingPageId && String(crRes.usedPageId) !== activeWorkingPageId))) {
                             activeWorkingPageId = String(crRes.usedPageId);
                             trData.spec = { ...trData.spec, pageId: activeWorkingPageId, instagramUserId: '' };
                             logMetaTerminal(`✅ Página '${activeWorkingPageId}' autorizada! Usando-a para os criativos em ${tLang.toUpperCase()}.`, 'success');
                         }
+                        const rawMediaId = mItem.kind === 'onedrive' ? (mItem.video.id || mItem.video.url || mItem.video.name) : `${mItem.file.name}:${mItem.file.size}`;
+                        savePersistentMetaCreativeCacheEntry(
+                            buildPersistentCreativeCacheKey({
+                                accountId: metaState.selectedAccountId,
+                                nicheSlug: campNicheSlug || 'Ad',
+                                lang: tLang,
+                                adName: mItem.adName,
+                                localizedLink: trData.localizedLink,
+                                videoId: rawMediaId
+                            }),
+                            {
+                                creativeId: crRes.id,
+                                adName: usePaired ? (templateAd.name || mItem.adName) : mItem.adName,
+                                urlTags: templateAd.url_tags || '',
+                                pageId: effectiveUsedPage
+                            }
+                        );
                         createdItems.push({
                             adName: usePaired ? (templateAd.name || mItem.adName) : mItem.adName,
                             creativeId: crRes.id,
@@ -7207,6 +7528,13 @@ async function startBatchDuplication() {
                             hitDevModeBlock = true;
                             break;
                         }
+                        if (isMetaRateLimitError(crRes.error || lastLangError)) {
+                            hitRateLimitBlock = true;
+                            hitRateLimitGlobally = true;
+                            rateLimitWaitSecs = Math.max(rateLimitWaitSecs, Number(crRes.error?.retry_after_seconds || 0));
+                            logMetaTerminal(`🛑 Cota/Rate Limit da Meta atingido! Interrompendo envios imediatamente para preservar a conta. Vídeos/AdCreatives já prontos foram salvos para reaproveitamento.`, 'warn');
+                            break;
+                        }
                         if (isMetaPagePermissionError(crRes.error)) {
                             hitPagePermBlock = true;
                             blockedPageId = crRes.usedPageId || trData.spec.pageId || '';
@@ -7215,23 +7543,39 @@ async function startBatchDuplication() {
                     }
                 }
 
-                if (createdItems.length > 0) {
+                if (createdItems.length > 0 && !hitRateLimitBlock && createdItems.length === mediaItems.length) {
                     preparedCreativesByLang[tLang] = createdItems;
                     logMetaTerminal(`✨ ${createdItems.length} AdCreative(s) prontos para ${tLang.toUpperCase()} (URL TranslateX: /${tLang}/)`, 'success');
                 } else {
+                    if (createdItems.length > 0 && !hitRateLimitBlock) {
+                        preparedCreativesByLang[tLang] = createdItems;
+                    }
                     creativePrepFailures.push({
                         lang: tLang,
-                        error: lastLangError || 'Nenhum AdCreative pôde ser criado.',
+                        error: lastLangError || (createdItems.length > 0 ? `Parcial (${createdItems.length}/${mediaItems.length} criativos prontos antes da parada).` : 'Nenhum AdCreative pôde ser criado.'),
                         isDevMode: hitDevModeBlock,
                         isPagePerm: hitPagePermBlock,
+                        isRateLimit: hitRateLimitBlock,
                         pageId: blockedPageId
                     });
                 }
             } catch (prepErr) {
                 console.error(`Erro preparando idioma ${tLang}:`, prepErr);
                 const errMsg = prepErr.message || String(prepErr);
+                const isRl = isMetaRateLimitError(prepErr);
+                if (isRl) {
+                    hitRateLimitGlobally = true;
+                    rateLimitWaitSecs = Math.max(rateLimitWaitSecs, Number(prepErr?.rawMetaError?.retry_after_seconds || 0));
+                }
                 logMetaTerminal(`❌ Erro ao preparar criativos em ${tLang.toUpperCase()}: ${errMsg}`, 'error');
-                creativePrepFailures.push({ lang: tLang, error: errMsg, isDevMode: false, isPagePerm: false, pageId: '' });
+                creativePrepFailures.push({
+                    lang: tLang,
+                    error: errMsg,
+                    isDevMode: false,
+                    isPagePerm: false,
+                    isRateLimit: isRl,
+                    pageId: ''
+                });
             }
         }
     }
@@ -7239,7 +7583,9 @@ async function startBatchDuplication() {
     // BLOQUEIO DE SEGURANÇA: nunca cria conjuntos vazios silenciosamente se a criação de AdCreative falhou
     if (creativePrepFailures.length > 0) {
         const hasDevMode = creativePrepFailures.some(f => f.isDevMode);
+        const hasRateLimit = hitRateLimitGlobally || creativePrepFailures.some(f => f.isRateLimit || isMetaRateLimitError(f.error || ''));
         const pagePermItem = creativePrepFailures.find(f => f.isPagePerm || isMetaPagePermissionError(f.error || ''));
+        const readyPartialLangs = Object.keys(preparedCreativesByLang);
         const failLines = creativePrepFailures.map(f => `• ${f.lang.toUpperCase()}: ${f.error}`).join('\n');
         const devHint = hasDevMode
             ? `\n\n📌 COMO RESOLVER AGORA (Modo Desenvolvimento):\n` +
@@ -7251,15 +7597,26 @@ async function startBatchDuplication() {
         const pagePermHint = pagePermItem
             ? `\n\n${buildMetaPagePermissionHint(pagePermItem.pageId || '')}`
             : '';
+        const quotaHint = hasRateLimit
+            ? `\n\n⏱️ SOBRE A COTA / RATE LIMIT DA META:\n` +
+              `• A trava local anti-rajada libera em ~${rateLimitWaitSecs > 0 ? rateLimitWaitSecs : 120}s (ou clique em "Checar Cota / Destravar Anti-Rajada").\n` +
+              `• A cota por hora da Meta (código 4 / 613) funciona em janela móvel: costuma aliviar em 5–15 min e zera em ~1 hora.\n` +
+              `• ♻️ REAPROVEITAMENTO SALVO: Todos os vídeos enviados e ${readyPartialLangs.length} idioma(s) já concluídos ficaram salvos e NÃO serão re-enviados quando você retomar!`
+            : '';
 
-        const proceedEmpty = confirm(
-            `❌ FALHA AO CRIAR OS ANÚNCIOS TRADUZIDOS NA META:\n\n${failLines}${devHint}${pagePermHint}\n\n` +
-            `Deseja MESMO ASSIM criar os conjuntos vazios (apenas estrutura em PAUSED, sem anúncio)?\n\n` +
-            `• Cancelar = ABORTAR AGORA (Recomendado — evita criar conjuntos sem anúncio)\n` +
-            `• OK = Continuar criando conjuntos sem anúncio`
+        const actionPrompt = readyPartialLangs.length > 0
+            ? `Já temos ${readyPartialLangs.length} idioma(s) 100% prontos (${readyPartialLangs.map(l => l.toUpperCase()).join(', ')}).\n` +
+              `• Cancelar = PAUSAR AGORA e retomar depois sem perder o que já subiu (Recomendado)\n` +
+              `• OK = Subir SOMENTE os países desses idiomas já prontos agora e deixar os demais pendentes`
+            : `Deseja MESMO ASSIM criar os conjuntos vazios (apenas estrutura em PAUSED, sem anúncio)?\n\n` +
+              `• Cancelar = ABORTAR AGORA (Recomendado — evita criar conjuntos sem anúncio)\n` +
+              `• OK = Continuar criando conjuntos sem anúncio`;
+
+        const proceedPartialOrEmpty = confirm(
+            `❌ FALHA AO CRIAR ALGUNS ANÚNCIOS TRADUZIDOS NA META:\n\n${failLines}${devHint}${pagePermHint}${quotaHint}\n\n${actionPrompt}`
         );
 
-        if (!proceedEmpty) {
+        if (!proceedPartialOrEmpty) {
             const firstBaseAdId = baseAds[0]?.id || '';
             const actionOpts = {
                 accountId,
@@ -7267,21 +7624,37 @@ async function startBatchDuplication() {
                 adsetId,
                 adId: firstBaseAdId,
                 pageId: pagePermItem?.pageId || '',
-                isPagePerm: Boolean(pagePermItem)
+                isPagePerm: Boolean(pagePermItem),
+                isRateLimit: hasRateLimit
             };
-            logMetaTerminal(`🛑 Operação cancelada antes de criar conjuntos vazios sem anúncio.`, 'warn');
+            logMetaTerminal(`🛑 Operação pausada antes de criar conjuntos vazios.${hasRateLimit ? ' Os vídeos e AdCreatives prontos estão salvos em cache para reaproveitamento!' : ''}`, 'warn');
             logMetaTerminalActions(actionOpts);
             showDupErrorActionCard({
-                title: hasDevMode
-                    ? '🔒 App Meta em Modo de Desenvolvimento (1885183)'
-                    : (pagePermItem ? '📄 Permissão da Página Bloqueada (Gerenciador)' : '❌ Falha ao Criar Anúncios Traduzidos'),
-                desc: failLines,
+                title: hasRateLimit
+                    ? `⏱️ Cota da Meta Atingida — ${readyPartialLangs.length} idioma(s) salvos em cache`
+                    : (hasDevMode
+                        ? '🔒 App Meta em Modo de Desenvolvimento (1885183)'
+                        : (pagePermItem ? '📄 Permissão da Página Bloqueada (Gerenciador)' : '❌ Falha ao Criar Anúncios Traduzidos')),
+                desc: hasRateLimit
+                    ? `Aguarde ~5–15 min (janela móvel da Meta ~1h) ou clique em "Checar Cota / Destravar Anti-Rajada". Ao iniciar de novo, tudo já criado (${readyPartialLangs.map(l => l.toUpperCase()).join(', ') || 'vídeos enviados'}) será reaproveitado sem gastar upload!`
+                    : failLines,
                 ...actionOpts
             });
-            if (termStatus) termStatus.innerText = hasDevMode ? 'Bloqueado (App Meta em Desenvolvimento)' : (pagePermItem ? 'Bloqueado (Permissão da Página)' : 'Cancelado');
-            if (progressStatus) progressStatus.innerText = 'Cancelado antes de criar conjuntos vazios';
+            if (termStatus) termStatus.innerText = hasRateLimit ? 'Pausado (Cota Meta — Cache Salvo)' : (hasDevMode ? 'Bloqueado (App Meta em Desenvolvimento)' : (pagePermItem ? 'Bloqueado (Permissão da Página)' : 'Cancelado'));
+            if (progressStatus) progressStatus.innerText = hasRateLimit ? 'Pausado na cota (criativos prontos salvos!)' : 'Cancelado antes de criar conjuntos vazios';
             finishDuplicationUi();
+            refreshMetaAppHealth(false);
             return;
+        }
+
+        if (readyPartialLangs.length > 0) {
+            const readySet = new Set(readyPartialLangs);
+            const filtered = countriesToDuplicate.filter(c => {
+                const cLang = (c.langCode || (block.langCode && block.langCode !== 'multi' ? block.langCode : baseLang) || baseLang).toLowerCase();
+                return cLang === baseLang || readySet.has(cLang);
+            });
+            countriesToDuplicate.splice(0, countriesToDuplicate.length, ...filtered);
+            logMetaTerminal(`▶️ Publicando apenas os ${countriesToDuplicate.length} país(es) com criativos 100% prontos (${readyPartialLangs.map(l => l.toUpperCase()).join(', ')}). Os demais permanecem marcados.`, 'info');
         }
     }
 
@@ -7704,6 +8077,7 @@ async function startBatchDuplication() {
 
             const errPagePerm = isMetaPagePermissionError(err.rawMetaError || err.message);
             const errMissingAdv = !errPagePerm && isMetaMissingAdvertiserError(err.rawMetaError || err.message);
+            const errRateLimit = isMetaRateLimitError(err.rawMetaError || err.message);
             const errActionAdId = err.failingAdId || baseAds[0]?.id || '';
             const errActionOpts = {
                 accountId,
@@ -7712,17 +8086,22 @@ async function startBatchDuplication() {
                 adId: errActionAdId,
                 targetAdsetId: copiedAdSetId || '',
                 pageId: detectedBasePageId,
-                isPagePerm: errPagePerm
+                isPagePerm: errPagePerm,
+                isRateLimit: errRateLimit
             };
 
             logMetaTerminalActions(errActionOpts);
             showDupErrorActionCard({
-                title: errPagePerm
-                    ? `📄 Erro de Permissão na Página em '${finalName}'`
-                    : (errMissingAdv
-                        ? `🏢 Advertiser Pendente em '${finalName}' (${country.code})`
-                        : `⚠️ Erro em '${finalName}' — Abrir no Meta Ads Manager`),
-                desc: err.message,
+                title: errRateLimit
+                    ? `⏱️ Cota da Meta Atingida em '${finalName}'`
+                    : (errPagePerm
+                        ? `📄 Erro de Permissão na Página em '${finalName}'`
+                        : (errMissingAdv
+                            ? `🏢 Advertiser Pendente em '${finalName}' (${country.code})`
+                            : `⚠️ Erro em '${finalName}' — Abrir no Meta Ads Manager`)),
+                desc: errRateLimit
+                    ? `${err.message} — Os vídeos e AdCreatives prontos ficaram salvos no cache para reaproveitar quando a cota aliviar (~5–15 min; reset completo ~1h).`
+                    : err.message,
                 ...errActionOpts
             });
 
@@ -8075,6 +8454,11 @@ window.loadDupAdvertiserEntities = loadDupAdvertiserEntities;
 window.onDupAdvertiserEntityChanged = onDupAdvertiserEntityChanged;
 window.buildRegionalComplianceAttempts = buildRegionalComplianceAttempts;
 window.isMetaMissingAdvertiserError = isMetaMissingAdvertiserError;
+window.isMetaRateLimitError = isMetaRateLimitError;
+window.ackResetMetaCircuit = ackResetMetaCircuit;
+window.getPersistentMetaVideoCacheEntry = getPersistentMetaVideoCacheEntry;
+window.savePersistentMetaVideoCacheEntry = savePersistentMetaVideoCacheEntry;
+window.fetchExistingAccountAdCreativesIndex = fetchExistingAccountAdCreativesIndex;
 window.buildMetaAdsManagerUrls = buildMetaAdsManagerUrls;
 window.showDupErrorActionCard = showDupErrorActionCard;
 window.hideDupErrorActionCard = hideDupErrorActionCard;
