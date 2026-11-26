@@ -1522,6 +1522,23 @@
                                 </div>
                                 <span class="help-text" id="dup-pages-help-text">Se a Página original bloquear (1885499), troca para outra autorizada</span>
                             </div>
+
+                            <div class="form-group" style="flex: 1.4; min-width: 280px;">
+                                <label for="select-dup-advertiser-entity">
+                                    <strong>🏢 Anunciante / Advertiser (Austrália, UE &amp; BR):</strong>
+                                </label>
+                                <div style="display: flex; gap: 6px; align-items: center;">
+                                    <select id="select-dup-advertiser-entity" class="twod-select" style="flex: 1; min-width: 0;" onchange="onDupAdvertiserEntityChanged()">
+                                        <option value="auto" selected>🤖 Auto-detectar Futuretech / Conta</option>
+                                    </select>
+                                    <button type="button" class="btn-chip" id="btn-refresh-dup-advertiser" onclick="loadDupAdvertiserEntities(null, true)" title="Detectar entidade verificada (Futuretech Dynamics) nos conjuntos e BMs da conta" style="white-space: nowrap; padding: 7px 10px;">🔄</button>
+                                </div>
+                                <div style="margin-top: 6px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
+                                    <input type="text" id="input-dup-dsa-name" class="twod-input" value="Futuretech Dynamics LLC" placeholder="Nome DSA (Futuretech Dynamics LLC)" style="flex: 1.3; min-width: 145px; font-size: 12px; padding: 6px 8px;" title="Nome do anunciante / beneficiário DSA">
+                                    <input type="text" id="input-dup-reg-entity-id" class="twod-input" value="" placeholder="ID Entidade Verificada (auto)" style="flex: 1; min-width: 135px; font-size: 12px; padding: 6px 8px;" title="ID numérico da Entidade Verificada / BM usado em Austrália (3858634), Brasil e UE">
+                                </div>
+                                <span class="help-text" id="dup-advertiser-help-text">Auto-preenche Futuretech Dynamics (ID verificado + DSA) quando Austrália, UE ou BR exigirem</span>
+                            </div>
                         </div>
                     </div>
 
@@ -1976,10 +1993,10 @@
         </div>
     </div>
 
-    <script src="app.js?v=9.8"></script>
+    <script src="app.js?v=9.9"></script>
     <script src="studio.js?v=1.11"></script>
     <script src="creative_gen.js?v=1.2"></script>
-    <script src="campaign_builder.js?v=1.9"></script>
+    <script src="campaign_builder.js?v=1.10"></script>
 </body>
 </html>
 

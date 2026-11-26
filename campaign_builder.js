@@ -1284,16 +1284,41 @@ const EU_DSA_COUNTRIES = new Set([
 async function createAdSetWithFallbacks(accountId, adSetPayload, token) {
     let res = await metaFormPost(`/${accountId}/adsets`, adSetPayload, token);
     const tried = new Set();
+    const targetCountry = String(adSetPayload?.targeting?.geo_locations?.countries?.[0] || '').toUpperCase();
 
-    for (let attempt = 0; attempt < 5 && res.error; attempt++) {
+    for (let attempt = 0; attempt < 8 && res.error; attempt++) {
         const msg = (res.error.message || '').toLowerCase();
         const sub = String(res.error.error_subcode || '');
+        const isMissingAdv = sub === '3858634' || msg.includes('advertiser is missing') || msg.includes('verified advertiser');
 
-        if (!tried.has('dsa') && (msg.includes('dsa_beneficiary') || msg.includes('dsa_payor') || msg.includes('beneficiary'))) {
+        if (isMissingAdv && targetCountry === 'AU') {
+            const curEntity = adSetPayload.regional_regulation_identities?.universal_beneficiary
+                || adSetPayload.regional_regulation_identities?.australia_finserv_beneficiary
+                || cbState.bmId || '';
+            if (!tried.has('au_voluntary') && curEntity) {
+                tried.add('au_voluntary');
+                adSetPayload.regional_regulated_categories = ['VOLUNTARY_VERIFICATION'];
+                adSetPayload.regional_regulation_identities = { universal_beneficiary: curEntity, universal_payer: curEntity };
+            } else if (!tried.has('au_finserv') && curEntity) {
+                tried.add('au_finserv');
+                adSetPayload.regional_regulated_categories = ['AUSTRALIA_FINSERV'];
+                adSetPayload.regional_regulation_identities = { australia_finserv_beneficiary: curEntity, australia_finserv_payer: curEntity };
+            } else if (!tried.has('au_nodsa') && (adSetPayload.dsa_beneficiary || adSetPayload.dsa_payor)) {
+                tried.add('au_nodsa');
+                delete adSetPayload.dsa_beneficiary;
+                delete adSetPayload.dsa_payor;
+                adSetPayload.regional_regulated_categories = ['AUSTRALIA_UNIVERSAL'];
+                if (curEntity) {
+                    adSetPayload.regional_regulation_identities = { universal_beneficiary: curEntity, universal_payer: curEntity };
+                }
+            } else {
+                break;
+            }
+        } else if (!tried.has('dsa') && !isMissingAdv && (msg.includes('dsa_beneficiary') || msg.includes('dsa_payor') || msg.includes('beneficiary'))) {
             tried.add('dsa');
             delete adSetPayload.dsa_beneficiary;
             delete adSetPayload.dsa_payor;
-        } else if (!tried.has('reg') && (msg.includes('regional_regulat') || msg.includes('universal_beneficiary') || msg.includes('voluntary_verification'))) {
+        } else if (!tried.has('reg') && !isMissingAdv && (msg.includes('regional_regulat') || msg.includes('universal_beneficiary') || msg.includes('voluntary_verification'))) {
             tried.add('reg');
             delete adSetPayload.regional_regulation_identities;
             delete adSetPayload.regional_regulated_categories;
@@ -1473,11 +1498,13 @@ async function launchStandardCampaign() {
                 adSetPayload.regional_regulated_categories = ['BRAZIL_REGULATION', 'VOLUNTARY_VERIFICATION'];
             } else if (country.code === 'ES') {
                 adSetPayload.regional_regulated_categories = ['SPAIN_FINSERV', 'VOLUNTARY_VERIFICATION'];
+            } else if (country.code === 'AU') {
+                adSetPayload.regional_regulated_categories = ['AUSTRALIA_UNIVERSAL'];
             } else if (universalEntityId) {
                 adSetPayload.regional_regulated_categories = ['VOLUNTARY_VERIFICATION'];
             }
 
-            if (advertiserName && (EU_DSA_COUNTRIES.has(country.code) || modelAdSet?.dsa_beneficiary)) {
+            if (advertiserName && (EU_DSA_COUNTRIES.has(country.code) || country.code === 'AU' || modelAdSet?.dsa_beneficiary)) {
                 adSetPayload.dsa_beneficiary = advertiserName;
                 adSetPayload.dsa_payor = advertiserName;
             }

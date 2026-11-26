@@ -692,6 +692,17 @@ const PANEL_CHANGELOG = [
     {
         date: '25/11/2026',
         type: 'feat',
+        badge: '🏢 Advertiser AU / Compliance',
+        title: 'Detecção e preenchimento automático do Advertiser (Futuretech Dynamics) para Austrália (3858634)',
+        summary: 'Detecta a entidade verificada na conta/BM/conjuntos existentes e aplica automaticamente em Austrália, Brasil, UE e demais países regulados.',
+        highlights: [
+            'Novo seletor "Anunciante / Advertiser" na Etapa 2 com auto-detecção de Futuretech Dynamics, dsa_recommendations e regional_regulation_identities.',
+            'Retry inteligente na criação/atualização do conjunto para Austrália (AUSTRALIA_UNIVERSAL, VOLUNTARY_VERIFICATION, AUSTRALIA_FINSERV) salvando a combinação vencedora.'
+        ]
+    },
+    {
+        date: '25/11/2026',
+        type: 'feat',
         badge: '📄 Troca Auto de Página',
         title: 'Seletor de Página + Fallback Automático no Duplicador (Erro 1885499 / 3858749)',
         summary: 'Lista as Páginas autorizadas da conta e troca automaticamente de Página quando a original estiver sem permissão de anunciante.',
@@ -2085,6 +2096,8 @@ let metaState = {
     selectedAdSet: null,
     promotePages: [],
     promotePagesAccountId: '',
+    advertiserCtx: null,
+    advertiserAccountId: '',
     activeBlockId: 'BLOCO-01',
     checkedCountries: {},
     isDuplicating: false,
@@ -2771,6 +2784,469 @@ function getAuthorizedCandidatePageIds(accountId, blockedSet = new Set(), prefer
     return out;
 }
 
+const EU_DSA_COUNTRY_CODES = new Set([
+    'AT', 'BE', 'BG', 'HR', 'CY', 'CZ', 'DK', 'EE', 'FI', 'FR',
+    'DE', 'GR', 'HU', 'IE', 'IT', 'LV', 'LT', 'LU', 'MT', 'NL',
+    'PL', 'PT', 'RO', 'SK', 'SI', 'ES', 'SE'
+]);
+
+const REGIONAL_COUNTRY_CATEGORIES = {
+    AU: [['AUSTRALIA_UNIVERSAL'], ['VOLUNTARY_VERIFICATION'], ['AUSTRALIA_UNIVERSAL', 'VOLUNTARY_VERIFICATION'], ['AUSTRALIA_FINSERV']],
+    BR: [['BRAZIL_REGULATION', 'VOLUNTARY_VERIFICATION'], ['BRAZIL_REGULATION'], ['VOLUNTARY_VERIFICATION']],
+    ES: [['SPAIN_FINSERV', 'VOLUNTARY_VERIFICATION'], ['VOLUNTARY_VERIFICATION']],
+    SG: [['SINGAPORE_UNIVERSAL', 'VOLUNTARY_VERIFICATION'], ['SINGAPORE_UNIVERSAL'], ['VOLUNTARY_VERIFICATION']],
+    TW: [['TAIWAN_UNIVERSAL', 'VOLUNTARY_VERIFICATION'], ['TAIWAN_UNIVERSAL'], ['VOLUNTARY_VERIFICATION']],
+    TH: [['THAILAND_UNIVERSAL', 'VOLUNTARY_VERIFICATION'], ['THAILAND_UNIVERSAL'], ['VOLUNTARY_VERIFICATION']],
+    MY: [['MALAYSIA_UNIVERSAL', 'VOLUNTARY_VERIFICATION'], ['MALAYSIA_UNIVERSAL'], ['VOLUNTARY_VERIFICATION']]
+};
+
+function isMetaMissingAdvertiserError(err) {
+    const raw = err?.rawMetaError || err || {};
+    const sub = Number(raw?.error_subcode || err?.error_subcode || 0);
+    const code = Number(raw?.code || err?.code || 0);
+    const msg = (typeof err === 'string' ? err : (raw?.message || err?.message || '')).toLowerCase();
+    return sub === 3858634 || code === 3858634
+        || sub === 3858548 || sub === 3858495 || sub === 3858152
+        || /advertiser is missing|provide a verified advertiser|compliance_section|universal_beneficiary|universal_payer|australia_finserv|regional_regulated_categories|regional_regulation_identities/i.test(msg);
+}
+
+function getStoredRegionalComplianceConfig(accountId, countryCode) {
+    if (!accountId || !countryCode) return null;
+    try {
+        const raw = localStorage.getItem(`twod_reg_cfg_${accountId}_${countryCode}`);
+        return raw ? JSON.parse(raw) : null;
+    } catch (_) {
+        return null;
+    }
+}
+
+function saveStoredRegionalComplianceConfig(accountId, countryCode, cfg) {
+    if (!accountId || !countryCode || !cfg) return;
+    try {
+        localStorage.setItem(`twod_reg_cfg_${accountId}_${countryCode}`, JSON.stringify(cfg));
+    } catch (_) { /* ignore storage quota */ }
+}
+
+function getStoredManualEntityId(accountId) {
+    if (!accountId) return '';
+    try {
+        return String(localStorage.getItem(`twod_reg_entity_${accountId}`) || '').trim();
+    } catch (_) {
+        return '';
+    }
+}
+
+function setStoredManualEntityId(accountId, entityId) {
+    if (!accountId) return;
+    try {
+        if (entityId) localStorage.setItem(`twod_reg_entity_${accountId}`, String(entityId).trim());
+        else localStorage.removeItem(`twod_reg_entity_${accountId}`);
+    } catch (_) { /* ignore */ }
+}
+
+function extractEntityIdFromRegObj(regObj) {
+    if (!regObj || typeof regObj !== 'object') return '';
+    return String(
+        regObj.universal_beneficiary
+        || regObj.australia_finserv_beneficiary
+        || regObj.universal_payer
+        || regObj.australia_finserv_payer
+        || Object.values(regObj).find(v => v && typeof v === 'string')
+        || ''
+    ).trim();
+}
+
+function onDupAdvertiserEntityChanged() {
+    const sel = document.getElementById('select-dup-advertiser-entity');
+    const idInput = document.getElementById('input-dup-reg-entity-id');
+    const accountId = document.getElementById('select-meta-account')?.value || metaState.selectedAccountId || '';
+    if (!sel || !idInput) return;
+
+    if (sel.value === 'auto') {
+        const ctx = metaState.advertiserCtx;
+        idInput.value = ctx?.candidates?.[0]?.id || '';
+        setStoredManualEntityId(accountId, '');
+    } else {
+        idInput.value = sel.value;
+        setStoredManualEntityId(accountId, sel.value);
+    }
+}
+
+function renderDupAdvertiserSelect(ctx = null) {
+    const sel = document.getElementById('select-dup-advertiser-entity');
+    const dsaInput = document.getElementById('input-dup-dsa-name');
+    const idInput = document.getElementById('input-dup-reg-entity-id');
+    const helpEl = document.getElementById('dup-advertiser-help-text');
+    if (!sel) return;
+
+    const accountId = document.getElementById('select-meta-account')?.value || metaState.selectedAccountId || '';
+    const storedManualId = getStoredManualEntityId(accountId);
+    const prevSel = sel.value || 'auto';
+
+    sel.innerHTML = '<option value="auto">🤖 Auto-detectar Futuretech / Conta</option>';
+
+    const cands = Array.isArray(ctx?.candidates) ? ctx.candidates : [];
+    cands.forEach(c => {
+        if (!c || !c.id) return;
+        const opt = document.createElement('option');
+        opt.value = String(c.id);
+        opt.textContent = c.label || `${c.name || 'Entidade'} (${c.id})`;
+        sel.appendChild(opt);
+    });
+
+    if (storedManualId && cands.some(c => String(c.id) === storedManualId)) {
+        sel.value = storedManualId;
+    } else if (prevSel && prevSel !== 'auto' && cands.some(c => String(c.id) === String(prevSel))) {
+        sel.value = prevSel;
+    } else {
+        sel.value = 'auto';
+    }
+
+    if (idInput) {
+        if (storedManualId) {
+            idInput.value = storedManualId;
+        } else if (sel.value !== 'auto') {
+            idInput.value = sel.value;
+        } else {
+            idInput.value = cands[0]?.id || '';
+        }
+    }
+
+    if (dsaInput && (!dsaInput.value.trim() || dsaInput.dataset.autoPopulated === 'true') && ctx?.dsaNames?.[0]) {
+        dsaInput.value = ctx.dsaNames[0];
+        dsaInput.dataset.autoPopulated = 'true';
+    }
+
+    if (helpEl) {
+        if (cands.length > 0) {
+            helpEl.textContent = `✓ ${cands.length} entidade(s) encontrada(s) — principal: ${cands[0].label}`;
+        } else {
+            helpEl.textContent = 'Se Austrália pedir Advertiser (3858634), clique 🔄 ou cole o ID verificado ao lado';
+        }
+    }
+}
+
+async function loadDupAdvertiserEntities(accountIdOverride = null, forceRefresh = false) {
+    const accountId = accountIdOverride !== null
+        ? String(accountIdOverride || '')
+        : String(document.getElementById('select-meta-account')?.value || metaState.selectedAccountId || '');
+
+    if (!accountId || !hasActiveMetaAuth()) {
+        metaState.advertiserCtx = null;
+        metaState.advertiserAccountId = '';
+        renderDupAdvertiserSelect(null);
+        return null;
+    }
+
+    if (!forceRefresh && metaState.advertiserAccountId === accountId && metaState.advertiserCtx) {
+        renderDupAdvertiserSelect(metaState.advertiserCtx);
+        return metaState.advertiserCtx;
+    }
+
+    const helpEl = document.getElementById('dup-advertiser-help-text');
+    if (helpEl) helpEl.textContent = '⏳ Buscando Futuretech Dynamics / entidades verificadas na conta...';
+
+    const [accRes, bizRes, dsaRecRes, accAdsetsRes] = await Promise.allSettled([
+        fetchMetaGraphWithFieldFallback([
+            `/${META_GRAPH_VERSION}/${accountId}?fields=business{id,name},default_dsa_beneficiary,default_dsa_payor`,
+            `/${META_GRAPH_VERSION}/${accountId}?fields=business{id,name}`
+        ]),
+        fetchMetaGraphWithFieldFallback([
+            `/${META_GRAPH_VERSION}/me/businesses?fields=id,name,verification_status&limit=50`,
+            `/${META_GRAPH_VERSION}/me/businesses?fields=id,name&limit=50`
+        ]),
+        metaGraphGet(`/${META_GRAPH_VERSION}/${accountId}/dsa_recommendations`).catch(() => null),
+        fetchMetaGraphWithFieldFallback([
+            `/${META_GRAPH_VERSION}/${accountId}/adsets?fields=id,name,targeting,dsa_beneficiary,dsa_payor,regional_regulated_categories,regional_regulation_identities&limit=100`,
+            `/${META_GRAPH_VERSION}/${accountId}/adsets?fields=id,name,targeting,dsa_beneficiary,dsa_payor&limit=100`
+        ])
+    ]);
+
+    const candidateMap = new Map();
+    const upsertCandidate = ({ id, name = '', label = '', source = '', priority = 10, categoriesHint = null, identitiesHint = null }) => {
+        const sId = String(id || '').trim();
+        if (!sId) return;
+        const existing = candidateMap.get(sId);
+        if (!existing || priority > existing.priority) {
+            candidateMap.set(sId, {
+                id: sId,
+                name: name || existing?.name || sId,
+                label: label || existing?.label || `${name || 'Entidade'} (${sId})`,
+                source: source || existing?.source || '',
+                priority,
+                categoriesHint: categoriesHint || existing?.categoriesHint || null,
+                identitiesHint: identitiesHint || existing?.identitiesHint || null
+            });
+        }
+    };
+
+    const dsaNameSet = new Set();
+    const addDsaName = (val) => {
+        const s = String(val || '').trim();
+        if (s) dsaNameSet.add(s);
+    };
+
+    const accObj = accRes.status === 'fulfilled' && accRes.value && !accRes.value.error ? accRes.value : null;
+    if (accObj?.default_dsa_beneficiary) addDsaName(accObj.default_dsa_beneficiary);
+    if (accObj?.default_dsa_payor) addDsaName(accObj.default_dsa_payor);
+
+    let auSample = null;
+    const allAdSets = [
+        ...(Array.isArray(metaState.adsets) ? metaState.adsets : []),
+        ...(accAdsetsRes.status === 'fulfilled' && Array.isArray(accAdsetsRes.value?.data) ? accAdsetsRes.value.data : [])
+    ];
+
+    allAdSets.forEach(as => {
+        if (!as) return;
+        if (as.dsa_beneficiary) addDsaName(as.dsa_beneficiary);
+        if (as.dsa_payor) addDsaName(as.dsa_payor);
+        const geoCountries = Array.isArray(as.targeting?.geo_locations?.countries) ? as.targeting.geo_locations.countries : [];
+        const targetsAu = geoCountries.includes('AU') || /austr[aá]lia/i.test(as.name || '');
+        const entId = extractEntityIdFromRegObj(as.regional_regulation_identities);
+        if (entId) {
+            upsertCandidate({
+                id: entId,
+                name: as.dsa_beneficiary || (targetsAu ? 'Verificado AU' : as.name),
+                label: `${targetsAu ? '✨ Conjunto AU' : `✨ Conjunto ${as.name || as.id}`}: ${entId}`,
+                source: targetsAu ? 'au_adset' : 'adset',
+                priority: targetsAu ? 100 : 80,
+                categoriesHint: Array.isArray(as.regional_regulated_categories) && as.regional_regulated_categories.length > 0 ? as.regional_regulated_categories : null,
+                identitiesHint: as.regional_regulation_identities
+            });
+            if (targetsAu && !auSample) {
+                auSample = {
+                    categories: Array.isArray(as.regional_regulated_categories) && as.regional_regulated_categories.length > 0
+                        ? as.regional_regulated_categories
+                        : ['AUSTRALIA_UNIVERSAL'],
+                    identities: as.regional_regulation_identities,
+                    dsaBeneficiary: as.dsa_beneficiary || '',
+                    dsaPayor: as.dsa_payor || ''
+                };
+            }
+        }
+    });
+
+    if (dsaRecRes.status === 'fulfilled' && Array.isArray(dsaRecRes.value?.data)) {
+        const recs = dsaRecRes.value.data;
+        recs.filter(r => /futuretech/i.test(String(r?.name || r?.beneficiary || r || ''))).forEach(r => {
+            addDsaName(r?.name || r?.beneficiary || r?.text || (typeof r === 'string' ? r : ''));
+        });
+        recs.forEach(r => {
+            addDsaName(r?.name || r?.beneficiary || r?.text || (typeof r === 'string' ? r : ''));
+        });
+    }
+
+    const bizList = bizRes.status === 'fulfilled' && Array.isArray(bizRes.value?.data) ? bizRes.value.data : [];
+    bizList.forEach(b => {
+        if (!b?.id) return;
+        const isFuturetech = /futuretech/i.test(b.name || '');
+        const isVerified = String(b.verification_status || '').toLowerCase() === 'verified';
+        if (isFuturetech) addDsaName(b.name);
+        upsertCandidate({
+            id: b.id,
+            name: b.name || b.id,
+            label: `🏢 ${b.name || 'BM'} (${b.id})${isVerified ? ' ✓' : ''}`,
+            source: isFuturetech ? 'futuretech_bm' : 'me_business',
+            priority: isFuturetech ? 75 : (isVerified ? 48 : 35)
+        });
+    });
+
+    const accBiz = accObj?.business || metaState.selectedAccount?.business || null;
+    if (accBiz?.id) {
+        const isFuturetech = /futuretech/i.test(accBiz.name || '');
+        upsertCandidate({
+            id: accBiz.id,
+            name: accBiz.name || accBiz.id,
+            label: `🏢 BM da Conta: ${accBiz.name || accBiz.id} (${accBiz.id})`,
+            source: 'account_business',
+            priority: isFuturetech ? 78 : 55
+        });
+    }
+
+    if (Array.isArray(metaState.promotePages)) {
+        metaState.promotePages.forEach(p => {
+            if (p?.business?.id) {
+                const isFuturetech = /futuretech/i.test(p.business.name || '');
+                upsertCandidate({
+                    id: p.business.id,
+                    name: p.business.name || p.business.id,
+                    label: `🏢 BM Página: ${p.business.name || p.business.id} (${p.business.id})`,
+                    source: 'page_business',
+                    priority: isFuturetech ? 70 : 25
+                });
+            }
+        });
+    }
+
+    addDsaName('Futuretech Dynamics LLC');
+    addDsaName('Futuretech Dynamics');
+
+    const candidates = Array.from(candidateMap.values()).sort((a, b) => b.priority - a.priority);
+    const ctx = {
+        accountId,
+        candidates,
+        dsaNames: Array.from(dsaNameSet),
+        auSample
+    };
+
+    metaState.advertiserCtx = ctx;
+    metaState.advertiserAccountId = accountId;
+    renderDupAdvertiserSelect(ctx);
+    return ctx;
+}
+
+function buildRegionalComplianceAttempts({
+    countryCode = '',
+    baseAdset = null,
+    siblingAdsets = [],
+    regCtx = null,
+    accountId = '',
+    manualEntityId = '',
+    manualDsaName = '',
+    workingComplianceByCountry = {}
+}) {
+    const code = String(countryCode || '').toUpperCase();
+    const isEu = EU_DSA_COUNTRY_CODES.has(code);
+
+    const dsaNames = Array.from(new Set([
+        manualDsaName,
+        baseAdset?.dsa_beneficiary,
+        ...(Array.isArray(siblingAdsets) ? siblingAdsets.map(a => a?.dsa_beneficiary) : []),
+        ...(regCtx?.dsaNames || []),
+        'Futuretech Dynamics LLC',
+        'Futuretech Dynamics'
+    ].map(v => String(v || '').trim()).filter(Boolean)));
+
+    const primaryDsa = dsaNames[0] || 'Futuretech Dynamics LLC';
+
+    const attempts = [];
+    const seenKeys = new Set();
+    const pushAttempt = ({ label, categories = null, identities = null, dsaBeneficiary = '', dsaPayor = '' }) => {
+        const key = JSON.stringify({
+            c: categories || null,
+            i: identities || null,
+            db: dsaBeneficiary || '',
+            dp: dsaPayor || ''
+        });
+        if (seenKeys.has(key)) return;
+        seenKeys.add(key);
+        attempts.push({ key, label, categories, identities, dsaBeneficiary, dsaPayor });
+    };
+
+    const cachedBatch = workingComplianceByCountry?.[code];
+    if (cachedBatch) pushAttempt(cachedBatch);
+
+    const storedCfg = getStoredRegionalComplianceConfig(accountId, code);
+    if (storedCfg) pushAttempt({ ...storedCfg, label: `${storedCfg.label || code} (salvo)` });
+
+    if (code === 'AU' && regCtx?.auSample) {
+        pushAttempt({
+            label: `Conjunto AU da conta (${extractEntityIdFromRegObj(regCtx.auSample.identities)})`,
+            categories: regCtx.auSample.categories,
+            identities: regCtx.auSample.identities,
+            dsaBeneficiary: regCtx.auSample.dsaBeneficiary || primaryDsa,
+            dsaPayor: regCtx.auSample.dsaPayor || primaryDsa
+        });
+        pushAttempt({
+            label: `Conjunto AU da conta sem DSA (${extractEntityIdFromRegObj(regCtx.auSample.identities)})`,
+            categories: regCtx.auSample.categories,
+            identities: regCtx.auSample.identities
+        });
+    }
+
+    const entityIds = [];
+    const seenEnt = new Set();
+    const addEnt = (id, label = '') => {
+        const sId = String(id || '').trim();
+        if (!sId || seenEnt.has(sId)) return;
+        seenEnt.add(sId);
+        entityIds.push({ id: sId, label: label || sId });
+    };
+
+    if (manualEntityId) addEnt(manualEntityId, `ID informado (${manualEntityId})`);
+    const baseEntId = extractEntityIdFromRegObj(baseAdset?.regional_regulation_identities);
+    if (baseEntId) addEnt(baseEntId, `Conjunto base (${baseEntId})`);
+    (siblingAdsets || []).forEach(a => {
+        const sId = extractEntityIdFromRegObj(a?.regional_regulation_identities);
+        if (sId) addEnt(sId, `Conjunto irmão (${sId})`);
+    });
+    (regCtx?.candidates || []).forEach(c => addEnt(c.id, c.label || c.id));
+
+    if (isEu && code !== 'ES') {
+        pushAttempt({
+            label: `DSA UE (${primaryDsa})`,
+            dsaBeneficiary: primaryDsa,
+            dsaPayor: baseAdset?.dsa_payor || primaryDsa
+        });
+    }
+
+    const catMatrix = REGIONAL_COUNTRY_CATEGORIES[code] || [['VOLUNTARY_VERIFICATION']];
+    const shouldProactive = code === 'AU' || isEu || Boolean(REGIONAL_COUNTRY_CATEGORIES[code]) || Boolean(cachedBatch || storedCfg);
+
+    entityIds.forEach(ent => {
+        catMatrix.forEach(cats => {
+            const isFinServAu = cats.includes('AUSTRALIA_FINSERV');
+            const idObj = isFinServAu
+                ? { australia_finserv_beneficiary: ent.id, australia_finserv_payer: ent.id }
+                : { universal_beneficiary: ent.id, universal_payer: ent.id };
+
+            if (isEu || code === 'AU' || !REGIONAL_COUNTRY_CATEGORIES[code]) {
+                pushAttempt({
+                    label: `${cats.join('+')} + ${ent.label} + DSA`,
+                    categories: cats,
+                    identities: idObj,
+                    dsaBeneficiary: primaryDsa,
+                    dsaPayor: primaryDsa
+                });
+            }
+            pushAttempt({
+                label: `${cats.join('+')} + ${ent.label}`,
+                categories: cats,
+                identities: idObj
+            });
+        });
+    });
+
+    dsaNames.slice(0, 2).forEach(dn => {
+        pushAttempt({
+            label: `DSA '${dn}'`,
+            dsaBeneficiary: dn,
+            dsaPayor: dn
+        });
+    });
+
+    attempts.shouldProactive = shouldProactive;
+    return attempts;
+}
+
+function applyComplianceAttemptToAdSetPayload(payloadObj, attempt) {
+    delete payloadObj.regional_regulated_categories;
+    delete payloadObj.regional_regulation_identities;
+    delete payloadObj.dsa_beneficiary;
+    delete payloadObj.dsa_payor;
+    if (!attempt) return payloadObj;
+    if (Array.isArray(attempt.categories) && attempt.categories.length > 0) {
+        payloadObj.regional_regulated_categories = attempt.categories;
+    }
+    if (attempt.identities && typeof attempt.identities === 'object') {
+        payloadObj.regional_regulation_identities = attempt.identities;
+    }
+    if (attempt.dsaBeneficiary) payloadObj.dsa_beneficiary = attempt.dsaBeneficiary;
+    if (attempt.dsaPayor) payloadObj.dsa_payor = attempt.dsaPayor;
+    return payloadObj;
+}
+
+function buildMetaAdvertiserHelpHint(countryName = 'Austrália', countryCode = 'AU', regCtx = null) {
+    const foundCount = regCtx?.candidates?.length || 0;
+    return (
+        `📌 COMO RESOLVER VERIFICAÇÃO DO ANUNCIANTE EM ${countryName.toUpperCase()} (${countryCode}) - subcode 3858634:\n` +
+        `A Meta exige uma Entidade Verificada ('Futuretech Dynamics') para entregar anúncios nesse país (entidades detectadas na conta: ${foundCount}).\n` +
+        `1. No Gerenciador de Anúncios da Meta, duplique ou edite 1 conjunto para '${countryName}', selecione "Futuretech Dynamics" no campo Advertiser / Anunciante e publique (pode deixar pausado).\n` +
+        `2. Volte aqui na Etapa 2 do Duplicador e clique no botão 🔄 ao lado de "Anunciante / Advertiser" — o painel copiará automaticamente o ID verificado desse conjunto!\n` +
+        `3. Se já tiver o ID numérico da entidade verificada no Business Manager (Configurações do Negócio > Entidades Verificadas / Identities), cole no campo "ID Entidade Verificada" na Etapa 2.`
+    );
+}
+
 // Disparado ao trocar de conta de anúncios
 async function onMetaAccountSelected() {
     const selectAcc = document.getElementById('select-meta-account');
@@ -2801,6 +3277,7 @@ async function onMetaAccountSelected() {
     if (!accountId) {
         selectCamp.innerHTML = '<option value="">Selecione uma conta primeiro...</option>';
         loadDupPromotePages('').catch(() => {});
+        loadDupAdvertiserEntities('').catch(() => {});
         return;
     }
 
@@ -2813,8 +3290,9 @@ async function onMetaAccountSelected() {
         currencyPrefix.innerText = '$';
     }
 
-    // Busca em paralelo as Páginas autorizadas da conta para o seletor e fallback 1885499
+    // Busca em paralelo Páginas autorizadas (1885499) e Entidades Verificadas / Futuretech Dynamics (3858634)
     loadDupPromotePages(accountId).catch(() => {});
+    loadDupAdvertiserEntities(accountId).catch(() => {});
 
     if (labelCamp) labelCamp.innerText = '(Buscando...)';
 
@@ -6287,14 +6765,15 @@ async function startBatchDuplication() {
         }
     }
 
-    const EU_DSA_SET = new Set([
-        'AT', 'BE', 'BG', 'HR', 'CY', 'CZ', 'DK', 'EE', 'FI', 'FR',
-        'DE', 'GR', 'HU', 'IE', 'IT', 'LV', 'LT', 'LU', 'MT', 'NL',
-        'PL', 'PT', 'RO', 'SK', 'SI', 'ES', 'SE'
-    ]);
-    const siblingDsaAdset = (metaState.adsets || []).find(a => a.dsa_beneficiary);
-    const fallbackDsaName = adsetObj.dsa_beneficiary || siblingDsaAdset?.dsa_beneficiary || 'Futuretech Dynamics LLC';
-    const baseRegId = adsetObj.regional_regulation_identities || null;
+    const regCtx = await loadDupAdvertiserEntities(accountId).catch(() => metaState.advertiserCtx || null);
+    const manualEntitySel = document.getElementById('select-dup-advertiser-entity')?.value || 'auto';
+    const manualEntityId = (document.getElementById('input-dup-reg-entity-id')?.value || '').trim()
+        || (manualEntitySel !== 'auto' ? manualEntitySel : '');
+    const manualDsaName = (document.getElementById('input-dup-dsa-name')?.value || '').trim();
+    if (manualEntityId && manualEntityId !== regCtx?.candidates?.[0]?.id) {
+        setStoredManualEntityId(accountId, manualEntityId);
+    }
+    const workingComplianceByCountry = {};
 
     const detectedBasePageId = (() => {
         for (const ad of baseAds) {
@@ -6312,6 +6791,7 @@ async function startBatchDuplication() {
     let failCount = 0;
     let abortedReason = '';
     let abortedPagePerm = false;
+    let abortedAdvCountry = null;
     const startTime = Date.now();
 
     for (let i = 0; i < countriesToDuplicate.length; i++) {
@@ -6387,7 +6867,7 @@ async function startBatchDuplication() {
                 }
             };
 
-            // PASSO 4: Atualiza o conjunto clonado via POST /{copied_id} com retries p/ DSA/regulação/start_time
+            // PASSO 4: Atualiza o conjunto clonado via POST /{copied_id} com suporte automático a Advertiser (AU/UE/BR/3858634)
             const updatePayload = {
                 name: finalName,
                 daily_budget: budgetInCents.toString(),
@@ -6397,19 +6877,21 @@ async function startBatchDuplication() {
             if (isScheduled && scheduledMetaStartTime) {
                 updatePayload.start_time = scheduledMetaStartTime;
             }
-            if (EU_DSA_SET.has(country.code)) {
-                updatePayload.dsa_beneficiary = fallbackDsaName;
-                updatePayload.dsa_payor = metaState.selectedAdSet?.dsa_payor || siblingDsaAdset?.dsa_payor || fallbackDsaName;
-            }
-            if (baseRegId?.universal_beneficiary) {
-                updatePayload.regional_regulation_identities = baseRegId;
-                if (country.code === 'ES') {
-                    updatePayload.regional_regulated_categories = ['SPAIN_FINSERV', 'VOLUNTARY_VERIFICATION'];
-                } else if (country.code === 'BR') {
-                    updatePayload.regional_regulated_categories = ['BRAZIL_REGULATION', 'VOLUNTARY_VERIFICATION'];
-                } else {
-                    updatePayload.regional_regulated_categories = ['VOLUNTARY_VERIFICATION'];
-                }
+
+            const complianceAttempts = buildRegionalComplianceAttempts({
+                countryCode: country.code,
+                baseAdset: adsetObj,
+                siblingAdsets: metaState.adsets || [],
+                regCtx,
+                accountId,
+                manualEntityId,
+                manualDsaName,
+                workingComplianceByCountry
+            });
+            let complianceIdx = -1;
+            if (complianceAttempts.shouldProactive && complianceAttempts.length > 0) {
+                complianceIdx = 0;
+                applyComplianceAttemptToAdSetPayload(updatePayload, complianceAttempts[0]);
             }
 
             const postAdSetUpdate = async (payloadObj) => {
@@ -6424,24 +6906,50 @@ async function startBatchDuplication() {
 
             let updateData = await postAdSetUpdate(updatePayload);
             const retried = new Set();
-            for (let attempt = 0; attempt < 5 && updateData.error; attempt++) {
+            const maxUpdateAttempts = Math.max(6, complianceAttempts.length + 3);
+            for (let attempt = 0; attempt < maxUpdateAttempts && updateData.error; attempt++) {
                 const errMsg = (updateData.error.message || '').toLowerCase();
+                const errSub = Number(updateData.error.error_subcode || 0);
+                const isMissingAdv = isMetaMissingAdvertiserError(updateData.error);
+                const isRegOrDsaErr = isMissingAdv
+                    || errMsg.includes('regional_regulat')
+                    || errMsg.includes('voluntary_verification')
+                    || errMsg.includes('brazil_regulation')
+                    || errMsg.includes('spain_finserv')
+                    || errMsg.includes('australia_')
+                    || errMsg.includes('dsa_beneficiary')
+                    || errMsg.includes('dsa_payor');
+
                 if (!retried.has('start_time') && copyAppliedStartTime && errMsg.includes('start_time')) {
                     retried.add('start_time');
                     delete updatePayload.start_time;
-                } else if (!retried.has('reg') && (errMsg.includes('regional_regulat') || errMsg.includes('voluntary_verification') || errMsg.includes('brazil_regulation'))) {
-                    retried.add('reg');
-                    delete updatePayload.regional_regulated_categories;
-                    delete updatePayload.regional_regulation_identities;
-                } else if (!retried.has('dsa') && (errMsg.includes('dsa_beneficiary') || errMsg.includes('dsa_payor'))) {
-                    retried.add('dsa');
-                    delete updatePayload.dsa_beneficiary;
-                    delete updatePayload.dsa_payor;
                 } else if (!retried.has('targeting') && (errMsg.includes('targeting') || errMsg.includes('advantage_audience'))) {
                     retried.add('targeting');
                     updatePayload.targeting = {
                         geo_locations: { countries: [country.code], location_types: ['frequently_in', 'home', 'recent'] }
                     };
+                } else if (isRegOrDsaErr) {
+                    const onlyDsaRejected = !isMissingAdv && (errMsg.includes('dsa_beneficiary') || errMsg.includes('dsa_payor')) && !errMsg.includes('regional_regulat');
+                    let nextIdx = -1;
+                    for (let k = complianceIdx + 1; k < complianceAttempts.length; k++) {
+                        if (onlyDsaRejected && complianceAttempts[k].dsaBeneficiary) continue;
+                        nextIdx = k;
+                        break;
+                    }
+                    if (nextIdx !== -1) {
+                        complianceIdx = nextIdx;
+                        const nextComp = complianceAttempts[complianceIdx];
+                        logMetaTerminal(`🏢 Ajustando Advertiser/Compliance em ${finalName} (${errSub || 'regulação'}) ➔ '${nextComp.label}'...`, 'warn');
+                        applyComplianceAttemptToAdSetPayload(updatePayload, nextComp);
+                    } else if (!retried.has('reg_strip') && !isMissingAdv) {
+                        retried.add('reg_strip');
+                        delete updatePayload.regional_regulated_categories;
+                        delete updatePayload.regional_regulation_identities;
+                        delete updatePayload.dsa_beneficiary;
+                        delete updatePayload.dsa_payor;
+                    } else {
+                        break;
+                    }
                 } else {
                     break;
                 }
@@ -6452,6 +6960,15 @@ async function startBatchDuplication() {
                 const uErr = new Error(formatMetaApiError(updateData.error));
                 uErr.rawMetaError = updateData.error;
                 throw uErr;
+            }
+
+            if (complianceIdx >= 0 && complianceAttempts[complianceIdx]) {
+                const winningComp = complianceAttempts[complianceIdx];
+                workingComplianceByCountry[country.code] = winningComp;
+                saveStoredRegionalComplianceConfig(accountId, country.code, winningComp);
+                if (complianceIdx > 0 || country.code === 'AU') {
+                    logMetaTerminal(`🏢 Advertiser aplicado em ${finalName}: '${winningComp.label}'`, 'info');
+                }
             }
 
             // PASSO 5: Publica anúncios clonados (mesmo idioma), traduzidos (idioma com criativo) ou omite se estrutura exclusiva
@@ -6680,12 +7197,20 @@ async function startBatchDuplication() {
                 const remaining = total - currentIdx;
                 abortedReason = err.message;
                 abortedPagePerm = isMetaPagePermissionError(err.rawMetaError || err.message);
+                const isMissingAdv = !abortedPagePerm && isMetaMissingAdvertiserError(err.rawMetaError || err.message);
+                if (isMissingAdv) {
+                    abortedAdvCountry = { name: country.adSetName, code: country.code };
+                }
                 logMetaTerminal(
                     `🛑 Trava Anti-Conjunto Vazio acionada: lote interrompido em [${currentIdx}/${total}] para não criar ${remaining > 0 ? `os outros ${remaining} conjunto(s)` : 'conjuntos'} sem anúncios!`,
                     'warn'
                 );
                 if (abortedPagePerm) {
                     buildMetaPagePermissionHint(detectedBasePageId).split('\n').forEach(line => {
+                        if (line.trim()) logMetaTerminal(line, 'warn');
+                    });
+                } else if (abortedAdvCountry) {
+                    buildMetaAdvertiserHelpHint(abortedAdvCountry.name, abortedAdvCountry.code, regCtx).split('\n').forEach(line => {
                         if (line.trim()) logMetaTerminal(line, 'warn');
                     });
                 }
@@ -6707,7 +7232,11 @@ async function startBatchDuplication() {
         if (termStatus) termStatus.innerText = 'Concluído';
     } else {
         if (progressStatus) progressStatus.innerText = `🛑 Interrompido (${successCount} criado(s), ${failCount} falha)`;
-        if (termStatus) termStatus.innerText = abortedPagePerm ? 'Bloqueado (Permissão na Página)' : 'Interrompido por erro';
+        if (termStatus) {
+            termStatus.innerText = abortedPagePerm
+                ? 'Bloqueado (Permissão na Página)'
+                : (abortedAdvCountry ? `Bloqueado (Advertiser ${abortedAdvCountry.code})` : 'Interrompido por erro');
+        }
     }
 
     finishDuplicationUi();
@@ -6720,7 +7249,9 @@ async function startBatchDuplication() {
     );
 
     if (abortedReason && failCount > 0) {
-        const extraHint = abortedPagePerm ? `\n\n${buildMetaPagePermissionHint(detectedBasePageId)}` : '';
+        const extraHint = abortedPagePerm
+            ? `\n\n${buildMetaPagePermissionHint(detectedBasePageId)}`
+            : (abortedAdvCountry ? `\n\n${buildMetaAdvertiserHelpHint(abortedAdvCountry.name, abortedAdvCountry.code, regCtx)}` : '');
         alert(
             `🛑 LOTE INTERROMPIDO NO 1º ERRO (CONJUNTOS VAZIOS EVITADOS):\n\n` +
             `• Motivo: ${abortedReason}\n` +
@@ -7002,6 +7533,10 @@ window.toggleChangelogHistory = toggleChangelogHistory;
 // Funções Meta Ads & Duplicador
 window.reloadMetaAccounts = loadMetaAccounts;
 window.loadDupPromotePages = loadDupPromotePages;
+window.loadDupAdvertiserEntities = loadDupAdvertiserEntities;
+window.onDupAdvertiserEntityChanged = onDupAdvertiserEntityChanged;
+window.buildRegionalComplianceAttempts = buildRegionalComplianceAttempts;
+window.isMetaMissingAdvertiserError = isMetaMissingAdvertiserError;
 window.onMetaAccountSelected = onMetaAccountSelected;
 window.onMetaCampaignSelected = onMetaCampaignSelected;
 window.onMetaAdSetSelected = onMetaAdSetSelected;
