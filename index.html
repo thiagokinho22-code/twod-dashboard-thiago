@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>TwoD Hub — Central de Automações</title>
-    <link rel="stylesheet" href="styles.css?v=3.4">
+    <link rel="stylesheet" href="styles.css?v=3.5">
 </head>
 <body>
 
@@ -1363,11 +1363,15 @@
 
                         <!-- Card de resumo do Conjunto Base Selecionado -->
                         <div id="base-adset-details-box" class="adset-preview-box twod-hidden">
-                            <div class="adset-preview-header">
+                            <div class="adset-preview-header" style="flex-wrap: wrap; gap: 10px;">
                                 <span class="adset-icon">📦</span>
-                                <div style="flex: 1;">
+                                <div style="flex: 1; min-width: 220px;">
                                     <strong id="preview-adset-name">Nome do Conjunto</strong>
                                     <div class="text-muted" id="preview-adset-meta">Orçamento: $1.00 | Segmentação detectada</div>
+                                </div>
+                                <div id="dup-preview-quick-links" style="display: flex; gap: 6px; flex-wrap: wrap; align-items: center;">
+                                    <a id="link-preview-open-camp" href="#" target="_blank" rel="noopener noreferrer" class="btn-chip" style="text-decoration:none; display:none;" title="Abrir esta campanha no Meta Ads Manager">🎯 Campanha ↗</a>
+                                    <a id="link-preview-open-adset" href="#" target="_blank" rel="noopener noreferrer" class="btn-chip btn-chip-primary" style="text-decoration:none; display:none;" title="Abrir este conjunto base no Meta Ads Manager">📦 Conjunto ↗</a>
                                 </div>
                             </div>
                             <div class="adset-preview-tags" id="preview-adset-tags">
@@ -1586,6 +1590,16 @@
                             <div class="progress-bar-bg">
                                 <div id="duplication-progress-fill" class="progress-bar-fill" style="width: 0%;"></div>
                             </div>
+                        </div>
+
+                        <!-- ATALHOS RÁPIDOS EM CASO DE ERRO (LINKS DIRETOS META ADS MANAGER) -->
+                        <div id="dup-error-action-card" class="dup-error-action-card twod-hidden">
+                            <div class="dup-error-action-head">
+                                <strong id="dup-error-action-title">⚠️ Ação Necessária no Gerenciador de Anúncios</strong>
+                                <button type="button" class="btn-chip" onclick="hideDupErrorActionCard()" title="Fechar aviso" style="padding:3px 8px; font-size:11px;">✕</button>
+                            </div>
+                            <div id="dup-error-action-desc" class="dup-error-action-desc"></div>
+                            <div id="dup-error-action-buttons" class="dup-error-action-buttons"></div>
                         </div>
 
                         <!-- TERMINAL / CONSOLE DE LOG AO VIVO -->
@@ -1997,7 +2011,7 @@
         ⬆ Topo
     </button>
 
-    <script src="app.js?v=9.11"></script>
+    <script src="app.js?v=9.12"></script>
     <script src="studio.js?v=1.11"></script>
     <script src="creative_gen.js?v=1.2"></script>
     <script src="campaign_builder.js?v=1.10"></script>

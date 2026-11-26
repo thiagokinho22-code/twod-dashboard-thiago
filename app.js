@@ -690,6 +690,17 @@ const tabTitles = {
 // ========================================================
 const PANEL_CHANGELOG = [
     {
+        date: '26/11/2026',
+        type: 'feat',
+        badge: '🔗 Link Direto Meta Ads',
+        title: 'Botões diretos para abrir Anúncio, Conjunto e Campanha no Gerenciador em erros + Prévia',
+        summary: 'Sempre que ocorrer um erro que exija ajuste manual (página, post, advertiser ou criativo), o terminal e o card de alerta exibem botões clicáveis direto para o item exato.',
+        highlights: [
+            'Gera o link exato (act + selected_campaign_ids + selected_adset_ids + selected_ad_ids) no /ads/edit/standalone ou /adsets/edit/standalone.',
+            'Atalhos rápidos também na Etapa 1 (Campanha, Conjunto Base e em cada miniatura de anúncio).'
+        ]
+    },
+    {
         date: '25/11/2026',
         type: 'feat',
         badge: '🛡️ Fix 3858756 & /copies',
@@ -3397,6 +3408,7 @@ async function onMetaAccountSelected() {
         selectAdSet.disabled = true;
     }
     hideBaseAdSetPreview();
+    hideDupErrorActionCard();
 
     if (!accountId) {
         selectCamp.innerHTML = '<option value="">Selecione uma conta primeiro...</option>';
@@ -3703,12 +3715,164 @@ function showBaseAdSetPreview(adset) {
         tagsEl.appendChild(tag3);
     }
 
+    const urls = buildMetaAdsManagerUrls({
+        accountId: metaState.selectedAccountId,
+        campaignId: metaState.selectedCampaignId,
+        adsetId: adset.id
+    });
+    const campLinkEl = document.getElementById('link-preview-open-camp');
+    const adsetLinkEl = document.getElementById('link-preview-open-adset');
+    if (campLinkEl) {
+        campLinkEl.href = urls.campaignUrl;
+        campLinkEl.style.display = metaState.selectedCampaignId ? 'inline-flex' : 'none';
+    }
+    if (adsetLinkEl) {
+        adsetLinkEl.href = urls.adsetUrl;
+        adsetLinkEl.style.display = adset?.id ? 'inline-flex' : 'none';
+    }
+
     box.classList.remove('twod-hidden');
 }
 
 function hideBaseAdSetPreview() {
     const box = document.getElementById('base-adset-details-box');
     if (box) box.classList.add('twod-hidden');
+    const campLinkEl = document.getElementById('link-preview-open-camp');
+    const adsetLinkEl = document.getElementById('link-preview-open-adset');
+    if (campLinkEl) campLinkEl.style.display = 'none';
+    if (adsetLinkEl) adsetLinkEl.style.display = 'none';
+}
+
+function buildMetaAdsManagerUrls({ accountId = '', campaignId = '', adsetId = '', adId = '' } = {}) {
+    const actNum = String(accountId || '').replace(/^act_/i, '').trim();
+    const base = 'https://adsmanager.facebook.com/adsmanager/manage';
+    const qs = (pairs) => pairs
+        .filter(([, v]) => Boolean(v))
+        .map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`)
+        .join('&');
+
+    const campQ = qs([['act', actNum], ['selected_campaign_ids', campaignId]]);
+    const adsetQ = qs([['act', actNum], ['selected_campaign_ids', campaignId], ['selected_adset_ids', adsetId]]);
+    const adQ = qs([
+        ['act', actNum],
+        ['selected_campaign_ids', campaignId],
+        ['selected_adset_ids', adsetId],
+        ['selected_ad_ids', adId]
+    ]);
+
+    return {
+        campaignUrl: `${base}/adsets${campQ ? '?' + campQ : ''}`,
+        adsetUrl: `${base}/adsets/edit/standalone${adsetQ ? '?' + adsetQ : ''}`,
+        adUrl: `${base}/ads/edit/standalone${adQ ? '?' + adQ : ''}`,
+        adsTabUrl: `${base}/ads${adQ ? '?' + adQ : ''}`,
+        bmSystemUsersUrl: 'https://business.facebook.com/settings/system-users'
+    };
+}
+
+function buildMetaErrorActionItems({
+    accountId = '',
+    campaignId = '',
+    adsetId = '',
+    adId = '',
+    targetAdsetId = '',
+    pageId = '',
+    isPagePerm = false
+} = {}) {
+    const items = [];
+    const baseUrls = buildMetaAdsManagerUrls({ accountId, campaignId, adsetId, adId });
+
+    if (targetAdsetId && String(targetAdsetId) !== String(adsetId || '')) {
+        const targetUrls = buildMetaAdsManagerUrls({ accountId, campaignId, adsetId: targetAdsetId });
+        items.push({
+            href: targetUrls.adsetUrl,
+            label: '📦 Abrir Conjunto Criado no Meta Ads ↗',
+            title: `Abrir conjunto ${targetAdsetId} no Gerenciador de Anúncios`,
+            variant: 'primary'
+        });
+    }
+    if (adId) {
+        items.push({
+            href: baseUrls.adUrl,
+            label: '📢 Abrir Anúncio no Meta Ads ↗',
+            title: `Abrir editor do anúncio ${adId} no Gerenciador`,
+            variant: 'primary'
+        });
+    }
+    if (adsetId) {
+        items.push({
+            href: baseUrls.adsetUrl,
+            label: '📦 Abrir Conjunto Base no Meta Ads ↗',
+            title: `Abrir conjunto base ${adsetId} no Gerenciador`,
+            variant: adId ? 'secondary' : 'primary'
+        });
+    }
+    if (campaignId) {
+        items.push({
+            href: baseUrls.campaignUrl,
+            label: '🎯 Abrir Campanha ↗',
+            title: `Abrir campanha ${campaignId} no Gerenciador`,
+            variant: 'secondary'
+        });
+    }
+    if (isPagePerm) {
+        items.push({
+            href: baseUrls.bmSystemUsersUrl,
+            label: pageId ? `🔐 Liberar Página ${pageId} no BM ↗` : '🔐 Liberar Página no BM ↗',
+            title: 'Abrir Usuários do Sistema no Business Manager',
+            variant: 'warn'
+        });
+    }
+    return items;
+}
+
+function hideDupErrorActionCard() {
+    const card = document.getElementById('dup-error-action-card');
+    if (card) card.classList.add('twod-hidden');
+    const btns = document.getElementById('dup-error-action-buttons');
+    if (btns) btns.innerHTML = '';
+}
+
+function showDupErrorActionCard({
+    title = '⚠️ Ação Necessária no Gerenciador de Anúncios',
+    desc = '',
+    accountId = '',
+    campaignId = '',
+    adsetId = '',
+    adId = '',
+    targetAdsetId = '',
+    pageId = '',
+    isPagePerm = false
+} = {}) {
+    const card = document.getElementById('dup-error-action-card');
+    const titleEl = document.getElementById('dup-error-action-title');
+    const descEl = document.getElementById('dup-error-action-desc');
+    const btnsEl = document.getElementById('dup-error-action-buttons');
+    if (!card || !btnsEl) return;
+
+    const items = buildMetaErrorActionItems({
+        accountId, campaignId, adsetId, adId, targetAdsetId, pageId, isPagePerm
+    });
+    if (items.length === 0) {
+        hideDupErrorActionCard();
+        return;
+    }
+
+    if (titleEl) titleEl.textContent = title;
+    if (descEl) descEl.textContent = desc || 'Clique abaixo para ir direto ao item exato no Meta Ads Manager:';
+    btnsEl.innerHTML = '';
+
+    items.forEach(item => {
+        const a = document.createElement('a');
+        a.href = item.href;
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        a.className = `dup-error-action-btn ${item.variant === 'primary' ? 'primary' : (item.variant === 'warn' ? 'warn' : '')}`.trim();
+        a.title = item.title || item.label;
+        a.textContent = item.label;
+        btnsEl.appendChild(a);
+    });
+
+    card.classList.remove('twod-hidden');
 }
 
 // ========================================================
@@ -5232,6 +5396,24 @@ async function loadBaseAdSetMetaThumbnails(adsetId) {
                 statusSpan.innerText = item.isActive ? '🟢 Ativo' : '⏸️ Pausado';
                 card.appendChild(statusSpan);
 
+                if (item.adId) {
+                    const adUrls = buildMetaAdsManagerUrls({
+                        accountId: metaState.selectedAccountId,
+                        campaignId: metaState.selectedCampaignId,
+                        adsetId,
+                        adId: item.adId
+                    });
+                    const editLink = document.createElement('a');
+                    editLink.href = adUrls.adUrl;
+                    editLink.target = '_blank';
+                    editLink.rel = 'noopener noreferrer';
+                    editLink.className = 'dup-thumb-open-link';
+                    editLink.innerText = '📢 Abrir Anúncio ↗';
+                    editLink.title = `Abrir anúncio ${item.adId} no Meta Ads Manager`;
+                    editLink.addEventListener('click', (ev) => ev.stopPropagation());
+                    card.appendChild(editLink);
+                }
+
                 thumbsRow.appendChild(card);
             });
 
@@ -6193,6 +6375,38 @@ function logMetaTerminal(message, type = 'info') {
     terminal.scrollTop = terminal.scrollHeight;
 }
 
+function logMetaTerminalActions(opts = {}) {
+    const terminal = document.getElementById('meta-terminal-body');
+    if (!terminal) return;
+    const emptyLog = terminal.querySelector('.terminal-log-empty');
+    if (emptyLog) emptyLog.remove();
+
+    const items = buildMetaErrorActionItems(opts);
+    if (!items.length) return;
+
+    const row = document.createElement('div');
+    row.className = 'terminal-entry-actions';
+
+    const prefix = document.createElement('span');
+    prefix.style.cssText = 'font-size:11.5px; font-weight:700; color:#93c5fd; align-self:center; margin-right:2px;';
+    prefix.textContent = '🔗 Ir direto no Meta Ads:';
+    row.appendChild(prefix);
+
+    items.forEach(item => {
+        const a = document.createElement('a');
+        a.href = item.href;
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        a.className = 'terminal-action-btn';
+        a.title = item.title || item.label;
+        a.textContent = item.label;
+        row.appendChild(a);
+    });
+
+    terminal.appendChild(row);
+    terminal.scrollTop = terminal.scrollHeight;
+}
+
 function clearMetaLog() {
     const terminal = document.getElementById('meta-terminal-body');
     if (terminal) {
@@ -6200,6 +6414,7 @@ function clearMetaLog() {
     }
     const clearBtn = document.getElementById('btn-clear-meta-log');
     if (clearBtn) clearBtn.style.display = 'none';
+    hideDupErrorActionCard();
 }
 
 function getMetaLogPlainText() {
@@ -6455,6 +6670,7 @@ async function startBatchDuplication() {
     if (clearBtn) clearBtn.style.display = 'inline-block';
     if (progressWrapper) progressWrapper.classList.remove('twod-hidden');
     if (termStatus) termStatus.innerText = 'Em execução...';
+    hideDupErrorActionCard();
 
     let accountPromotePages = [];
     if (selectedPageOverride !== 'auto' || autoFallbackPage) {
@@ -6465,7 +6681,7 @@ async function startBatchDuplication() {
         }
     }
 
-    logMetaTerminal(`🚀 Iniciando processo de duplicação para ${countriesToDuplicate.length} países no bloco ${block.title}...`, 'info');
+    logMetaTerminal(`🚀 Iniciando processo de duplicação para ${countriesToDuplicate.length} países no bloco ${block.title}... [v9.12]`, 'info');
     logMetaTerminal(`🎯 Campanha de Destino: '${campObj.name}' (ID: ${campObj.id})`, 'info');
     logMetaTerminal(`📦 Conjunto base: '${adsetObj.name}' (${baseLang.toUpperCase()} | ID: ${adsetObj.id})`, 'info');
     if (activeWorkingPageId) {
@@ -6884,7 +7100,24 @@ async function startBatchDuplication() {
         );
 
         if (!proceedEmpty) {
+            const firstBaseAdId = baseAds[0]?.id || '';
+            const actionOpts = {
+                accountId,
+                campaignId,
+                adsetId,
+                adId: firstBaseAdId,
+                pageId: pagePermItem?.pageId || '',
+                isPagePerm: Boolean(pagePermItem)
+            };
             logMetaTerminal(`🛑 Operação cancelada antes de criar conjuntos vazios sem anúncio.`, 'warn');
+            logMetaTerminalActions(actionOpts);
+            showDupErrorActionCard({
+                title: hasDevMode
+                    ? '🔒 App Meta em Modo de Desenvolvimento (1885183)'
+                    : (pagePermItem ? '📄 Permissão da Página Bloqueada (Gerenciador)' : '❌ Falha ao Criar Anúncios Traduzidos'),
+                desc: failLines,
+                ...actionOpts
+            });
             if (termStatus) termStatus.innerText = hasDevMode ? 'Bloqueado (App Meta em Desenvolvimento)' : (pagePermItem ? 'Bloqueado (Permissão da Página)' : 'Cancelado');
             if (progressStatus) progressStatus.innerText = 'Cancelado antes de criar conjuntos vazios';
             finishDuplicationUi();
@@ -7093,6 +7326,7 @@ async function startBatchDuplication() {
             let expectedAds = 0;
             let adsCreated = 0;
             const adErrors = [];
+            let firstFailedAdId = '';
             let countryModeMsg = '';
 
             const createAdInCopiedSet = async (adName, creativeId, urlTags) => {
@@ -7224,6 +7458,7 @@ async function startBatchDuplication() {
                             adsCreated++;
                         } else if (adResult.error) {
                             adErrors.push(adResult.error);
+                            if (!firstFailedAdId) firstFailedAdId = baseAds[0]?.id || '';
                             logMetaTerminal(`❌ Anúncio '${item.adName}' em ${finalName} falhou: ${formatMetaApiError(adResult.error)}`, 'error');
                             if (stopOnFirstError) break;
                         }
@@ -7238,6 +7473,7 @@ async function startBatchDuplication() {
                             adsCreated++;
                         } else if (adResult.error) {
                             adErrors.push(adResult.error);
+                            if (!firstFailedAdId) firstFailedAdId = baseAd.id || '';
                             logMetaTerminal(`❌ Anúncio '${baseAd.name}' em ${finalName} falhou: ${formatMetaApiError(adResult.error)}`, 'error');
                             if (stopOnFirstError) break;
                         }
@@ -7254,6 +7490,7 @@ async function startBatchDuplication() {
                         adsCreated++;
                     } else if (adResult.error) {
                         adErrors.push(adResult.error);
+                        if (!firstFailedAdId) firstFailedAdId = baseAds[0]?.id || '';
                         logMetaTerminal(`❌ Anúncio traduzido '${item.adName}' em ${finalName} falhou: ${formatMetaApiError(adResult.error)}`, 'error');
                         if (stopOnFirstError) break;
                     }
@@ -7272,6 +7509,7 @@ async function startBatchDuplication() {
                 }
                 const adErrObj = new Error(`Anúncio falhou (${adsCreated}/${expectedAds} criados): ${formatMetaApiError(firstAdErr)}`);
                 adErrObj.rawMetaError = firstAdErr;
+                adErrObj.failingAdId = firstFailedAdId || baseAds[0]?.id || '';
                 adErrObj.isCircuitBreaker = Boolean(firstAdErr.is_circuit_breaker);
                 throw adErrObj;
             }
@@ -7304,6 +7542,30 @@ async function startBatchDuplication() {
                 copiedAdSetId = '';
             }
 
+            const errPagePerm = isMetaPagePermissionError(err.rawMetaError || err.message);
+            const errMissingAdv = !errPagePerm && isMetaMissingAdvertiserError(err.rawMetaError || err.message);
+            const errActionAdId = err.failingAdId || baseAds[0]?.id || '';
+            const errActionOpts = {
+                accountId,
+                campaignId,
+                adsetId,
+                adId: errActionAdId,
+                targetAdsetId: copiedAdSetId || '',
+                pageId: detectedBasePageId,
+                isPagePerm: errPagePerm
+            };
+
+            logMetaTerminalActions(errActionOpts);
+            showDupErrorActionCard({
+                title: errPagePerm
+                    ? `📄 Erro de Permissão na Página em '${finalName}'`
+                    : (errMissingAdv
+                        ? `🏢 Advertiser Pendente em '${finalName}' (${country.code})`
+                        : `⚠️ Erro em '${finalName}' — Abrir no Meta Ads Manager`),
+                desc: err.message,
+                ...errActionOpts
+            });
+
             if (err.isCircuitBreaker || /Proteção anti-rajada ativa|rate limit/i.test(err.message || '')) {
                 abortedReason = 'Pausado pelo Circuit Breaker anti-rajada.';
                 logMetaTerminal('🛑 Lote pausado automaticamente pelo Circuit Breaker para proteger o App Meta contra bloqueios. Veja o Status do App na Visão Geral.', 'warn');
@@ -7313,9 +7575,8 @@ async function startBatchDuplication() {
             if (stopOnFirstError) {
                 const remaining = total - currentIdx;
                 abortedReason = err.message;
-                abortedPagePerm = isMetaPagePermissionError(err.rawMetaError || err.message);
-                const isMissingAdv = !abortedPagePerm && isMetaMissingAdvertiserError(err.rawMetaError || err.message);
-                if (isMissingAdv) {
+                abortedPagePerm = errPagePerm;
+                if (errMissingAdv) {
                     abortedAdvCountry = { name: country.adSetName, code: country.code };
                 }
                 logMetaTerminal(
@@ -7654,6 +7915,9 @@ window.loadDupAdvertiserEntities = loadDupAdvertiserEntities;
 window.onDupAdvertiserEntityChanged = onDupAdvertiserEntityChanged;
 window.buildRegionalComplianceAttempts = buildRegionalComplianceAttempts;
 window.isMetaMissingAdvertiserError = isMetaMissingAdvertiserError;
+window.buildMetaAdsManagerUrls = buildMetaAdsManagerUrls;
+window.showDupErrorActionCard = showDupErrorActionCard;
+window.hideDupErrorActionCard = hideDupErrorActionCard;
 window.onMetaAccountSelected = onMetaAccountSelected;
 window.onMetaCampaignSelected = onMetaCampaignSelected;
 window.onMetaAdSetSelected = onMetaAdSetSelected;
