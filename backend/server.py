@@ -615,7 +615,13 @@ def _parse_usage_header_metrics(headers):
     est_regain = 0
     sources = []
 
-    raw_app = headers.get("X-App-Usage")
+    headers_ci = {str(k).lower(): v for k, v in headers.items()} if hasattr(headers, "items") else {}
+    def _hget(name):
+        if headers_ci:
+            return headers_ci.get(name.lower())
+        return headers.get(name) if hasattr(headers, "get") else None
+
+    raw_app = _hget("X-App-Usage")
     if raw_app:
         try:
             d = json.loads(raw_app)
@@ -627,7 +633,7 @@ def _parse_usage_header_metrics(headers):
         except Exception:
             pass
 
-    raw_buca = headers.get("X-Business-Use-Case-Usage")
+    raw_buca = _hget("X-Business-Use-Case-Usage")
     if raw_buca:
         try:
             d = json.loads(raw_buca)
@@ -644,7 +650,7 @@ def _parse_usage_header_metrics(headers):
         except Exception:
             pass
 
-    raw_acc = headers.get("X-Ad-Account-Usage")
+    raw_acc = _hget("X-Ad-Account-Usage")
     if raw_acc:
         try:
             d = json.loads(raw_acc)
@@ -1261,6 +1267,59 @@ def build_meta_app_health_report(account_id="", manual_token=""):
         },
         "links": links,
         "checks": checks,
+    }
+
+
+def get_meta_quota_snapshot(probe_if_stale=False, manual_token=""):
+    """Retorna cota atual e estado do circuit breaker em memoria; faz no maximo 1 GET leve (/me?fields=id) a cada 55s quando solicitado e ocioso."""
+    now = time.time()
+    with META_GUARD_LOCK:
+        usage = dict(META_GUARD_STATE["last_usage"])
+        open_until = float(META_GUARD_STATE["circuit_open_until"] or 0.0)
+        circuit_reason = META_GUARD_STATE["circuit_reason"]
+        throttle_ms = int(META_GUARD_STATE["throttle_delay_ms"] or 0)
+        dev_blocked = bool(META_GUARD_STATE["dev_mode_blocked"])
+        token_blocked = bool(META_GUARD_STATE["token_blocked"])
+        last_probe_at = float(META_GUARD_STATE.get("last_quota_probe_at") or 0.0)
+        updated_at = float(usage.get("updated_at") or 0.0)
+
+    circuit_secs_left = max(0, int(round(open_until - now)))
+    probed = False
+    if probe_if_stale and circuit_secs_left == 0:
+        stale_usage = (not updated_at) or ((now - updated_at) >= 55.0)
+        stale_probe = (not last_probe_at) or ((now - last_probe_at) >= 55.0)
+        if stale_usage and stale_probe and resolve_meta_token(manual_token):
+            with META_GUARD_LOCK:
+                META_GUARD_STATE["last_quota_probe_at"] = now
+            try:
+                _execute_meta_graph_request("GET", "/v21.0/me?fields=id", None, manual_token, bypass_circuit=True)
+                probed = True
+            except Exception:
+                pass
+            with META_GUARD_LOCK:
+                usage = dict(META_GUARD_STATE["last_usage"])
+                open_until = float(META_GUARD_STATE["circuit_open_until"] or 0.0)
+                circuit_reason = META_GUARD_STATE["circuit_reason"]
+                throttle_ms = int(META_GUARD_STATE["throttle_delay_ms"] or 0)
+                dev_blocked = bool(META_GUARD_STATE["dev_mode_blocked"])
+                token_blocked = bool(META_GUARD_STATE["token_blocked"])
+            circuit_secs_left = max(0, int(round(open_until - time.time())))
+
+    max_pct = int(usage.get("max_pct") or 0)
+    return {
+        "success": True,
+        "probed": probed,
+        "checked_at": time.strftime("%H:%M:%S"),
+        "usage": usage,
+        "max_pct": max_pct,
+        "guard": {
+            "circuit_open": circuit_secs_left > 0,
+            "circuit_seconds_left": circuit_secs_left,
+            "circuit_reason": circuit_reason if circuit_secs_left > 0 else "",
+            "throttle_delay_ms": throttle_ms,
+            "dev_mode_blocked": dev_blocked,
+            "token_blocked": token_blocked,
+        },
     }
 
 
@@ -2765,6 +2824,16 @@ class APIHandler(BaseHTTPRequestHandler):
                 manual_tok = (self.headers.get("X-Meta-Token", "") or "").strip()
                 report = build_meta_app_health_report(account_id=acc_q, manual_token=manual_tok)
                 self._send_json(report)
+            except Exception as e:
+                self._send_json({"success": False, "error": str(e)}, 500)
+
+        elif path == "/api/meta/quota":
+            if not self._authenticate_request():
+                return
+            try:
+                probe_flag = qs.get("probe", ["0"])[0].lower() in ("1", "true", "yes")
+                manual_tok = (self.headers.get("X-Meta-Token", "") or "").strip()
+                self._send_json(get_meta_quota_snapshot(probe_if_stale=probe_flag, manual_token=manual_tok))
             except Exception as e:
                 self._send_json({"success": False, "error": str(e)}, 500)
 

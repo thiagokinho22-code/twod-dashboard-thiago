@@ -418,6 +418,7 @@ function showApp() {
         try { loadUsersFromBackend(); } catch (e) { }
     }
     try { initTabs(); } catch (e) { }
+    try { if (typeof startMetaQuotaLiveMonitor === 'function') startMetaQuotaLiveMonitor(); } catch (e) { }
 }
 
 function initAuthenticatedApp() {
@@ -689,6 +690,17 @@ const tabTitles = {
 // Para adicionar novas entregas, insira um item no topo abaixo.
 // ========================================================
 const PANEL_CHANGELOG = [
+    {
+        date: '26/11/2026',
+        type: 'feat',
+        badge: '📊 Cota ao Vivo',
+        title: 'Indicador de cota Meta API ao vivo dentro do botão App Meta no topo',
+        summary: 'Exibe a porcentagem de uso da cota e contagem da trava anti-rajada diretamente no botão superior "App Meta", com atualização inteligente sem desperdício de requisições.',
+        highlights: [
+            'Mostra Cota: XX% (verde/amarelo/vermelho) e contagem regressiva 🔒 Xs da trava anti-rajada em todas as telas.',
+            'Monitoramento adaptativo: lê telemetria da memória do servidor a cada 10s durante duplicações/travas (0 chamadas na Meta) e faz 1 checagem leve por minuto quando ocioso e visível.'
+        ]
+    },
     {
         date: '26/11/2026',
         type: 'fix',
@@ -2509,6 +2521,7 @@ function renderMetaAppHealthUI(report) {
     const pillTxt = document.getElementById('header-meta-app-pill-text');
     if (pillEl) pillEl.className = `app-health-pill ${overallMeta.cls}`;
     if (pillTxt) pillTxt.innerText = overallMeta.pill;
+    applyMetaQuotaSnapshot(report, { fromHealthUi: true });
 
     const badgeEl = document.getElementById('meta-app-health-badge');
     if (badgeEl) {
@@ -2614,6 +2627,218 @@ function renderMetaAppHealthUI(report) {
 window.openMetaAppHealthPanel = openMetaAppHealthPanel;
 window.refreshMetaAppHealth = refreshMetaAppHealth;
 window.ackMetaAppHealth = ackMetaAppHealth;
+
+const _metaQuotaLiveState = {
+    snapshot: null,
+    circuitEndsAtMs: 0,
+    pollTimerId: null,
+    countdownTimerId: null,
+    inFlight: false,
+    started: false,
+    visBound: false
+};
+
+function _hasNonQuotaHealthIssue(level) {
+    const checks = Array.isArray(_lastMetaHealthReport?.checks) ? _lastMetaHealthReport.checks : [];
+    const quotaIds = new Set(['rate_ok', 'rate_high', 'circuit_open']);
+    return checks.some(c => c && !quotaIds.has(c.id) && c.level === level);
+}
+
+/** Updates the top-header quota chip and pill status from a quota or app-health snapshot. */
+function renderHeaderMetaQuotaChip(snapshot, overrideSecLeft = null) {
+    const chipEl = document.getElementById('header-meta-quota-chip');
+    const pillEl = document.getElementById('header-meta-app-pill');
+    const pillTxt = document.getElementById('header-meta-app-pill-text');
+    if (!chipEl) return;
+
+    if (!snapshot || (!snapshot.usage && snapshot.max_pct === undefined)) {
+        chipEl.className = 'meta-quota-inline-chip quota-unknown';
+        chipEl.textContent = 'Cota: --%';
+        chipEl.title = 'Uso atual da cota da Meta API (aguardando leitura)';
+        return;
+    }
+
+    const usage = snapshot.usage || {};
+    const guard = snapshot.guard || {};
+    const rawPct = snapshot.max_pct ?? usage.max_pct ?? 0;
+    const pct = Math.max(0, Math.min(100, Math.round(Number(rawPct || 0))));
+    const updatedAt = Number(usage.updated_at || 0);
+    const secLeft = overrideSecLeft !== null
+        ? Math.max(0, Math.round(Number(overrideSecLeft || 0)))
+        : Math.max(0, Math.round(Number(guard.circuit_seconds_left || 0)));
+    const circuitOpen = Boolean(guard.circuit_open) && secLeft > 0;
+    const hasReading = updatedAt > 0 || pct > 0 || circuitOpen || snapshot.max_pct !== undefined;
+
+    if (!hasReading) {
+        chipEl.className = 'meta-quota-inline-chip quota-unknown';
+        chipEl.textContent = 'Cota: --%';
+    } else {
+        const cls = (circuitOpen || pct >= 90)
+            ? 'quota-crit'
+            : (pct >= 70 ? 'quota-warn' : 'quota-ok');
+        chipEl.className = `meta-quota-inline-chip ${cls}`;
+        chipEl.textContent = circuitOpen ? `Cota: ${pct}% 🔒 ${secLeft}s` : `Cota: ${pct}%`;
+    }
+
+    const callPct = Math.round(Number(usage.call_count || 0));
+    const cpuPct = Math.round(Number(usage.total_cputime || 0));
+    const timePct = Math.round(Number(usage.total_time || 0));
+    const accPct = Math.round(Number(usage.acc_util_pct || 0));
+    const throttleMs = Number(guard.throttle_delay_ms || 0);
+    const checkedLabel = snapshot.checked_at || (snapshot.checked_at_iso ? new Date(snapshot.checked_at_iso).toLocaleTimeString('pt-BR', { hour12: false }) : '--:--:--');
+
+    const tipParts = [
+        `Cota Meta: ${hasReading ? `${pct}%` : '--%'} (Call App ${callPct}% • CPU ${cpuPct}% • Tempo ${timePct}% • Conta ${accPct}%)`
+    ];
+    if (circuitOpen) {
+        tipParts.push(`Anti-rajada ativa: ${secLeft}s${guard.circuit_reason ? ` — ${guard.circuit_reason}` : ''}`);
+    } else if (throttleMs > 0) {
+        tipParts.push(`Throttle preventivo: ${throttleMs}ms entre chamadas`);
+    }
+    tipParts.push(`Atualizado: ${checkedLabel} • Clique para diagnóstico`);
+    const fullTip = tipParts.join('\n');
+    chipEl.title = fullTip;
+    if (pillEl) pillEl.title = fullTip;
+
+    if (pillEl && pillTxt) {
+        if (circuitOpen || pct >= 95) {
+            pillEl.className = 'app-health-pill health-red';
+            pillTxt.innerText = 'App Meta: Crítico';
+        } else if (_hasNonQuotaHealthIssue('red') || guard.dev_mode_blocked || guard.token_blocked) {
+            pillEl.className = 'app-health-pill health-red';
+            pillTxt.innerText = 'App Meta: Crítico';
+        } else if (pct >= 70 || _hasNonQuotaHealthIssue('yellow')) {
+            pillEl.className = 'app-health-pill health-yellow';
+            pillTxt.innerText = 'App Meta: Atenção';
+        } else if (_lastMetaHealthReport) {
+            pillEl.className = 'app-health-pill health-green';
+            pillTxt.innerText = 'App Meta: Saudável';
+        }
+    }
+}
+
+function _syncMetaQuotaCountdownTicker() {
+    const remainingMs = _metaQuotaLiveState.circuitEndsAtMs - Date.now();
+    if (remainingMs > 0) {
+        if (_metaQuotaLiveState.countdownTimerId) return;
+        _metaQuotaLiveState.countdownTimerId = setInterval(() => {
+            const leftSec = Math.max(0, Math.ceil((_metaQuotaLiveState.circuitEndsAtMs - Date.now()) / 1000));
+            renderHeaderMetaQuotaChip(_metaQuotaLiveState.snapshot, leftSec);
+            if (leftSec <= 0) {
+                clearInterval(_metaQuotaLiveState.countdownTimerId);
+                _metaQuotaLiveState.countdownTimerId = null;
+                _metaQuotaLiveState.circuitEndsAtMs = 0;
+                refreshMetaQuotaBadge(true);
+            }
+        }, 1000);
+        return;
+    }
+    if (_metaQuotaLiveState.countdownTimerId) {
+        clearInterval(_metaQuotaLiveState.countdownTimerId);
+        _metaQuotaLiveState.countdownTimerId = null;
+    }
+}
+
+function applyMetaQuotaSnapshot(snapshot, opts = {}) {
+    if (!snapshot) return;
+    _metaQuotaLiveState.snapshot = snapshot;
+    const guard = snapshot.guard || {};
+    const secLeft = Math.max(0, Math.round(Number(guard.circuit_seconds_left || 0)));
+    _metaQuotaLiveState.circuitEndsAtMs = (guard.circuit_open && secLeft > 0)
+        ? (Date.now() + secLeft * 1000)
+        : 0;
+
+    if (!opts.fromHealthUi && _lastMetaHealthReport && snapshot !== _lastMetaHealthReport) {
+        if (snapshot.usage) _lastMetaHealthReport.usage = snapshot.usage;
+        if (snapshot.guard) _lastMetaHealthReport.guard = snapshot.guard;
+    }
+    renderHeaderMetaQuotaChip(snapshot);
+    _syncMetaQuotaCountdownTicker();
+}
+
+function _isDashboardSessionActive() {
+    const appEl = document.getElementById('app-container');
+    const visibleApp = appEl && !appEl.classList.contains('twod-hidden');
+    const hasToken = typeof getAuthToken === 'function' ? Boolean(getAuthToken()) : false;
+    return Boolean(visibleApp && hasToken);
+}
+
+/** Fetches current Meta quota telemetry; only probes Graph /me when shouldProbe=true and allowed by backend cooldown. */
+async function refreshMetaQuotaBadge(shouldProbe = false, opts = {}) {
+    if (!opts.force && !_isDashboardSessionActive()) return null;
+    if (_metaQuotaLiveState.inFlight) return _metaQuotaLiveState.snapshot;
+    _metaQuotaLiveState.inFlight = true;
+    try {
+        const hdrs = {};
+        const tok = (typeof getMetaToken === 'function' ? getMetaToken() : metaState.token) || '';
+        if (tok) hdrs['X-Meta-Token'] = tok;
+        const url = shouldProbe ? '/api/meta/quota?probe=1' : '/api/meta/quota';
+        const resp = await apiFetch(url, { headers: hdrs });
+        if (!resp || !resp.ok) return null;
+        const data = await resp.json();
+        if (data && data.success) {
+            applyMetaQuotaSnapshot(data);
+            return data;
+        }
+    } catch (_) {
+        // Falha silenciosa (ex.: backend reiniciando no deploy) — mantém última leitura visível.
+    } finally {
+        _metaQuotaLiveState.inFlight = false;
+    }
+    return null;
+}
+
+function scheduleNextMetaQuotaPoll(customDelayMs = null) {
+    if (_metaQuotaLiveState.pollTimerId) {
+        clearTimeout(_metaQuotaLiveState.pollTimerId);
+        _metaQuotaLiveState.pollTimerId = null;
+    }
+    if (!_isDashboardSessionActive() || document.visibilityState === 'hidden') return;
+
+    const circuitActive = (_metaQuotaLiveState.circuitEndsAtMs > Date.now()) || Boolean(_metaQuotaLiveState.snapshot?.guard?.circuit_open);
+    const fastMode = Boolean(metaState.isDuplicating || circuitActive);
+    const delayMs = customDelayMs !== null ? customDelayMs : (fastMode ? 10000 : 60000);
+
+    _metaQuotaLiveState.pollTimerId = setTimeout(async () => {
+        const stillCircuit = (_metaQuotaLiveState.circuitEndsAtMs > Date.now()) || Boolean(_metaQuotaLiveState.snapshot?.guard?.circuit_open);
+        const stillFast = Boolean(metaState.isDuplicating || stillCircuit);
+        await refreshMetaQuotaBadge(!stillFast);
+        scheduleNextMetaQuotaPoll();
+    }, delayMs);
+}
+
+function startMetaQuotaLiveMonitor() {
+    if (!_metaQuotaLiveState.visBound) {
+        _metaQuotaLiveState.visBound = true;
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible' && _isDashboardSessionActive()) {
+                const fast = Boolean(metaState.isDuplicating || (_metaQuotaLiveState.circuitEndsAtMs > Date.now()));
+                refreshMetaQuotaBadge(!fast).finally(() => scheduleNextMetaQuotaPoll());
+            } else {
+                scheduleNextMetaQuotaPoll();
+            }
+        });
+    }
+    if (_metaQuotaLiveState.started) {
+        refreshMetaQuotaBadge(false).finally(() => scheduleNextMetaQuotaPoll());
+        return;
+    }
+    _metaQuotaLiveState.started = true;
+    // Aguarda refreshMetaAppHealth inicial alimentar a UI; só faz probe se ainda não houver leitura real.
+    setTimeout(() => {
+        const hasUsage = Number(_metaQuotaLiveState.snapshot?.usage?.updated_at || 0) > 0;
+        if (!hasUsage && _isDashboardSessionActive()) {
+            refreshMetaQuotaBadge(true).finally(() => scheduleNextMetaQuotaPoll());
+        } else {
+            scheduleNextMetaQuotaPoll();
+        }
+    }, 2500);
+}
+
+window.renderHeaderMetaQuotaChip = renderHeaderMetaQuotaChip;
+window.applyMetaQuotaSnapshot = applyMetaQuotaSnapshot;
+window.refreshMetaQuotaBadge = refreshMetaQuotaBadge;
+window.startMetaQuotaLiveMonitor = startMetaQuotaLiveMonitor;
 
 // Busca a lista de contas de anúncio do usuário
 async function loadMetaAccounts(forceReload = false) {
@@ -5118,6 +5343,7 @@ async function ackResetMetaCircuit(accountId = '') {
             })
         });
         const report = await resp.json();
+        applyMetaQuotaSnapshot(report);
         const quotaChk = (report.checks || []).find(c => c.id === 'rate_ok' || c.id === 'rate_high' || c.id === 'circuit_open');
         const msg = quotaChk
             ? `🔓 Trava anti-rajada limpa! ${quotaChk.title} — ${quotaChk.detail}`
@@ -7049,6 +7275,7 @@ async function startBatchDuplication() {
 
     metaState.isDuplicating = true;
     metaState.stopDuplicationRequested = false;
+    scheduleNextMetaQuotaPoll(3000);
     const stopOnFirstError = document.getElementById('dup-stop-on-error-check')
         ? Boolean(document.getElementById('dup-stop-on-error-check').checked)
         : true;
@@ -7152,6 +7379,7 @@ async function startBatchDuplication() {
             stopBtn.innerText = '⏹️ Parar Após Atual';
             stopBtn.classList.add('twod-hidden');
         }
+        refreshMetaQuotaBadge(false).finally(() => scheduleNextMetaQuotaPoll());
     };
 
     const uploadLocalBrowserFileToMeta = async (accountId, fileObj) => {
