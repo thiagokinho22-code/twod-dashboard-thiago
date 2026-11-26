@@ -1509,6 +1509,19 @@
                                 </div>
                                 <span class="help-text">Ao programar, a Meta deixa "Programado" e liga sozinho no horário</span>
                             </div>
+
+                            <div class="form-group" style="flex: 1.2; min-width: 260px;">
+                                <label for="select-dup-page-override">
+                                    <strong>📄 Página do Anúncio (Meta):</strong>
+                                </label>
+                                <div style="display: flex; gap: 6px; align-items: center;">
+                                    <select id="select-dup-page-override" class="twod-select" style="flex: 1; min-width: 0;">
+                                        <option value="auto" selected>🔁 Página Original (Trocar automático se bloquear)</option>
+                                    </select>
+                                    <button type="button" class="btn-chip" id="btn-refresh-dup-pages" onclick="loadDupPromotePages(null, true)" title="Recarregar Páginas autorizadas da conta" style="white-space: nowrap; padding: 7px 10px;">🔄</button>
+                                </div>
+                                <span class="help-text" id="dup-pages-help-text">Se a Página original bloquear (1885499), troca para outra autorizada</span>
+                            </div>
                         </div>
                     </div>
 
@@ -1526,6 +1539,10 @@
                             <label style="display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; cursor: pointer; padding: 7px 12px; border-radius: 8px; background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.28);">
                                 <input type="checkbox" id="dup-stop-on-error-check" checked>
                                 <span>🛑 <strong>Trava Anti-Conjunto Vazio:</strong> parar lote imediatamente no 1º erro de anúncio e excluir o conjunto incompleto</span>
+                            </label>
+                            <label style="display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; cursor: pointer; padding: 7px 12px; border-radius: 8px; background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.28);">
+                                <input type="checkbox" id="dup-auto-fallback-page-check" checked>
+                                <span>🔄 <strong>Trocar Página Automaticamente:</strong> se a Página atual bloquear (1885499 / 3858749), recriar anúncio em Página autorizada da conta</span>
                             </label>
                         </div>
 
@@ -1959,7 +1976,7 @@
         </div>
     </div>
 
-    <script src="app.js?v=9.7"></script>
+    <script src="app.js?v=9.8"></script>
     <script src="studio.js?v=1.11"></script>
     <script src="creative_gen.js?v=1.2"></script>
     <script src="campaign_builder.js?v=1.9"></script>

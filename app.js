@@ -692,6 +692,17 @@ const PANEL_CHANGELOG = [
     {
         date: '25/11/2026',
         type: 'feat',
+        badge: '📄 Troca Auto de Página',
+        title: 'Seletor de Página + Fallback Automático no Duplicador (Erro 1885499 / 3858749)',
+        summary: 'Lista as Páginas autorizadas da conta e troca automaticamente de Página quando a original estiver sem permissão de anunciante.',
+        highlights: [
+            'Novo seletor "Página do Anúncio (Meta)" na Etapa 2 para escolher outra Página fixa ou deixar no modo automático.',
+            'Se /ads ou /adcreatives retornar 1885499/3858749, recria o AdCreative em uma Página autorizada (removendo instagram_user_id incompatível), reutiliza nos próximos países e mantém o rollback anti-conjunto vazio se nenhuma Página funcionar.'
+        ]
+    },
+    {
+        date: '25/11/2026',
+        type: 'feat',
         badge: '⏰ Agendar 01h & Trava',
         title: 'Agendamento de conjuntos (Instantâneo vs Programar 01:00) + Trava Anti-Conjunto Vazio',
         summary: 'Modal próprio de disparo perguntando se deve iniciar agora ou programar (ex.: 01:00 da manhã) e rollback automático no 1º erro.',
@@ -2072,6 +2083,8 @@ let metaState = {
     adsets: [],
     selectedAdSetId: '',
     selectedAdSet: null,
+    promotePages: [],
+    promotePagesAccountId: '',
     activeBlockId: 'BLOCO-01',
     checkedCountries: {},
     isDuplicating: false,
@@ -2615,6 +2628,149 @@ function populateAccountsSelect(accounts) {
     }
 }
 
+function renderDupPromotePagesSelect(pages = []) {
+    const sel = document.getElementById('select-dup-page-override');
+    const helpEl = document.getElementById('dup-pages-help-text');
+    if (!sel) return;
+
+    const prevVal = sel.value || 'auto';
+    sel.innerHTML = '<option value="auto">🔁 Página Original (Trocar automático se bloquear)</option>';
+
+    const list = Array.isArray(pages) ? pages : [];
+    list.forEach(p => {
+        if (!p || !p.id) return;
+        const opt = document.createElement('option');
+        opt.value = String(p.id);
+        const tag = (p.fromMeAccounts || p.canAdvertise) ? ' ✓' : '';
+        opt.textContent = `📄 ${p.name || 'Página ' + p.id} (ID: ${p.id})${tag}`;
+        sel.appendChild(opt);
+    });
+
+    if (prevVal && prevVal !== 'auto' && list.some(p => String(p.id) === String(prevVal))) {
+        sel.value = prevVal;
+    } else {
+        sel.value = 'auto';
+    }
+
+    if (helpEl) {
+        helpEl.textContent = list.length > 0
+            ? `✓ ${list.length} página(s) disponível(is) na conta — troca automática ativa em caso de bloqueio 1885499`
+            : 'Se a Página original bloquear (1885499), troca para outra autorizada';
+    }
+}
+
+async function fetchMetaGraphWithFieldFallback(pathCandidates = []) {
+    for (let i = 0; i < pathCandidates.length; i++) {
+        try {
+            const res = await metaGraphGet(pathCandidates[i]);
+            if (res && !res.error) return res;
+            const errMsg = res?.error?.message || '';
+            const isFieldErr = /nonexisting field|\(#100\)|tasks|business/i.test(errMsg) || res?.error?.code === 100;
+            if (!isFieldErr) return res;
+        } catch (e) {
+            if (i === pathCandidates.length - 1) throw e;
+        }
+    }
+    return null;
+}
+
+async function loadDupPromotePages(accountIdOverride = null, forceRefresh = false) {
+    const accountId = accountIdOverride !== null
+        ? String(accountIdOverride || '')
+        : String(document.getElementById('select-meta-account')?.value || metaState.selectedAccountId || '');
+
+    if (!accountId || !hasActiveMetaAuth()) {
+        metaState.promotePages = [];
+        metaState.promotePagesAccountId = '';
+        renderDupPromotePagesSelect([]);
+        return [];
+    }
+
+    if (!forceRefresh && metaState.promotePagesAccountId === accountId && Array.isArray(metaState.promotePages) && metaState.promotePages.length > 0) {
+        renderDupPromotePagesSelect(metaState.promotePages);
+        return metaState.promotePages;
+    }
+
+    const helpEl = document.getElementById('dup-pages-help-text');
+    if (helpEl) helpEl.textContent = '⏳ Buscando páginas autorizadas da conta...';
+
+    const [promoteRes, meAccRes] = await Promise.allSettled([
+        fetchMetaGraphWithFieldFallback([
+            `/${META_GRAPH_VERSION}/${accountId}/promote_pages?fields=id,name,tasks,business{id,name}&limit=100`,
+            `/${META_GRAPH_VERSION}/${accountId}/promote_pages?fields=id,name&limit=100`
+        ]),
+        fetchMetaGraphWithFieldFallback([
+            `/${META_GRAPH_VERSION}/me/accounts?fields=id,name,tasks&limit=100`,
+            `/${META_GRAPH_VERSION}/me/accounts?fields=id,name&limit=100`
+        ])
+    ]);
+
+    const byId = new Map();
+    const upsertPage = (raw, fromMeAccounts = false) => {
+        if (!raw || !raw.id) return;
+        const id = String(raw.id);
+        const existing = byId.get(id) || {
+            id,
+            name: '',
+            tasks: [],
+            fromMeAccounts: false,
+            canAdvertise: false,
+            businessName: ''
+        };
+        if (raw.name && !existing.name) existing.name = String(raw.name);
+        if (raw.business?.name && !existing.businessName) existing.businessName = String(raw.business.name);
+        if (Array.isArray(raw.tasks)) {
+            const merged = new Set([...existing.tasks, ...raw.tasks.map(t => String(t).toUpperCase())]);
+            existing.tasks = Array.from(merged);
+        }
+        if (fromMeAccounts) existing.fromMeAccounts = true;
+        const hasAdvTask = existing.tasks.includes('ADVERTISE') || existing.tasks.includes('MANAGE') || existing.tasks.includes('CREATE_CONTENT');
+        existing.canAdvertise = Boolean(hasAdvTask || (existing.fromMeAccounts && existing.tasks.length === 0));
+        byId.set(id, existing);
+    };
+
+    if (promoteRes.status === 'fulfilled' && Array.isArray(promoteRes.value?.data)) {
+        promoteRes.value.data.forEach(p => upsertPage(p, false));
+    }
+    if (meAccRes.status === 'fulfilled' && Array.isArray(meAccRes.value?.data)) {
+        meAccRes.value.data.forEach(p => upsertPage(p, true));
+    }
+    if (Array.isArray(metaState.pages)) {
+        metaState.pages.forEach(p => upsertPage(p, false));
+    }
+
+    const pages = Array.from(byId.values()).sort((a, b) => {
+        const score = (p) => (p.canAdvertise ? 4 : 0) + (p.fromMeAccounts ? 2 : 0);
+        const diff = score(b) - score(a);
+        if (diff !== 0) return diff;
+        return (a.name || a.id).localeCompare(b.name || b.id);
+    });
+
+    metaState.promotePages = pages;
+    metaState.promotePagesAccountId = accountId;
+    renderDupPromotePagesSelect(pages);
+    return pages;
+}
+
+function getAuthorizedCandidatePageIds(accountId, blockedSet = new Set(), preferPageId = '') {
+    const pages = (metaState.promotePagesAccountId === String(accountId) && Array.isArray(metaState.promotePages))
+        ? metaState.promotePages
+        : [];
+    const seen = new Set();
+    const out = [];
+    const addCandidate = (id, name = '') => {
+        const sId = String(id || '').trim();
+        if (!sId || seen.has(sId) || blockedSet.has(sId)) return;
+        seen.add(sId);
+        out.push({ id: sId, name: name || pages.find(p => String(p.id) === sId)?.name || sId });
+    };
+    if (preferPageId && preferPageId !== 'auto') {
+        addCandidate(preferPageId);
+    }
+    pages.forEach(p => addCandidate(p.id, p.name));
+    return out;
+}
+
 // Disparado ao trocar de conta de anúncios
 async function onMetaAccountSelected() {
     const selectAcc = document.getElementById('select-meta-account');
@@ -2644,6 +2800,7 @@ async function onMetaAccountSelected() {
 
     if (!accountId) {
         selectCamp.innerHTML = '<option value="">Selecione uma conta primeiro...</option>';
+        loadDupPromotePages('').catch(() => {});
         return;
     }
 
@@ -2655,6 +2812,9 @@ async function onMetaAccountSelected() {
     if (currencyPrefix) {
         currencyPrefix.innerText = '$';
     }
+
+    // Busca em paralelo as Páginas autorizadas da conta para o seletor e fallback 1885499
+    loadDupPromotePages(accountId).catch(() => {});
 
     if (labelCamp) labelCamp.innerText = '(Buscando...)';
 
@@ -3698,14 +3858,73 @@ function extractCreativeMediaEntries(cr = {}) {
     return entries;
 }
 
+function extractAnyCreativeMediaEntries(cr = {}) {
+    const multi = extractCreativeMediaEntries(cr);
+    if (multi.length > 0) return multi;
+
+    const entries = [];
+    const oss = cr.object_story_spec || {};
+    const vd = oss.video_data || {};
+    const ld = oss.link_data || {};
+    const pd = oss.photo_data || {};
+
+    const singleVideoId = vd.video_id || cr.video_id || '';
+    if (singleVideoId) {
+        entries.push({
+            kind: 'video',
+            videoId: String(singleVideoId),
+            thumbnailUrl: vd.image_url || cr.image_url || cr.thumbnail_url || '',
+            thumbnailHash: vd.image_hash || ''
+        });
+        return entries;
+    }
+
+    const childAttachments = Array.isArray(ld.child_attachments)
+        ? ld.child_attachments
+        : (Array.isArray(oss.template_data?.child_attachments) ? oss.template_data.child_attachments : []);
+    if (childAttachments.length === 1) {
+        const ch = childAttachments[0];
+        if (ch?.video_id) {
+            entries.push({
+                kind: 'video',
+                videoId: String(ch.video_id),
+                thumbnailUrl: ch.picture || cr.thumbnail_url || '',
+                thumbnailHash: ch.image_hash || ''
+            });
+            return entries;
+        }
+        if (ch?.image_hash || ch?.picture) {
+            entries.push({
+                kind: 'image',
+                imageHash: ch.image_hash ? String(ch.image_hash) : '',
+                imageUrl: ch.picture ? String(ch.picture) : ''
+            });
+            return entries;
+        }
+    }
+
+    const singleImgHash = ld.image_hash || pd.image_hash || cr.image_hash || '';
+    const singleImgUrl = ld.picture || pd.url || cr.image_url || '';
+    if (singleImgHash || singleImgUrl) {
+        entries.push({
+            kind: 'image',
+            imageHash: singleImgHash ? String(singleImgHash) : '',
+            imageUrl: singleImgUrl ? String(singleImgUrl) : (cr.thumbnail_url ? String(cr.thumbnail_url) : '')
+        });
+    }
+
+    return entries;
+}
+
 async function fetchAdCreativeFullFields(creativeId) {
     if (!creativeId) return null;
-    const baseFields = 'id,name,actor_id,object_type,effective_object_story_id,thumbnail_url,image_url,video_id,object_story_spec,asset_feed_spec';
-    const minFields = 'id,name,actor_id,object_type,effective_object_story_id,thumbnail_url,image_url,video_id,object_story_spec';
+    const baseFields = 'id,name,actor_id,object_type,effective_object_story_id,object_story_id,thumbnail_url,image_url,image_hash,video_id,title,body,link_url,call_to_action_type,object_story_spec,asset_feed_spec';
+    const minFields = 'id,name,actor_id,object_type,effective_object_story_id,thumbnail_url,image_url,image_hash,video_id,title,body,link_url,call_to_action_type,object_story_spec';
     const tiers = [
         `${baseFields},creative_asset_groups_spec`,
         baseFields,
-        minFields
+        minFields,
+        'id,name,actor_id,object_type,effective_object_story_id,thumbnail_url,image_url,video_id,object_story_spec'
     ];
 
     let lastRes = null;
@@ -3715,10 +3934,10 @@ async function fetchAdCreativeFullFields(creativeId) {
             lastRes = res;
             if (res && !res.error) return res;
             const errMsg = res?.error?.message || '';
-            const isFieldErr = /creative_asset_groups_spec|asset_feed_spec|nonexisting field|\(#100\)/i.test(errMsg) || res?.error?.code === 100;
+            const isFieldErr = /creative_asset_groups_spec|asset_feed_spec|object_story_id|image_hash|call_to_action_type|link_url|title|body|nonexisting field|\(#100\)/i.test(errMsg) || res?.error?.code === 100;
             if (!isFieldErr) return res;
         } catch (e) {
-            const isFieldErr = /creative_asset_groups_spec|asset_feed_spec|nonexisting field|\(#100\)/i.test(e.message || '');
+            const isFieldErr = /creative_asset_groups_spec|asset_feed_spec|object_story_id|image_hash|call_to_action_type|link_url|title|body|nonexisting field|\(#100\)/i.test(e.message || '');
             if (!isFieldErr || i === tiers.length - 1) throw e;
         }
     }
@@ -3726,7 +3945,7 @@ async function fetchAdCreativeFullFields(creativeId) {
 }
 
 async function hydrateAdSetAdsWithCreatives(adsetId) {
-    const baseCrFields = 'id,name,actor_id,object_type,effective_object_story_id,thumbnail_url,image_url,video_id,object_story_spec,asset_feed_spec';
+    const baseCrFields = 'id,name,actor_id,object_type,effective_object_story_id,object_story_id,thumbnail_url,image_url,image_hash,video_id,title,body,link_url,call_to_action_type,object_story_spec,asset_feed_spec';
     const minCrFields = 'id,name,actor_id,object_type,effective_object_story_id,thumbnail_url,image_url,video_id,object_story_spec';
     const fieldTiers = [
         `id,name,status,url_tags,creative{${baseCrFields},creative_asset_groups_spec}`,
@@ -3742,10 +3961,10 @@ async function hydrateAdSetAdsWithCreatives(adsetId) {
             adsData = res;
             if (res && !res.error) break;
             const errMsg = res?.error?.message || '';
-            const isFieldErr = /creative_asset_groups_spec|asset_feed_spec|nonexisting field|\(#100\)/i.test(errMsg) || res?.error?.code === 100;
+            const isFieldErr = /creative_asset_groups_spec|asset_feed_spec|object_story_id|image_hash|call_to_action_type|link_url|title|body|nonexisting field|\(#100\)/i.test(errMsg) || res?.error?.code === 100;
             if (!isFieldErr) break;
         } catch (e) {
-            const isFieldErr = /creative_asset_groups_spec|asset_feed_spec|nonexisting field|\(#100\)/i.test(e.message || '');
+            const isFieldErr = /creative_asset_groups_spec|asset_feed_spec|object_story_id|image_hash|call_to_action_type|link_url|title|body|nonexisting field|\(#100\)/i.test(e.message || '');
             if (!isFieldErr || i === fieldTiers.length - 1) throw e;
         }
     }
@@ -3819,8 +4038,8 @@ function extractCreativeTemplateSpec(cr = {}, fallbackActorId = '') {
 
     const afsCtaType = Array.isArray(afs.call_to_action_types) ? afs.call_to_action_types[0] : '';
     const afsLinkObj = Array.isArray(afs.link_urls) ? afs.link_urls[0] : null;
-    const ctaObj = vd.call_to_action || ld.call_to_action || firstGrpCta || { type: afsCtaType || firstGrpCtaType || 'DOWNLOAD', value: { link: '' } };
-    const rawLink = ctaObj.value?.link || ld.link || afsLinkObj?.website_url || afsLinkObj?.display_url || firstGrpLinkObj?.website_url || firstGrpLinkObj?.display_url || '';
+    const ctaObj = vd.call_to_action || ld.call_to_action || firstGrpCta || { type: afsCtaType || firstGrpCtaType || cr.call_to_action_type || 'DOWNLOAD', value: { link: cr.link_url || '' } };
+    const rawLink = ctaObj.value?.link || ld.link || cr.link_url || afsLinkObj?.website_url || afsLinkObj?.display_url || firstGrpLinkObj?.website_url || firstGrpLinkObj?.display_url || '';
 
     const rawBodies = [];
     const rawTitles = [];
@@ -3852,19 +4071,20 @@ function extractCreativeTemplateSpec(cr = {}, fallbackActorId = '') {
     return {
         pageId: oss.page_id || cr.actor_id || fallbackActorId || storyPageId || fallbackPageId || '',
         instagramUserId: oss.instagram_user_id || '',
-        ctaType: ctaObj.type || afsCtaType || firstGrpCtaType || 'DOWNLOAD',
+        ctaType: ctaObj.type || cr.call_to_action_type || afsCtaType || firstGrpCtaType || 'DOWNLOAD',
         rawLink,
         rawBodies,
         rawTitles,
         rawDescs,
-        rawVdMsg: vd.message || ld.message || '',
-        rawVdTitle: vd.title || ld.name || '',
+        rawVdMsg: vd.message || ld.message || cr.body || '',
+        rawVdTitle: vd.title || ld.name || cr.title || '',
         rawVdDesc: vd.link_description || ld.description || '',
         hasAfs: rawBodies.length > 0 || rawTitles.length > 0 || rawDescs.length > 0,
         optimizationType: 'DEGREES_OF_FREEDOM',
         afsVideos: Array.isArray(afs.videos) ? afs.videos : [],
         afsImages: Array.isArray(afs.images) ? afs.images : [],
-        mediaEntries: extractCreativeMediaEntries(cr)
+        mediaEntries: extractCreativeMediaEntries(cr),
+        allMediaEntries: extractAnyCreativeMediaEntries(cr)
     };
 }
 
@@ -3895,6 +4115,9 @@ async function createSingleMediaAdCreative({ accountId, name, spec, mediaAsset, 
     );
 
     const buildCtaObj = () => {
+        if (!cleanLink && (!spec.ctaType || spec.ctaType === 'DOWNLOAD' || spec.ctaType === 'LEARN_MORE')) {
+            return null;
+        }
         const cta = { type: spec.ctaType || 'DOWNLOAD' };
         if (cleanLink) cta.value = { link: cleanLink };
         return cta;
@@ -3905,10 +4128,11 @@ async function createSingleMediaAdCreative({ accountId, name, spec, mediaAsset, 
         if (spec.instagramUserId) oss.instagram_user_id = spec.instagramUserId;
 
         if (mediaAsset.kind === 'video') {
+            const ctaBuilt = buildCtaObj();
             const videoData = {
-                video_id: mediaAsset.videoId,
-                call_to_action: buildCtaObj()
+                video_id: mediaAsset.videoId
             };
+            if (ctaBuilt) videoData.call_to_action = ctaBuilt;
             if (mediaAsset.thumbnailUrl) {
                 videoData.image_url = mediaAsset.thumbnailUrl;
             } else if (mediaAsset.thumbnailHash) {
@@ -3924,9 +4148,9 @@ async function createSingleMediaAdCreative({ accountId, name, spec, mediaAsset, 
             }
             oss.video_data = videoData;
         } else {
-            const linkData = {
-                call_to_action: buildCtaObj()
-            };
+            const ctaBuilt = buildCtaObj();
+            const linkData = {};
+            if (ctaBuilt) linkData.call_to_action = ctaBuilt;
             if (cleanLink) linkData.link = cleanLink;
             if (mediaAsset.imageHash) linkData.image_hash = mediaAsset.imageHash;
             else if (mediaAsset.imageUrl) linkData.picture = mediaAsset.imageUrl;
@@ -3991,6 +4215,300 @@ async function createSingleMediaAdCreative({ accountId, name, spec, mediaAsset, 
     }
 
     return crRes;
+}
+
+async function createSingleMediaCreativeWithPageFallback({
+    accountId,
+    name,
+    spec,
+    mediaAsset,
+    textsObj,
+    linkUrl,
+    candidatePages = [],
+    allowFallback = true,
+    blockedPageIds = new Set(),
+    activeWorkingPageId = '',
+    logFn = null
+}) {
+    const queue = [];
+    const queuedIds = new Set();
+    const enqueuePage = (id, label = '') => {
+        const sId = String(id || '').trim();
+        if (!sId || queuedIds.has(sId) || blockedPageIds.has(sId)) return;
+        queuedIds.add(sId);
+        queue.push({ id: sId, label: label || sId });
+    };
+
+    if (activeWorkingPageId) {
+        enqueuePage(activeWorkingPageId);
+    } else if (spec.pageId) {
+        enqueuePage(spec.pageId);
+    }
+
+    if (allowFallback && Array.isArray(candidatePages)) {
+        candidatePages.forEach(p => enqueuePage(p.id, p.name ? `${p.name} (${p.id})` : p.id));
+    }
+
+    if (queue.length === 0 && spec.pageId) {
+        enqueuePage(spec.pageId);
+    }
+
+    let lastRes = { error: { message: 'Nenhuma Página autorizada disponível na conta.' } };
+    for (let i = 0; i < queue.length; i++) {
+        const cand = queue[i];
+        const useOriginalIg = (!activeWorkingPageId && String(cand.id) === String(spec.pageId || '')) ? (spec.instagramUserId || '') : '';
+        const attemptSpec = {
+            ...spec,
+            pageId: cand.id,
+            instagramUserId: useOriginalIg
+        };
+
+        if (i > 0 && typeof logFn === 'function') {
+            logFn(`🔄 Página anterior sem permissão. Testando Página autorizada ${cand.label}...`, 'warn');
+        }
+
+        const res = await createSingleMediaAdCreative({
+            accountId,
+            name,
+            spec: attemptSpec,
+            mediaAsset,
+            textsObj,
+            linkUrl,
+            logFn
+        });
+        lastRes = res;
+
+        if (res && res.id) {
+            return { ...res, usedPageId: cand.id, switchedPage: String(cand.id) !== String(spec.pageId || '') };
+        }
+        if (res?.error?.error_subcode === 1885183) {
+            return { ...res, usedPageId: cand.id };
+        }
+        if (isMetaPagePermissionError(res?.error)) {
+            blockedPageIds.add(String(cand.id));
+            if (!allowFallback) return { ...res, usedPageId: cand.id };
+            continue;
+        }
+        return { ...res, usedPageId: cand.id };
+    }
+    return lastRes;
+}
+
+async function hydrateCreativeFromEffectiveStory(cr = {}, spec = {}, currentMedia = []) {
+    const outSpec = { ...spec };
+    const mediaList = Array.isArray(currentMedia) ? [...currentMedia] : [];
+    const storyId = cr.effective_object_story_id || cr.object_story_id || '';
+    if (!storyId || (mediaList.length > 0 && outSpec.rawLink && (outSpec.rawVdMsg || (outSpec.rawBodies || []).length > 0))) {
+        return { spec: outSpec, mediaList };
+    }
+
+    try {
+        const post = await metaGraphGet(`/${META_GRAPH_VERSION}/${storyId}?fields=message,call_to_action,attachments{type,media,target{id},url,unshimmed_url,title,description}`);
+        if (post && !post.error) {
+            if (!outSpec.rawVdMsg && post.message) outSpec.rawVdMsg = String(post.message);
+            if (post.call_to_action?.type && (!outSpec.ctaType || outSpec.ctaType === 'DOWNLOAD')) {
+                outSpec.ctaType = post.call_to_action.type;
+            }
+            if (!outSpec.rawLink && post.call_to_action?.value?.link) {
+                outSpec.rawLink = post.call_to_action.value.link;
+            }
+            const att = Array.isArray(post.attachments?.data) ? post.attachments.data[0] : null;
+            if (att) {
+                if (!outSpec.rawLink) outSpec.rawLink = att.unshimmed_url || att.url || '';
+                if (!outSpec.rawVdTitle && att.title) outSpec.rawVdTitle = String(att.title);
+                if (!outSpec.rawVdDesc && att.description) outSpec.rawVdDesc = String(att.description);
+                if (mediaList.length === 0) {
+                    const isVideo = /video/i.test(att.type || '') || Boolean(att.target?.id && att.media?.source);
+                    if (isVideo && att.target?.id) {
+                        mediaList.push({
+                            kind: 'video',
+                            videoId: String(att.target.id),
+                            thumbnailUrl: att.media?.image?.src || cr.thumbnail_url || '',
+                            thumbnailHash: ''
+                        });
+                    } else if (att.media?.image?.src) {
+                        mediaList.push({
+                            kind: 'image',
+                            imageHash: '',
+                            imageUrl: String(att.media.image.src)
+                        });
+                    }
+                }
+            }
+        }
+    } catch (e) {
+        console.warn(`Não foi possível consultar effective_object_story_id ${storyId}:`, e);
+    }
+
+    return { spec: outSpec, mediaList };
+}
+
+async function rescueBaseAdWithPage({
+    adObj,
+    targetPageId,
+    accountId,
+    nicheSlug = '',
+    baseLang = 'es',
+    token = '',
+    campaignId = '',
+    currentAdsetId = '',
+    videoUploadCache = {},
+    resolvedImgMap = {},
+    logFn = null
+}) {
+    const cr = adObj?.creative || {};
+    let spec = extractCreativeTemplateSpec(cr, cr.actor_id || '');
+    let mediaList = Array.isArray(spec.allMediaEntries) ? [...spec.allMediaEntries] : extractAnyCreativeMediaEntries(cr);
+
+    // 1. Suporte direto a Carrossel (child_attachments > 1)
+    const rawCarousel = cr.object_story_spec?.link_data || cr.object_story_spec?.template_data || null;
+    if (rawCarousel && Array.isArray(rawCarousel.child_attachments) && rawCarousel.child_attachments.length > 1) {
+        const clonedCarousel = JSON.parse(JSON.stringify(rawCarousel));
+        const res = await metaGraphPost(`/${META_GRAPH_VERSION}/${accountId}/adcreatives`, {
+            name: `${adObj.name || nicheSlug || 'Carousel'} - Page ${targetPageId}`,
+            object_story_spec: {
+                page_id: String(targetPageId),
+                link_data: clonedCarousel
+            }
+        });
+        if (res && res.id) {
+            return {
+                creativeId: res.id,
+                adName: adObj.name || '',
+                urlTags: adObj.url_tags || '',
+                pageId: String(targetPageId)
+            };
+        }
+        return {
+            error: res?.error || { message: 'Falha ao clonar carrossel na nova Página.' },
+            isPagePerm: isMetaPagePermissionError(res?.error),
+            isDevMode: res?.error?.error_subcode === 1885183
+        };
+    }
+
+    // 2. Se Meta ocultou mídia ou URL por permissão da Página, tenta hidratar via post original
+    const enriched = await hydrateCreativeFromEffectiveStory(cr, spec, mediaList);
+    spec = enriched.spec;
+    mediaList = enriched.mediaList;
+
+    // 3. Se ainda faltar link de destino, consulta 1 conjunto irmão na campanha como resgate
+    if (!spec.rawLink && Array.isArray(metaState.adsets)) {
+        const sibling = metaState.adsets.find(a => String(a.id) !== String(currentAdsetId));
+        if (sibling) {
+            try {
+                const sibAds = await hydrateAdSetAdsWithCreatives(sibling.id);
+                for (const sAd of sibAds) {
+                    const sSpec = extractCreativeTemplateSpec(sAd.creative || {}, sAd.creative?.actor_id || '');
+                    if (sSpec.rawLink) {
+                        spec.rawLink = sSpec.rawLink;
+                        if (!spec.rawVdMsg && sSpec.rawVdMsg) spec.rawVdMsg = sSpec.rawVdMsg;
+                        if (!spec.rawVdTitle && sSpec.rawVdTitle) spec.rawVdTitle = sSpec.rawVdTitle;
+                        if (!spec.rawVdDesc && sSpec.rawVdDesc) spec.rawVdDesc = sSpec.rawVdDesc;
+                        if ((!spec.rawBodies || spec.rawBodies.length === 0) && sSpec.rawBodies?.length) spec.rawBodies = sSpec.rawBodies;
+                        if ((!spec.rawTitles || spec.rawTitles.length === 0) && sSpec.rawTitles?.length) spec.rawTitles = sSpec.rawTitles;
+                        if ((!spec.rawDescs || spec.rawDescs.length === 0) && sSpec.rawDescs?.length) spec.rawDescs = sSpec.rawDescs;
+                        if (sSpec.hasAfs) spec.hasAfs = true;
+                        break;
+                    }
+                }
+            } catch (_) { /* best effort */ }
+        }
+    }
+
+    // 4. Se ainda não há mídia, tenta pacote OneDrive no idioma base ou thumbnail
+    if (mediaList.length === 0 && campaignId && campaignCreativesMap[campaignId]) {
+        try {
+            let pack = getCachedLinkedPackObj(campaignId);
+            if (!pack) {
+                pack = await Promise.race([
+                    ensureLinkedPackHydrated(campaignId, false),
+                    new Promise(resolve => setTimeout(() => resolve(null), 9000))
+                ]);
+            }
+            const packRes = pack ? getVideosForPackLang(pack, baseLang) : { slots: [] };
+            if (Array.isArray(packRes.slots) && packRes.slots.length > 0) {
+                const firstVideo = packRes.slots[0].video;
+                if (typeof logFn === 'function') {
+                    logFn(`☁️ Mídia oculta na Meta — subindo vídeo base (${baseLang.toUpperCase()} / ${firstVideo.name}) do OneDrive...`, 'info');
+                }
+                const upRes = await uploadOneDriveVideoToMeta(accountId, firstVideo, token, videoUploadCache);
+                if (upRes?.video_id) {
+                    mediaList.push({
+                        kind: 'video',
+                        videoId: upRes.video_id,
+                        thumbnailUrl: upRes.thumbnail_url || cr.thumbnail_url || ''
+                    });
+                }
+            }
+        } catch (e) {
+            console.warn('Fallback OneDrive no idioma base falhou:', e);
+        }
+    }
+
+    if (mediaList.length === 0 && (cr.image_url || cr.thumbnail_url)) {
+        mediaList.push({
+            kind: 'image',
+            imageHash: cr.image_hash || '',
+            imageUrl: cr.image_url || cr.thumbnail_url || ''
+        });
+    }
+
+    if (mediaList.length === 0) {
+        return {
+            error: { message: `Não foi possível extrair vídeo ou imagem de '${adObj?.name || 'Anúncio'}' para recriar na Página ${targetPageId}.` },
+            isAssetError: true
+        };
+    }
+
+    const chosenAsset = { ...mediaList[0] };
+    if (chosenAsset.kind === 'video' && !chosenAsset.thumbnailUrl && !chosenAsset.thumbnailHash) {
+        chosenAsset.thumbnailUrl = await resolveMetaVideoThumbUrl(chosenAsset.videoId, cr.thumbnail_url || '', videoUploadCache);
+    } else if (chosenAsset.kind === 'image' && chosenAsset.imageHash && !chosenAsset.imageUrl) {
+        if (!resolvedImgMap[chosenAsset.imageHash]) {
+            const fetchedMap = await resolveMetaImageHashMap(accountId, [chosenAsset.imageHash], videoUploadCache);
+            Object.assign(resolvedImgMap, fetchedMap);
+        }
+        chosenAsset.imageUrl = resolvedImgMap[chosenAsset.imageHash] || cr.thumbnail_url || '';
+    }
+
+    const textsObj = {
+        hasAfs: spec.hasAfs,
+        tBodies: spec.rawBodies || [],
+        tTitles: spec.rawTitles || [],
+        tDescs: spec.rawDescs || [],
+        tVdMsg: spec.rawVdMsg || '',
+        tVdTitle: spec.rawVdTitle || '',
+        tVdDesc: spec.rawVdDesc || ''
+    };
+
+    const res = await createSingleMediaAdCreative({
+        accountId,
+        name: `${adObj?.name || nicheSlug || 'Ad'} - Page ${targetPageId}`,
+        spec: {
+            ...spec,
+            pageId: String(targetPageId),
+            instagramUserId: '' // Nunca herdar IG de Página diferente
+        },
+        mediaAsset: chosenAsset,
+        textsObj,
+        linkUrl: spec.rawLink || cr.link_url || '',
+        logFn
+    });
+
+    if (res && res.id) {
+        return {
+            creativeId: res.id,
+            adName: adObj?.name || '',
+            urlTags: adObj?.url_tags || '',
+            pageId: String(targetPageId)
+        };
+    }
+
+    return {
+        error: res?.error || { message: 'Falha ao recriar AdCreative na nova Página.' },
+        isPagePerm: isMetaPagePermissionError(res?.error),
+        isDevMode: res?.error?.error_subcode === 1885183
+    };
 }
 
 async function loadBaseAdSetMetaThumbnails(adsetId) {
@@ -5303,6 +5821,14 @@ async function startBatchDuplication() {
     const stopOnFirstError = document.getElementById('dup-stop-on-error-check')
         ? Boolean(document.getElementById('dup-stop-on-error-check').checked)
         : true;
+    const selectedPageOverride = document.getElementById('select-dup-page-override')?.value || 'auto';
+    const autoFallbackPage = document.getElementById('dup-auto-fallback-page-check')
+        ? Boolean(document.getElementById('dup-auto-fallback-page-check').checked)
+        : true;
+    const blockedPageIds = new Set();
+    let activeWorkingPageId = (selectedPageOverride && selectedPageOverride !== 'auto') ? String(selectedPageOverride) : '';
+    const cachedRescuedAdsByBaseId = {};
+    const resolvedImgMap = {};
 
     // Atualiza UI para estado de execução
     const clearBtn = document.getElementById('btn-clear-meta-log');
@@ -5325,9 +5851,22 @@ async function startBatchDuplication() {
     if (progressWrapper) progressWrapper.classList.remove('twod-hidden');
     if (termStatus) termStatus.innerText = 'Em execução...';
 
+    let accountPromotePages = [];
+    if (selectedPageOverride !== 'auto' || autoFallbackPage) {
+        try {
+            accountPromotePages = await loadDupPromotePages(accountId);
+        } catch (_) {
+            accountPromotePages = Array.isArray(metaState.promotePages) ? metaState.promotePages : [];
+        }
+    }
+
     logMetaTerminal(`🚀 Iniciando processo de duplicação para ${countriesToDuplicate.length} países no bloco ${block.title}...`, 'info');
     logMetaTerminal(`🎯 Campanha de Destino: '${campObj.name}' (ID: ${campObj.id})`, 'info');
     logMetaTerminal(`📦 Conjunto base: '${adsetObj.name}' (${baseLang.toUpperCase()} | ID: ${adsetObj.id})`, 'info');
+    if (activeWorkingPageId) {
+        const pgName = accountPromotePages.find(p => String(p.id) === activeWorkingPageId)?.name || activeWorkingPageId;
+        logMetaTerminal(`📄 Página selecionada para os anúncios: '${pgName}' (ID: ${activeWorkingPageId})`, 'info');
+    }
     if (isScheduled) {
         logMetaTerminal(`🕐 Agendamento ativo: início programado para ${launchChoice.schedulePtBr} (${scheduledMetaStartTime} • status=${effectiveStatus})`, 'info');
     } else {
@@ -5344,11 +5883,12 @@ async function startBatchDuplication() {
         logMetaTerminal(`📋 Anúncios identificados no conjunto base: ${baseAds.length} anúncio(s)`, 'info');
         baseAds.forEach((bAd, idx) => {
             const cr = bAd.creative || {};
-            const mEntries = extractCreativeMediaEntries(cr);
+            const allEntries = extractAnyCreativeMediaEntries(cr);
+            const crPageId = cr.object_story_spec?.page_id || cr.actor_id || (cr.effective_object_story_id ? String(cr.effective_object_story_id).split('_')[0] : '') || '';
             const afsV = Array.isArray(cr.asset_feed_spec?.videos) ? cr.asset_feed_spec.videos.length : 0;
             const afsI = Array.isArray(cr.asset_feed_spec?.images) ? cr.asset_feed_spec.images.length : 0;
             const cagsG = Array.isArray(cr.creative_asset_groups_spec?.groups) ? cr.creative_asset_groups_spec.groups.length : 0;
-            logMetaTerminal(`🔎 Modelo #${idx + 1} '${bAd.name || bAd.id}': ${mEntries.length} mídia(s) detectada(s) [afs_v=${afsV}, afs_i=${afsI}, cags_g=${cagsG}]`, 'info');
+            logMetaTerminal(`🔎 Modelo #${idx + 1} '${bAd.name || bAd.id}': ${allEntries.length} mídia(s) detectada(s) [afs_v=${afsV}, afs_i=${afsI}, cags_g=${cagsG}]${crPageId ? ` • Página: ${crPageId}` : ''}`, 'info');
         });
     } catch (e) {
         baseAdsLoadError = e.message || String(e);
@@ -5494,17 +6034,25 @@ async function startBatchDuplication() {
                         entry.thumbnailUrl = await resolveMetaVideoThumbUrl(entry.videoId, '', videoUploadCache);
                     }
 
-                    const crRes = await createSingleMediaAdCreative({
+                    const crRes = await createSingleMediaCreativeWithPageFallback({
                         accountId: metaState.selectedAccountId,
                         name: `${campNicheSlug || 'Ad'} - ${baseLang.toUpperCase()} - ${adCode}`,
                         spec,
                         mediaAsset: entry,
                         textsObj,
                         linkUrl: spec.rawLink,
+                        candidatePages: getAuthorizedCandidatePageIds(metaState.selectedAccountId, blockedPageIds),
+                        allowFallback: autoFallbackPage,
+                        blockedPageIds,
+                        activeWorkingPageId,
                         logFn: logMetaTerminal
                     });
 
                     if (crRes.id) {
+                        if (crRes.usedPageId && crRes.switchedPage) {
+                            activeWorkingPageId = String(crRes.usedPageId);
+                            logMetaTerminal(`✅ Página '${activeWorkingPageId}' autorizada! Expandindo os demais criativos por ela.`, 'success');
+                        }
                         expandedItems.push({
                             adName: adCode,
                             creativeId: crRes.id,
@@ -5516,7 +6064,7 @@ async function startBatchDuplication() {
                         if (crRes.error?.error_subcode === 1885183 || isMetaPagePermissionError(crRes.error)) {
                             sameLangDevBlock = crRes.error?.error_subcode === 1885183;
                             sameLangPageBlock = isMetaPagePermissionError(crRes.error);
-                            sameLangBlockedPageId = spec.pageId || '';
+                            sameLangBlockedPageId = crRes.usedPageId || spec.pageId || '';
                             break;
                         }
                     }
@@ -5592,9 +6140,13 @@ async function startBatchDuplication() {
                     const templateAd = usePaired ? baseAds[uIdx] : baseAds[0];
                     const templateKey = templateAd.id || String(usePaired ? uIdx : 0);
                     const spec = extractCreativeTemplateSpec(templateAd.creative || {}, templateAd.creative?.actor_id || '');
+                    if (!spec.pageId && (activeWorkingPageId || accountPromotePages[0]?.id)) {
+                        spec.pageId = String(activeWorkingPageId || accountPromotePages[0].id);
+                        spec.instagramUserId = '';
+                    }
 
                     if (!spec.pageId) {
-                        lastLangError = `Anúncio base '${templateAd.name}' não possui page_id em object_story_spec.`;
+                        lastLangError = `Anúncio base '${templateAd.name}' não possui page_id e nenhuma Página foi encontrada na conta.`;
                         logMetaTerminal(`⚠️ ${lastLangError}`, 'warn');
                         continue;
                     }
@@ -5637,7 +6189,7 @@ async function startBatchDuplication() {
                     }
 
                     const trData = translatedTemplateCache[templateKey];
-                    const crRes = await createSingleMediaAdCreative({
+                    const crRes = await createSingleMediaCreativeWithPageFallback({
                         accountId: metaState.selectedAccountId,
                         name: `${campNicheSlug || 'Ad'} - ${tLang.toUpperCase()} - ${mItem.adName}`,
                         spec: trData.spec,
@@ -5648,10 +6200,19 @@ async function startBatchDuplication() {
                         },
                         textsObj: trData.textsObj,
                         linkUrl: trData.localizedLink,
+                        candidatePages: getAuthorizedCandidatePageIds(metaState.selectedAccountId, blockedPageIds),
+                        allowFallback: autoFallbackPage,
+                        blockedPageIds,
+                        activeWorkingPageId,
                         logFn: logMetaTerminal
                     });
 
                     if (crRes.id) {
+                        if (crRes.usedPageId && (crRes.switchedPage || (activeWorkingPageId && String(crRes.usedPageId) !== activeWorkingPageId))) {
+                            activeWorkingPageId = String(crRes.usedPageId);
+                            trData.spec = { ...trData.spec, pageId: activeWorkingPageId, instagramUserId: '' };
+                            logMetaTerminal(`✅ Página '${activeWorkingPageId}' autorizada! Usando-a para os criativos em ${tLang.toUpperCase()}.`, 'success');
+                        }
                         createdItems.push({
                             adName: usePaired ? (templateAd.name || mItem.adName) : mItem.adName,
                             creativeId: crRes.id,
@@ -5661,14 +6222,13 @@ async function startBatchDuplication() {
                         lastLangError = formatMetaApiError(crRes.error || crRes);
                         logMetaTerminal(`⚠️ Falha ao criar AdCreative ${mItem.adName} (${tLang.toUpperCase()}): ${lastLangError}`, 'error');
                         const errSub = crRes.error?.error_subcode;
-                        const errMsgTxt = crRes.error?.message || '';
                         if (errSub === 1885183) {
                             hitDevModeBlock = true;
                             break;
                         }
                         if (isMetaPagePermissionError(crRes.error)) {
                             hitPagePermBlock = true;
-                            blockedPageId = trData.spec.pageId || '';
+                            blockedPageId = crRes.usedPageId || trData.spec.pageId || '';
                             break;
                         }
                     }
@@ -5912,6 +6472,115 @@ async function startBatchDuplication() {
                 return metaGraphPost(`/${META_GRAPH_VERSION}/${metaState.selectedAccountId}/ads`, payload);
             };
 
+            const publishDirectBaseAdWithPageFallback = async (baseAd) => {
+                const adDisplayName = baseAd.name || finalName;
+                const getOrCreateRescued = async (pId) => {
+                    const cacheKey = `${pId}:${baseAd.id || baseAd.creative?.id}`;
+                    if (cachedRescuedAdsByBaseId[cacheKey]) return cachedRescuedAdsByBaseId[cacheKey];
+                    const res = await rescueBaseAdWithPage({
+                        adObj: baseAd,
+                        targetPageId: pId,
+                        accountId: metaState.selectedAccountId,
+                        nicheSlug: campNicheSlug,
+                        baseLang,
+                        token,
+                        campaignId,
+                        currentAdsetId: adsetId,
+                        videoUploadCache,
+                        resolvedImgMap,
+                        logFn: logMetaTerminal
+                    });
+                    if (res && res.creativeId) cachedRescuedAdsByBaseId[cacheKey] = res;
+                    return res;
+                };
+
+                let initialErr = null;
+                let needPageFallback = false;
+
+                if (activeWorkingPageId) {
+                    const rescued = await getOrCreateRescued(activeWorkingPageId);
+                    if (rescued && rescued.creativeId) {
+                        const adRes = await createAdInCopiedSet(adDisplayName, rescued.creativeId, baseAd.url_tags);
+                        if (adRes.id) return adRes;
+                        initialErr = adRes.error;
+                        if (isMetaPagePermissionError(adRes.error) && autoFallbackPage) {
+                            blockedPageIds.add(String(activeWorkingPageId));
+                            activeWorkingPageId = '';
+                            needPageFallback = true;
+                        }
+                    } else {
+                        initialErr = rescued?.error || { message: 'Falha ao recriar anúncio na Página selecionada.' };
+                        if ((rescued?.isPagePerm || isMetaPagePermissionError(initialErr)) && autoFallbackPage && !rescued?.isDevMode) {
+                            blockedPageIds.add(String(activeWorkingPageId));
+                            activeWorkingPageId = '';
+                            needPageFallback = true;
+                        }
+                    }
+                } else {
+                    const directRes = await createAdInCopiedSet(adDisplayName, baseAd.creative.id, baseAd.url_tags);
+                    if (directRes.id) return directRes;
+                    initialErr = directRes.error;
+                    if (isMetaPagePermissionError(directRes.error) && autoFallbackPage) {
+                        const origSpec = extractCreativeTemplateSpec(baseAd.creative || {}, baseAd.creative?.actor_id || '');
+                        if (origSpec.pageId) blockedPageIds.add(String(origSpec.pageId));
+                        needPageFallback = true;
+                    }
+                }
+
+                if (!needPageFallback) {
+                    return { error: initialErr };
+                }
+
+                if (accountPromotePages.length === 0) {
+                    try {
+                        accountPromotePages = await loadDupPromotePages(metaState.selectedAccountId);
+                    } catch (_) { /* keep empty */ }
+                }
+
+                const candidates = getAuthorizedCandidatePageIds(metaState.selectedAccountId, blockedPageIds);
+                if (candidates.length === 0) {
+                    logMetaTerminal('⚠️ Nenhuma outra Página autorizada encontrada nesta conta para substituir a Página bloqueada.', 'warn');
+                    return { error: initialErr };
+                }
+
+                logMetaTerminal(`🔄 Página atual sem permissão de anunciante (1885499/3858749). Testando ${candidates.length} Página(s) autorizada(s) da conta...`, 'warn');
+                let lastErr = initialErr;
+
+                for (const cand of candidates) {
+                    if (blockedPageIds.has(String(cand.id))) continue;
+                    logMetaTerminal(`🔁 Recriando anúncio '${adDisplayName}' usando Página '${cand.name}' (ID: ${cand.id})...`, 'info');
+                    const rescueRes = await getOrCreateRescued(cand.id);
+                    if (!rescueRes?.creativeId) {
+                        lastErr = rescueRes?.error || lastErr;
+                        if (rescueRes?.isDevMode || rescueRes?.isAssetError) break;
+                        if (rescueRes?.isPagePerm || isMetaPagePermissionError(lastErr)) {
+                            blockedPageIds.add(String(cand.id));
+                            logMetaTerminal(`⚠️ Página '${cand.name}' (${cand.id}) também sem permissão no BM, tentando próxima...`, 'warn');
+                            continue;
+                        }
+                        break;
+                    }
+
+                    const retryAdRes = await createAdInCopiedSet(adDisplayName, rescueRes.creativeId, baseAd.url_tags);
+                    if (retryAdRes.id) {
+                        activeWorkingPageId = String(cand.id);
+                        logMetaTerminal(`✅ Página '${cand.name}' (ID: ${cand.id}) aceita! Anúncio publicado com novo AdCreative (${rescueRes.creativeId}) — aplicando esta Página nos próximos países.`, 'success');
+                        return retryAdRes;
+                    }
+                    if (retryAdRes.error) {
+                        lastErr = retryAdRes.error;
+                        if (isMetaPagePermissionError(retryAdRes.error)) {
+                            blockedPageIds.add(String(cand.id));
+                            logMetaTerminal(`⚠️ Página '${cand.name}' (${cand.id}) também sem permissão para publicar anúncio, tentando próxima...`, 'warn');
+                            continue;
+                        }
+                        break;
+                    }
+                }
+
+                return { error: lastErr };
+            };
+
             if (countryLang === baseLang) {
                 if (preparedSameLangItems.length > 0) {
                     expectedAds = preparedSameLangItems.length;
@@ -5930,7 +6599,7 @@ async function startBatchDuplication() {
                     const validBaseAds = baseAds.filter(b => b.creative && b.creative.id);
                     expectedAds = validBaseAds.length;
                     for (const baseAd of validBaseAds) {
-                        const adResult = await createAdInCopiedSet(baseAd.name || finalName, baseAd.creative.id, baseAd.url_tags);
+                        const adResult = await publishDirectBaseAdWithPageFallback(baseAd);
                         if (adResult.id) {
                             adsCreated++;
                         } else if (adResult.error) {
@@ -5939,7 +6608,9 @@ async function startBatchDuplication() {
                             if (stopOnFirstError) break;
                         }
                     }
-                    countryModeMsg = adsCreated > 0 ? `com ${adsCreated} anúncio(s) clonado(s)` : 'sem anúncios';
+                    countryModeMsg = adsCreated > 0
+                        ? `com ${adsCreated} anúncio(s) ${activeWorkingPageId ? `(Página ${activeWorkingPageId})` : 'clonado(s)'}`
+                        : 'sem anúncios';
                 }
             } else if (Array.isArray(preparedCreativesByLang[countryLang]) && preparedCreativesByLang[countryLang].length > 0) {
                 expectedAds = preparedCreativesByLang[countryLang].length;
@@ -6330,6 +7001,7 @@ window.toggleChangelogHistory = toggleChangelogHistory;
 
 // Funções Meta Ads & Duplicador
 window.reloadMetaAccounts = loadMetaAccounts;
+window.loadDupPromotePages = loadDupPromotePages;
 window.onMetaAccountSelected = onMetaAccountSelected;
 window.onMetaCampaignSelected = onMetaCampaignSelected;
 window.onMetaAdSetSelected = onMetaAdSetSelected;
