@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>TwoD Hub — Central de Automações</title>
-    <link rel="stylesheet" href="styles.css?v=3.7">
+    <link rel="stylesheet" href="styles.css?v=3.8">
 </head>
 <body>
 
@@ -1488,33 +1488,31 @@
                             <!-- Preenchido dinamicamente quando o idioma do bloco diferir da base -->
                         </div>
 
-                        <!-- SELETOR DE BLOCOS (TABS HORIZONTAIS) -->
-                        <div class="blocks-tab-nav" id="blocks-tab-nav">
-                            <!-- Inserido dinamicamente via JS -->
-                        </div>
-
-                        <!-- AÇÕES RÁPIDAS DE SELEÇÃO E CONTADOR -->
+                        <!-- BARRA GLOBAL MULTI-BLOCOS -->
                         <div class="block-controls-bar">
                             <div class="block-info-label">
-                                <strong id="current-block-title">BLOCO 01 - Espanhol (es)</strong>
-                                <span class="badge-count" id="current-block-selected-count">15 selecionados</span>
+                                <strong id="current-block-title">Seleção Multi-Blocos</strong>
+                                <span class="badge-count" id="current-block-selected-count">0 selecionados</span>
                                 <div id="current-block-status-pills" class="block-status-pills">
-                                    <!-- Badges: ✅ X criados | ⏳ Y pendentes -->
+                                    <!-- Badges dos blocos com países marcados -->
                                 </div>
                             </div>
                             <div class="block-quick-actions">
-                                <button type="button" class="btn-chip btn-chip-primary" onclick="selectMissingCountriesOnly()" title="Marca apenas os países que ainda NÃO foram criados nesta campanha">
-                                    ⚡ Marcar Apenas Faltantes
+                                <button type="button" class="btn-chip" onclick="toggleAllBlockAccordions(true)" title="Expandir todos os blocos">
+                                    📂 Expandir Todos
                                 </button>
-                                <button type="button" class="btn-chip" onclick="toggleAllCountriesInBlock(true)">✓ Marcar Todos</button>
-                                <button type="button" class="btn-chip" onclick="toggleAllCountriesInBlock(false)">✕ Desmarcar Todos</button>
-                                <button type="button" class="btn-chip" onclick="selectPriorityCountriesOnly()">⭐ Apenas Prioritários</button>
+                                <button type="button" class="btn-chip" onclick="toggleAllBlockAccordions(false)" title="Recolher todos os blocos">
+                                    📁 Recolher Todos
+                                </button>
+                                <button type="button" class="btn-chip" onclick="clearAllBlocksSelection()" title="Desmarcar todos os países de todos os blocos">
+                                    🧹 Limpar Tudo
+                                </button>
                             </div>
                         </div>
 
-                        <!-- GRID DE CARDS/CHECKBOXES DE PAÍSES -->
-                        <div class="countries-grid-container" id="countries-grid-container">
-                            <!-- Cards de países gerados via JS -->
+                        <!-- MENUS EXPANSÍVEIS (ACORDEÃO MULTI-BLOCOS) -->
+                        <div class="blocks-accordion-list" id="blocks-accordion-list">
+                            <!-- Inserido dinamicamente via JS -->
                         </div>
 
                         <!-- CONFIGURAÇÕES DE DISPARO -->
@@ -2070,8 +2068,8 @@
         ⬆ Topo
     </button>
 
-    <script src="app.js?v=9.17"></script>
-    <script src="duplicator_queue.js?v=1.0"></script>
+    <script src="app.js?v=9.18"></script>
+    <script src="duplicator_queue.js?v=1.1"></script>
     <script src="studio.js?v=1.11"></script>
     <script src="creative_gen.js?v=1.2"></script>
     <script src="campaign_builder.js?v=1.11"></script>

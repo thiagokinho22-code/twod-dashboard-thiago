@@ -2166,6 +2166,7 @@ let metaState = {
     advertiserCtx: null,
     advertiserAccountId: '',
     activeBlockId: 'BLOCO-01',
+    expandedBlocks: { 'BLOCO-01': true },
     checkedCountries: {},
     isDuplicating: false,
     initialized: false
@@ -6478,6 +6479,47 @@ function toggleDuplicatorSlot(slotNum, isChecked) {
     else duplicatorSelectedSlots.delete(num);
 }
 
+function getCountryBlockLangCode(country, blockObj, baseLang = 'pt') {
+    return (country?.langCode || (blockObj?.langCode && blockObj.langCode !== 'multi' ? blockObj.langCode : baseLang) || baseLang).toLowerCase();
+}
+
+function getAllSelectedCountriesWithBlock() {
+    const out = [];
+    if (typeof META_COUNTRY_BLOCKS === 'undefined') return out;
+    Object.keys(META_COUNTRY_BLOCKS).forEach(blockId => {
+        const blk = META_COUNTRY_BLOCKS[blockId];
+        const checks = metaState.checkedCountries[blockId] || {};
+        (blk?.countries || []).forEach(c => {
+            if (checks[c.adSetName]) {
+                out.push({
+                    ...c,
+                    _blockId: blockId,
+                    _blockTitle: blk.title,
+                    _blockLangCode: blk.langCode
+                });
+            }
+        });
+    });
+    return out;
+}
+
+function getSelectedBlocksSummary() {
+    const byBlock = [];
+    let totalSelected = 0;
+    if (typeof META_COUNTRY_BLOCKS !== 'undefined') {
+        Object.keys(META_COUNTRY_BLOCKS).forEach(blockId => {
+            const blk = META_COUNTRY_BLOCKS[blockId];
+            const checks = metaState.checkedCountries[blockId] || {};
+            const count = (blk?.countries || []).filter(c => checks[c.adSetName]).length;
+            if (count > 0) {
+                totalSelected += count;
+                byBlock.push({ blockId, title: blk.title, count });
+            }
+        });
+    }
+    return { totalSelected, byBlock };
+}
+
 // Alerta dinâmico de diferença de idioma, criativos prontos e upload manual no Passo 2
 function updateDuplicatorLanguageNotice() {
     const noticeEl = document.getElementById('duplicator-lang-notice');
@@ -6493,13 +6535,20 @@ function updateDuplicatorLanguageNotice() {
     }
 
     const baseLang = detectAdSetLanguage(adset);
-    const checks = metaState.checkedCountries[metaState.activeBlockId] || {};
-    const selectedCountries = block.countries.filter(c => checks[c.adSetName]);
-    const scopeCountries = selectedCountries.length > 0 ? selectedCountries : block.countries;
+    const allSelected = getAllSelectedCountriesWithBlock();
+    const selSummary = getSelectedBlocksSummary();
+    const scopeCountries = allSelected.length > 0
+        ? allSelected
+        : (block.countries || []).map(c => ({ ...c, _blockId: block.id, _blockTitle: block.title, _blockLangCode: block.langCode }));
+    const scopeTitle = allSelected.length > 0
+        ? (selSummary.byBlock.length > 1
+            ? `${selSummary.byBlock.length} blocos • ${allSelected.length} países`
+            : `${selSummary.byBlock[0]?.title || block.title}`)
+        : block.title;
 
     const neededLangsMap = new Map();
     scopeCountries.forEach(c => {
-        const l = (c.langCode || (block.langCode && block.langCode !== 'multi' ? block.langCode : baseLang) || baseLang).toLowerCase();
+        const l = getCountryBlockLangCode(c, { langCode: c._blockLangCode || block.langCode }, baseLang);
         if (!neededLangsMap.has(l)) neededLangsMap.set(l, c.langName || l.toUpperCase());
     });
 
@@ -6510,7 +6559,7 @@ function updateDuplicatorLanguageNotice() {
         noticeEl.innerHTML = `
             <div style="display:flex; align-items:center; gap:8px;">
                 <span>✅</span>
-                <strong>OK — Mesmo Idioma da Origem (${escHtml(block.title)})</strong>
+                <strong>OK — Mesmo Idioma da Origem (${escHtml(scopeTitle)})</strong>
             </div>
             <div style="font-size:12px; color:#d1fae5;">
                 O conjunto base e os países selecionados compartilham o mesmo idioma (${baseLang.toUpperCase()}). Os anúncios, criativos e UTMs serão clonados com precisão instantânea.
@@ -6540,7 +6589,7 @@ function updateDuplicatorLanguageNotice() {
         header.innerHTML = `
             <div style="display:flex; align-items:center; gap:8px;">
                 <span>✅</span>
-                <strong>Criativo OK + Tradução Automática (${escHtml(block.title)})</strong>
+                <strong>Criativo OK + Tradução Automática (${escHtml(scopeTitle)})</strong>
             </div>
             <span class="lang-pill ready">🎬 OK (${readyLangs.map(r => r.code.toUpperCase()).join(', ')})</span>
         `;
@@ -6550,7 +6599,7 @@ function updateDuplicatorLanguageNotice() {
         desc.style.fontSize = '12px';
         desc.innerHTML = `
             Origem em <strong>${baseLang.toUpperCase()}</strong> ➔ Duplicando para <strong>${diffLangs.map(l => l.toUpperCase()).join(', ')}</strong>.<br>
-            Ao clicar em Duplicar, o TwoD Hub subirá os vídeos do pacote <strong>"${escHtml(link?.niche_pack || 'MP4 Manual')}"</strong>, traduzirá os textos (2-3-2) e atualizará a URL TranslateX (<code>/${diffLangs[0]}/</code>).
+            Ao clicar em Duplicar, o TwoD Hub subirá os vídeos do pacote <strong>"${escHtml(link?.niche_pack || 'MP4 Manual')}"</strong>, traduzirá os textos (2-3-2) e atualizará a URL TranslateX (<code>${diffLangs.map(l => `/${escHtml(l)}/`).join(', ')}</code>).
         `;
         noticeEl.appendChild(desc);
 
@@ -6767,21 +6816,99 @@ function getBlockCreativeSummary(blockId) {
     return { readyCount, total, status };
 }
 
-// Renderiza a barra de navegação dos blocos com badges de progresso + status OK de criativos
-function renderBlockNav() {
-    const nav = document.getElementById('blocks-tab-nav');
-    if (!nav) return;
+function buildCountryCardElement(blockId, country, isChecked) {
+    const existingAdSet = findExistingAdSetForCountry(country);
 
-    nav.innerHTML = '';
+    const card = document.createElement('label');
+    card.className = `country-card ${isChecked ? 'selected' : ''} ${existingAdSet ? 'country-already-exists' : ''}`;
+
+    const chk = document.createElement('input');
+    chk.type = 'checkbox';
+    chk.checked = isChecked;
+    chk.onchange = (e) => {
+        metaState.activeBlockId = blockId;
+        if (!metaState.checkedCountries[blockId]) {
+            metaState.checkedCountries[blockId] = {};
+        }
+        metaState.checkedCountries[blockId][country.adSetName] = e.target.checked;
+        card.classList.toggle('selected', e.target.checked);
+        const accItem = card.closest('.block-acc-item');
+        if (accItem) {
+            const blkCount = (META_COUNTRY_BLOCKS[blockId]?.countries || []).filter(c => metaState.checkedCountries[blockId][c.adSetName]).length;
+            accItem.classList.toggle('has-selected', blkCount > 0);
+            const selBadge = accItem.querySelector('.block-acc-sel-pill');
+            if (selBadge) {
+                selBadge.textContent = `☑️ ${blkCount} marcado(s)`;
+                selBadge.classList.toggle('twod-hidden', blkCount === 0);
+            }
+        }
+        updateBlockCounter();
+    };
+
+    const info = document.createElement('div');
+    info.className = 'country-info';
+
+    const nameDiv = document.createElement('div');
+    nameDiv.className = 'country-name';
+    nameDiv.innerHTML = `${country.adSetName} <span class="country-sub">(${country.code})</span>`;
+
+    const subDiv = document.createElement('div');
+    subDiv.className = 'country-sub';
+    subDiv.innerText = `${country.langName}${country.note ? ' • ' + country.note : ''}`;
+
+    const cLang = (country.langCode || 'es').toLowerCase();
+    const cCreativeStatus = isCreativeReadyForLang(metaState.selectedCampaignId, metaState.selectedAdSet, cLang);
+    const creativePillHtml = (metaState.selectedCampaignId && metaState.selectedAdSet)
+        ? `<span class="country-creative-pill ${cCreativeStatus.ready ? 'ok' : 'missing'}" title="${cCreativeStatus.ready ? `Criativo disponível: ${escHtml(cCreativeStatus.label)}` : `Sem pasta em ${cLang.toUpperCase()} vinculada`}">${cCreativeStatus.ready ? '🎬 Criativo OK' : '⏳ Sem criativo'}</span>`
+        : '';
+
+    const statusDiv = document.createElement('div');
+    if (existingAdSet) {
+        const statusLabel = existingAdSet.status === 'ACTIVE' ? 'Ativo 🟢' : 'Pausado ⏸️';
+        statusDiv.innerHTML = `<span class="country-status-pill pill-exists" title="Conjunto existente: ${escHtml(existingAdSet.name)} (ID: ${existingAdSet.id})">✅ Já na Campanha (${statusLabel})</span> ${creativePillHtml}`;
+    } else {
+        statusDiv.innerHTML = `<span class="country-status-pill pill-pending">⏳ Pendente</span> ${creativePillHtml}`;
+    }
+
+    info.appendChild(nameDiv);
+    info.appendChild(subDiv);
+    info.appendChild(statusDiv);
+
+    card.appendChild(chk);
+    card.appendChild(info);
+
+    if (country.priority) {
+        const star = document.createElement('span');
+        star.className = 'country-badge-star';
+        star.title = 'País Prioritário';
+        star.innerText = '⭐';
+        card.appendChild(star);
+    }
+
+    return card;
+}
+
+// Renderiza todos os blocos em menus expansíveis (acordeão) com seleção simultânea entre múltiplos blocos
+function renderBlockNav() {
+    const accList = document.getElementById('blocks-accordion-list');
+    if (!accList) return;
+
+    if (!metaState.expandedBlocks || typeof metaState.expandedBlocks !== 'object') {
+        metaState.expandedBlocks = { [metaState.activeBlockId || 'BLOCO-01']: true };
+    }
+
+    accList.innerHTML = '';
     Object.keys(META_COUNTRY_BLOCKS).forEach(blockId => {
         const block = META_COUNTRY_BLOCKS[blockId];
         const stats = getBlockStats(blockId);
         const creativeStats = getBlockCreativeSummary(blockId);
+        const currentChecks = metaState.checkedCountries[blockId] || {};
+        const selectedCount = (block.countries || []).filter(c => currentChecks[c.adSetName]).length;
+        const isOpen = Boolean(metaState.expandedBlocks[blockId]);
 
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = `block-tab-btn ${blockId === metaState.activeBlockId ? 'active' : ''} ${stats.isComplete ? 'is-complete' : ''}`;
-        btn.setAttribute('data-block', blockId);
+        const item = document.createElement('div');
+        item.className = `block-acc-item ${isOpen ? 'is-open' : ''} ${selectedCount > 0 ? 'has-selected' : ''} ${stats.isComplete ? 'is-complete' : ''}`;
+        item.setAttribute('data-block', blockId);
 
         let badgeHtml = '';
         if (stats.isComplete) {
@@ -6803,34 +6930,79 @@ function renderBlockNav() {
             }
         }
 
-        btn.innerHTML = `<span>${block.title}</span> ${badgeHtml} ${creativeBadgeHtml}`;
-        btn.onclick = () => selectCountryBlock(blockId);
-        nav.appendChild(btn);
+        const header = document.createElement('div');
+        header.className = 'block-acc-header';
+        header.onclick = () => toggleBlockAccordion(blockId);
+
+        header.innerHTML = `
+            <div class="block-acc-title-wrap">
+                <span class="block-acc-arrow">${isOpen ? '▾' : '▸'}</span>
+                <span class="block-acc-title">${escHtml(block.title)}</span>
+                ${badgeHtml}
+                ${creativeBadgeHtml}
+                <span class="block-acc-sel-pill ${selectedCount > 0 ? '' : 'twod-hidden'}">☑️ ${selectedCount} marcado(s)</span>
+            </div>
+            <div class="block-acc-actions">
+                <button type="button" class="btn-chip btn-chip-primary" onclick="event.stopPropagation(); selectMissingCountriesOnly('${escHtml(blockId)}')" title="Marcar apenas países faltantes deste bloco">⚡ Faltantes</button>
+                <button type="button" class="btn-chip" onclick="event.stopPropagation(); toggleAllCountriesInBlock(true, '${escHtml(blockId)}')">✓ Todos</button>
+                <button type="button" class="btn-chip" onclick="event.stopPropagation(); toggleAllCountriesInBlock(false, '${escHtml(blockId)}')">✕ Limpar</button>
+                <button type="button" class="btn-chip" onclick="event.stopPropagation(); selectPriorityCountriesOnly('${escHtml(blockId)}')">⭐ Prioritários</button>
+            </div>
+        `;
+
+        const body = document.createElement('div');
+        body.className = `block-acc-body ${isOpen ? '' : 'twod-hidden'}`;
+        if (isOpen) {
+            const grid = document.createElement('div');
+            grid.className = 'countries-grid-container';
+            (block.countries || []).forEach(country => {
+                grid.appendChild(buildCountryCardElement(blockId, country, !!currentChecks[country.adSetName]));
+            });
+            body.appendChild(grid);
+        }
+
+        item.appendChild(header);
+        item.appendChild(body);
+        accList.appendChild(item);
     });
+
+    updateBlockCounter();
 }
 
-// Seleciona um bloco de países
+function toggleBlockAccordion(blockId) {
+    if (!META_COUNTRY_BLOCKS[blockId]) return;
+    if (!metaState.expandedBlocks) metaState.expandedBlocks = {};
+    const nextOpen = !metaState.expandedBlocks[blockId];
+    metaState.expandedBlocks[blockId] = nextOpen;
+    if (nextOpen) metaState.activeBlockId = blockId;
+    renderBlockNav();
+}
+
+function toggleAllBlockAccordions(openState) {
+    if (!metaState.expandedBlocks) metaState.expandedBlocks = {};
+    Object.keys(META_COUNTRY_BLOCKS).forEach(blockId => {
+        metaState.expandedBlocks[blockId] = Boolean(openState);
+    });
+    renderBlockNav();
+}
+
+function clearAllBlocksSelection() {
+    metaState.checkedCountries = {};
+    renderBlockNav();
+    updateDuplicatorLanguageNotice();
+}
+
+// Seleciona e expande um bloco de países (preservando seleções já feitas nos outros blocos!)
 function selectCountryBlock(blockId) {
     if (!META_COUNTRY_BLOCKS[blockId]) return;
 
     metaState.activeBlockId = blockId;
+    if (!metaState.expandedBlocks) metaState.expandedBlocks = {};
+    metaState.expandedBlocks[blockId] = true;
+
     const block = META_COUNTRY_BLOCKS[blockId];
-
-    // Atualiza botões ativos
-    document.querySelectorAll('.block-tab-btn').forEach(btn => {
-        if (btn.getAttribute('data-block') === blockId) {
-            btn.classList.add('active');
-        } else {
-            btn.classList.remove('active');
-        }
-    });
-
-    const titleEl = document.getElementById('current-block-title');
-    if (titleEl) titleEl.innerText = block.title;
-
-    // Inicializa seleção padrão inteligente:
-    // Apenas países faltantes vêm marcados por padrão; países já criados ficam desmarcados!
-    if (!metaState.checkedCountries[blockId]) {
+    const nothingCheckedAnywhere = Object.keys(metaState.checkedCountries || {}).length === 0;
+    if (!metaState.checkedCountries[blockId] && nothingCheckedAnywhere) {
         metaState.checkedCountries[blockId] = {};
         block.countries.forEach(c => {
             const alreadyExists = !!findExistingAdSetForCountry(c);
@@ -6838,171 +7010,100 @@ function selectCountryBlock(blockId) {
         });
     }
 
-    renderCountriesGrid();
+    renderBlockNav();
     updateDuplicatorLanguageNotice();
 }
 
-// Renderiza o grid de checkboxes dos países do bloco ativo com badges visuais de presença
+// Renderiza o grid de checkboxes dos blocos (mantido por compatibilidade com chamadores existentes)
 function renderCountriesGrid() {
-    const grid = document.getElementById('countries-grid-container');
-    if (!grid) return;
-
-    const block = META_COUNTRY_BLOCKS[metaState.activeBlockId];
-    if (!block) return;
-
-    grid.innerHTML = '';
-    if (!metaState.checkedCountries[metaState.activeBlockId]) {
-        metaState.checkedCountries[metaState.activeBlockId] = {};
-    }
-    const currentChecks = metaState.checkedCountries[metaState.activeBlockId];
-
-    block.countries.forEach(country => {
-        const isChecked = !!currentChecks[country.adSetName];
-        const existingAdSet = findExistingAdSetForCountry(country);
-
-        const card = document.createElement('label');
-        card.className = `country-card ${isChecked ? 'selected' : ''} ${existingAdSet ? 'country-already-exists' : ''}`;
-
-        const chk = document.createElement('input');
-        chk.type = 'checkbox';
-        chk.checked = isChecked;
-        chk.onchange = (e) => {
-            if (!metaState.checkedCountries[metaState.activeBlockId]) {
-                metaState.checkedCountries[metaState.activeBlockId] = {};
-            }
-            metaState.checkedCountries[metaState.activeBlockId][country.adSetName] = e.target.checked;
-            if (e.target.checked) {
-                card.classList.add('selected');
-            } else {
-                card.classList.remove('selected');
-            }
-            updateBlockCounter();
-        };
-
-        const info = document.createElement('div');
-        info.className = 'country-info';
-
-        const nameDiv = document.createElement('div');
-        nameDiv.className = 'country-name';
-        nameDiv.innerHTML = `${country.adSetName} <span class="country-sub">(${country.code})</span>`;
-
-        const subDiv = document.createElement('div');
-        subDiv.className = 'country-sub';
-        subDiv.innerText = `${country.langName}${country.note ? ' • ' + country.note : ''}`;
-
-        const cLang = (country.langCode || 'es').toLowerCase();
-        const cCreativeStatus = isCreativeReadyForLang(metaState.selectedCampaignId, metaState.selectedAdSet, cLang);
-        const creativePillHtml = (metaState.selectedCampaignId && metaState.selectedAdSet)
-            ? `<span class="country-creative-pill ${cCreativeStatus.ready ? 'ok' : 'missing'}" title="${cCreativeStatus.ready ? `Criativo disponível: ${escHtml(cCreativeStatus.label)}` : `Sem pasta em ${cLang.toUpperCase()} vinculada`}">${cCreativeStatus.ready ? '🎬 Criativo OK' : '⏳ Sem criativo'}</span>`
-            : '';
-
-        const statusDiv = document.createElement('div');
-        if (existingAdSet) {
-            const statusLabel = existingAdSet.status === 'ACTIVE' ? 'Ativo 🟢' : 'Pausado ⏸️';
-            statusDiv.innerHTML = `<span class="country-status-pill pill-exists" title="Conjunto existente: ${escHtml(existingAdSet.name)} (ID: ${existingAdSet.id})">✅ Já na Campanha (${statusLabel})</span> ${creativePillHtml}`;
-        } else {
-            statusDiv.innerHTML = `<span class="country-status-pill pill-pending">⏳ Pendente</span> ${creativePillHtml}`;
-        }
-
-        info.appendChild(nameDiv);
-        info.appendChild(subDiv);
-        info.appendChild(statusDiv);
-
-        card.appendChild(chk);
-        card.appendChild(info);
-
-        if (country.priority) {
-            const star = document.createElement('span');
-            star.className = 'country-badge-star';
-            star.title = 'País Prioritário';
-            star.innerText = '⭐';
-            card.appendChild(star);
-        }
-
-        grid.appendChild(card);
-    });
-
-    updateBlockCounter();
+    renderBlockNav();
 }
 
 function updateBlockCounter() {
-    const block = META_COUNTRY_BLOCKS[metaState.activeBlockId];
-    if (!block) return;
-
-    const currentChecks = metaState.checkedCountries[metaState.activeBlockId] || {};
-    const count = Object.values(currentChecks).filter(Boolean).length;
+    const summary = getSelectedBlocksSummary();
     const badge = document.getElementById('current-block-selected-count');
     if (badge) {
-        badge.innerText = `${count} de ${block.countries.length} selecionados`;
+        badge.innerText = summary.byBlock.length > 1
+            ? `${summary.totalSelected} países em ${summary.byBlock.length} blocos`
+            : `${summary.totalSelected} selecionado(s)`;
     }
 
     const pillsContainer = document.getElementById('current-block-status-pills');
     if (pillsContainer) {
-        const stats = getBlockStats(metaState.activeBlockId);
-        if (stats.isComplete) {
-            pillsContainer.innerHTML = `<span class="stat-pill stat-pill-complete">🎉 Bloco 100% Concluído (${stats.existing}/${stats.total})</span>`;
-        } else if (stats.existing > 0) {
-            pillsContainer.innerHTML = `
-                <span class="stat-pill stat-pill-created">✅ ${stats.existing} já na campanha</span>
-                <span class="stat-pill stat-pill-missing">⏳ ${stats.missing} faltam criar</span>
-            `;
+        if (summary.byBlock.length > 0) {
+            pillsContainer.innerHTML = summary.byBlock.map(b =>
+                `<span class="stat-pill stat-pill-created" style="cursor:pointer;" onclick="toggleBlockAccordion('${escHtml(b.blockId)}')" title="${escHtml(b.title)}">☑ ${escHtml(b.blockId.replace('BLOCO-', 'B'))}: ${b.count}</span>`
+            ).join(' ');
         } else {
-            pillsContainer.innerHTML = `
-                <span class="stat-pill stat-pill-missing">⏳ Nenhum país deste bloco na campanha (${stats.total} faltantes)</span>
-            `;
+            pillsContainer.innerHTML = `<span class="stat-pill stat-pill-missing">Expanda um ou mais blocos abaixo e marque os países desejados</span>`;
         }
     }
 
     updateDuplicatorLanguageNotice();
 }
 
-function toggleAllCountriesInBlock(checked) {
-    const block = META_COUNTRY_BLOCKS[metaState.activeBlockId];
+function toggleAllCountriesInBlock(checked, explicitBlockId = null) {
+    const targetBlockId = explicitBlockId || metaState.activeBlockId;
+    const block = META_COUNTRY_BLOCKS[targetBlockId];
     if (!block) return;
 
-    if (!metaState.checkedCountries[metaState.activeBlockId]) {
-        metaState.checkedCountries[metaState.activeBlockId] = {};
+    metaState.activeBlockId = targetBlockId;
+    if (!metaState.expandedBlocks) metaState.expandedBlocks = {};
+    if (checked) metaState.expandedBlocks[targetBlockId] = true;
+
+    if (!metaState.checkedCountries[targetBlockId]) {
+        metaState.checkedCountries[targetBlockId] = {};
     }
 
     block.countries.forEach(c => {
-        metaState.checkedCountries[metaState.activeBlockId][c.adSetName] = checked;
+        metaState.checkedCountries[targetBlockId][c.adSetName] = checked;
     });
 
-    renderCountriesGrid();
+    renderBlockNav();
     updateDuplicatorLanguageNotice();
 }
 
-function selectPriorityCountriesOnly() {
-    const block = META_COUNTRY_BLOCKS[metaState.activeBlockId];
+function selectPriorityCountriesOnly(explicitBlockId = null) {
+    const targetBlockId = explicitBlockId || metaState.activeBlockId;
+    const block = META_COUNTRY_BLOCKS[targetBlockId];
     if (!block) return;
 
-    if (!metaState.checkedCountries[metaState.activeBlockId]) {
-        metaState.checkedCountries[metaState.activeBlockId] = {};
+    metaState.activeBlockId = targetBlockId;
+    if (!metaState.expandedBlocks) metaState.expandedBlocks = {};
+    metaState.expandedBlocks[targetBlockId] = true;
+
+    if (!metaState.checkedCountries[targetBlockId]) {
+        metaState.checkedCountries[targetBlockId] = {};
     }
 
     block.countries.forEach(c => {
-        metaState.checkedCountries[metaState.activeBlockId][c.adSetName] = !!c.priority;
+        metaState.checkedCountries[targetBlockId][c.adSetName] = !!c.priority;
     });
 
-    renderCountriesGrid();
+    renderBlockNav();
     updateDuplicatorLanguageNotice();
 }
 
 // Ação rápida: Marca apenas os países que ainda NÃO existem na campanha selecionada
-function selectMissingCountriesOnly() {
-    const block = META_COUNTRY_BLOCKS[metaState.activeBlockId];
+function selectMissingCountriesOnly(explicitBlockId = null) {
+    const targetBlockId = explicitBlockId || metaState.activeBlockId;
+    const block = META_COUNTRY_BLOCKS[targetBlockId];
     if (!block) return;
 
-    if (!metaState.checkedCountries[metaState.activeBlockId]) {
-        metaState.checkedCountries[metaState.activeBlockId] = {};
+    metaState.activeBlockId = targetBlockId;
+    if (!metaState.expandedBlocks) metaState.expandedBlocks = {};
+    metaState.expandedBlocks[targetBlockId] = true;
+
+    if (!metaState.checkedCountries[targetBlockId]) {
+        metaState.checkedCountries[targetBlockId] = {};
     }
 
     block.countries.forEach(c => {
         const alreadyExists = !!findExistingAdSetForCountry(c);
-        metaState.checkedCountries[metaState.activeBlockId][c.adSetName] = !alreadyExists;
+        metaState.checkedCountries[targetBlockId][c.adSetName] = !alreadyExists;
     });
 
-    renderCountriesGrid();
+    renderBlockNav();
     updateDuplicatorLanguageNotice();
 }
 
@@ -7185,16 +7286,14 @@ async function startBatchDuplication() {
     }
     metaState.selectedAdSet = adsetObj;
 
-    const block = META_COUNTRY_BLOCKS[metaState.activeBlockId];
-    if (!block) {
-        showDupClickFeedback('⚠️ Selecione um Bloco de países no Passo 2.', 'warn');
-        return;
-    }
-    const checks = metaState.checkedCountries[metaState.activeBlockId] || {};
-    const countriesToDuplicate = block.countries.filter(c => checks[c.adSetName]);
+    const countriesToDuplicate = getAllSelectedCountriesWithBlock();
+    const selectedSummary = getSelectedBlocksSummary();
+    const blockTitleSummary = selectedSummary.byBlock.length > 1
+        ? selectedSummary.byBlock.map(b => `${b.blockId.replace('BLOCO-', 'B')} (${b.count})`).join(' + ')
+        : (selectedSummary.byBlock[0]?.title || META_COUNTRY_BLOCKS[metaState.activeBlockId]?.title || 'Multi-Blocos');
 
     if (countriesToDuplicate.length === 0) {
-        showDupClickFeedback('⚠️ <strong>Nenhum país marcado neste bloco!</strong> Marque pelo menos 1 país acima (ex.: clique em "✓ Marcar Todos" ou "⚡ Marcar Apenas Faltantes").', 'warn');
+        showDupClickFeedback('⚠️ <strong>Nenhum país marcado!</strong> Expanda pelo menos 1 bloco e marque os países desejados (ou clique em "⚡ Faltantes").', 'warn');
         return;
     }
 
@@ -7206,7 +7305,7 @@ async function startBatchDuplication() {
 
     const uniqueDiffLangs = Array.from(new Set(
         countriesToDuplicate
-            .map(c => (c.langCode || (block.langCode && block.langCode !== 'multi' ? block.langCode : baseLang) || baseLang).toLowerCase())
+            .map(c => getCountryBlockLangCode(c, { langCode: c._blockLangCode }, baseLang))
             .filter(l => l !== baseLang)
     ));
 
@@ -7271,7 +7370,7 @@ async function startBatchDuplication() {
         adsetName: adsetObj.name,
         adsetId: adsetObj.id,
         baseLang,
-        blockTitle: block.title,
+        blockTitle: blockTitleSummary,
         countriesCount: countriesToDuplicate.length,
         modeSummary,
         initialStatus,
@@ -7332,7 +7431,7 @@ async function startBatchDuplication() {
         }
     }
 
-    logMetaTerminal(`🚀 Iniciando processo de duplicação para ${countriesToDuplicate.length} países no bloco ${block.title}... [v9.15]`, 'info');
+    logMetaTerminal(`🚀 Iniciando processo de duplicação para ${countriesToDuplicate.length} países em ${blockTitleSummary}... [v9.18]`, 'info');
     logMetaTerminal(`🎯 Campanha de Destino: '${campObj.name}' (ID: ${campObj.id})`, 'info');
     logMetaTerminal(`📦 Conjunto base: '${adsetObj.name}' (${baseLang.toUpperCase()} | ID: ${adsetObj.id})`, 'info');
     if (activeWorkingPageId) {
@@ -7929,7 +8028,7 @@ async function startBatchDuplication() {
         if (readyPartialLangs.length > 0) {
             const readySet = new Set(readyPartialLangs);
             const filtered = countriesToDuplicate.filter(c => {
-                const cLang = (c.langCode || (block.langCode && block.langCode !== 'multi' ? block.langCode : baseLang) || baseLang).toLowerCase();
+                const cLang = getCountryBlockLangCode(c, { langCode: c._blockLangCode }, baseLang);
                 return cLang === baseLang || readySet.has(cLang);
             });
             countriesToDuplicate.splice(0, countriesToDuplicate.length, ...filtered);
@@ -7994,7 +8093,7 @@ async function startBatchDuplication() {
             if (nameFormat === 'country_lang') {
                 finalName = `${country.adSetName} (${country.langName})`;
             } else if (nameFormat === 'block_country') {
-                finalName = `${block.id.replace('BLOCO-', 'B')} - ${country.adSetName}`;
+                finalName = `${(country._blockId || metaState.activeBlockId).replace('BLOCO-', 'B')} - ${country.adSetName}`;
             }
 
             const baseT = metaState.selectedAdSet?.targeting ? JSON.parse(JSON.stringify(metaState.selectedAdSet.targeting)) : {};
@@ -8134,7 +8233,7 @@ async function startBatchDuplication() {
             }
 
             // PASSO 5: Publica anúncios clonados (mesmo idioma), traduzidos (idioma com criativo) ou omite se estrutura exclusiva
-            const countryLang = (country.langCode || (block.langCode && block.langCode !== 'multi' ? block.langCode : baseLang) || baseLang).toLowerCase();
+            const countryLang = getCountryBlockLangCode(country, { langCode: country._blockLangCode }, baseLang);
             let expectedAds = 0;
             let adsCreated = 0;
             const adErrors = [];
@@ -8338,8 +8437,9 @@ async function startBatchDuplication() {
                 start_time: scheduledMetaStartTime || undefined,
                 targeting: targeting
             });
-            if (metaState.checkedCountries[metaState.activeBlockId]) {
-                metaState.checkedCountries[metaState.activeBlockId][country.adSetName] = false;
+            const doneBlockId = country._blockId || metaState.activeBlockId;
+            if (metaState.checkedCountries[doneBlockId]) {
+                metaState.checkedCountries[doneBlockId][country.adSetName] = false;
             }
             renderBlockNav();
             renderCountriesGrid();
@@ -8745,6 +8845,10 @@ window.onMetaAccountSelected = onMetaAccountSelected;
 window.onMetaCampaignSelected = onMetaCampaignSelected;
 window.onMetaAdSetSelected = onMetaAdSetSelected;
 window.selectCountryBlock = selectCountryBlock;
+window.toggleBlockAccordion = toggleBlockAccordion;
+window.toggleAllBlockAccordions = toggleAllBlockAccordions;
+window.clearAllBlocksSelection = clearAllBlocksSelection;
+window.getAllSelectedCountriesWithBlock = getAllSelectedCountriesWithBlock;
 window.toggleAllCountriesInBlock = toggleAllCountriesInBlock;
 window.selectPriorityCountriesOnly = selectPriorityCountriesOnly;
 window.selectMissingCountriesOnly = selectMissingCountriesOnly;

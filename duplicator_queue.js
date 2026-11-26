@@ -620,9 +620,11 @@ function selectBestBlockForTask(campaignId, adsetObj) {
     });
 
     const chosenBlock = bestReadyIncomplete || firstIncomplete || 'BLOCO-01';
+    metaState.checkedCountries = {};
+    metaState.expandedBlocks = {};
     selectCountryBlock(chosenBlock);
     if (typeof selectMissingCountriesOnly === 'function') {
-        selectMissingCountriesOnly();
+        selectMissingCountriesOnly(chosenBlock);
     }
     return { chosenBlock, summaryRows };
 }
@@ -658,46 +660,53 @@ function rankAndSelectNCountries(targetCount, campaignId, adsetObj) {
         return { chosenBlock: 'BLOCO-01', picked: [], inBlockNames: [], reason: 'Todos os países dos blocos já estão criados nesta campanha!' };
     }
 
-    // Foca no bloco onde estão os melhores candidatos escolhidos (priorizando o 1º bloco dos tops)
-    const countByBlock = {};
-    picked.forEach(p => { countByBlock[p.blockId] = (countByBlock[p.blockId] || 0) + 1; });
     const chosenBlock = picked[0].blockId;
+    metaState.checkedCountries = {};
+    metaState.expandedBlocks = {};
 
-    selectCountryBlock(chosenBlock);
-    metaState.checkedCountries[chosenBlock] = {};
-    const blk = META_COUNTRY_BLOCKS[chosenBlock];
-    const inBlockPicks = candidates.filter(c => c.blockId === chosenBlock).slice(0, targetCount);
-    const pickedSet = new Set(inBlockPicks.map(p => p.country.adSetName));
-    (blk.countries || []).forEach(c => {
-        metaState.checkedCountries[chosenBlock][c.adSetName] = pickedSet.has(c.adSetName);
+    picked.forEach(p => {
+        if (!metaState.checkedCountries[p.blockId]) metaState.checkedCountries[p.blockId] = {};
+        metaState.checkedCountries[p.blockId][p.country.adSetName] = true;
+        metaState.expandedBlocks[p.blockId] = true;
     });
-    renderCountriesGrid();
-    updateDuplicatorLanguageNotice();
 
-    const readyCount = inBlockPicks.filter(p => p.crReady).length;
-    const prioCount = inBlockPicks.filter(p => p.isPriority).length;
-    const reason = `${inBlockPicks.length} país(es) marcado(s) em ${blk.title}` +
+    metaState.activeBlockId = chosenBlock;
+    if (typeof renderBlockNav === 'function') renderBlockNav();
+    if (typeof updateBlockCounter === 'function') updateBlockCounter();
+    else if (typeof updateDuplicatorLanguageNotice === 'function') updateDuplicatorLanguageNotice();
+
+    const touchedBlocks = [...new Set(picked.map(p => p.blockId))];
+    const readyCount = picked.filter(p => p.crReady).length;
+    const prioCount = picked.filter(p => p.isPriority).length;
+    const blockSummary = touchedBlocks.length === 1
+        ? (META_COUNTRY_BLOCKS[chosenBlock]?.title || chosenBlock)
+        : `${touchedBlocks.length} blocos (${touchedBlocks.map(b => b.replace('BLOCO-', 'B')).join(' + ')})`;
+    const reason = `${picked.length} país(es) marcado(s) em ${blockSummary}` +
         (readyCount > 0 ? ` • ${readyCount} com idioma/criativo pronto` : '') +
         (prioCount > 0 ? ` • ${prioCount} prioritário(s) ⭐` : '');
 
     return {
         chosenBlock,
-        picked: inBlockPicks,
-        inBlockNames: inBlockPicks.map(p => p.country.adSetName),
+        picked,
+        inBlockNames: picked.map(p => p.country.adSetName),
         reason
     };
 }
 
 function jumpQueueCountryReference(blockId, countryName) {
     if (blockId && META_COUNTRY_BLOCKS[blockId]) {
-        selectCountryBlock(blockId);
+        metaState.checkedCountries = {};
+        if (!metaState.expandedBlocks) metaState.expandedBlocks = {};
+        metaState.expandedBlocks[blockId] = true;
+        metaState.activeBlockId = blockId;
         const blk = META_COUNTRY_BLOCKS[blockId];
         metaState.checkedCountries[blockId] = {};
         (blk.countries || []).forEach(c => {
             metaState.checkedCountries[blockId][c.adSetName] = _dqNorm(c.adSetName) === _dqNorm(countryName);
         });
-        renderCountriesGrid();
-        updateDuplicatorLanguageNotice();
+        if (typeof renderBlockNav === 'function') renderBlockNav();
+        if (typeof updateBlockCounter === 'function') updateBlockCounter();
+        document.querySelector(`.block-acc-item[data-block="${blockId}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     } else {
         alert(`"${countryName}" é um conjunto mestre/especial (ex.: EUA ou Brasil) fora da grade de blocos — selecione o conjunto "${countryName}" no Conjunto Base ou duplique direto no Gerenciador com a UTM indicada.`);
     }
@@ -933,6 +942,7 @@ window.renderDupQueueList = renderDupQueueList;
 window.parseDupQueueParagraphs = parseDupQueueParagraphs;
 window.extractParagraphsFromGoogleDocsHtml = extractParagraphsFromGoogleDocsHtml;
 window.findMetaAccountForQueueTask = findMetaAccountForQueueTask;
+window.rankAndSelectNCountries = rankAndSelectNCountries;
 
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initDupQueueModule);
